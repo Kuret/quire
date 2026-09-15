@@ -52,8 +52,8 @@
     },
     "allowedHosts": {
       "type": "array",
-      "description": "Extra registrable domains a redirect may land on. Absent this, the fetch layer rejects any redirect leaving baseUrl's registrable domain (PLAN §7.4). Image CDNs are the usual reason to set it.",
-      "items": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
+      "description": "Extra hosts a redirect may land on. Absent this, the fetch layer rejects any redirect leaving baseUrl's registrable domain (PLAN \u00a77.4). Image CDNs are the usual reason to set it. \"example.test\" matches that host and anything under it; \"*.example.test\" matches subdomains only. PLAN \u00a77.5 stage 6 seeds this from the theme's own declared hosts, so it is usually already correct. It widens only the registrable-domain boundary: private, loopback and link-local addresses stay refused however they are named.",
+      "items": { "type": "string", "pattern": "^(\\*\\.)?[a-z0-9.-]+$" },
       "uniqueItems": true,
       "default": []
     },
