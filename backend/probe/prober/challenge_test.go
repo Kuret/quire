@@ -16,12 +16,15 @@ import (
 // be registered. Stage 4's tie-breaking is about the *scores*, so a real theme
 // would only make the arithmetic harder to see.
 type stubTheme struct {
-	id    string
-	score int
+	id           string
+	score        int
+	allowedHosts []string
 }
 
 func (s stubTheme) ID() string                  { return s.id }
 func (s stubTheme) Fingerprint(*probe.Page) int { return s.score }
+
+func (s stubTheme) AllowedHosts() []string { return s.allowedHosts }
 func (s stubTheme) ValidateOverrides(map[string]any) error {
 	return nil
 }
@@ -185,4 +188,64 @@ func TestOrdinarySiteBehindACDNIsNotRefused(t *testing.T) {
 	if res.Verdict != theme.VerdictOK {
 		t.Fatalf("verdict = %q (%s); a readable site behind a CDN must not be refused", res.Verdict, res.Detail)
 	}
+}
+
+// PLAN §7.5 stage 6 (and §7.2, 2026-09-15): the stored source's allowedHosts
+// is seeded from what the theme declares it needs.
+//
+// The case behind it is MangaDex, whose page images come from a different
+// registrable domain than its API. Without seeding, a user's first download
+// fails on an SSRF rejection naming a host they have never heard of, and their
+// only route out is to guess at the CDN's name — which is precisely the
+// "arbitrary host list pasted into a config file" that §7.4's boundary exists
+// to avoid.
+func TestDraftSeedsAllowedHostsFromTheTheme(t *testing.T) {
+	newProber := func(t *testing.T, th theme.Theme) *prober.Prober {
+		f := themetest.New(t, map[string]themetest.Route{
+			"GET /": {File: "home-unrecognised.html"},
+		})
+		reg := theme.NewRegistry()
+		reg.MustRegister(th)
+		return prober.New(prober.Options{
+			Fetcher: f, Registry: reg, Guard: allowGuard{}, Now: clock,
+			NewID: func() string { return "src-test" },
+		})
+	}
+
+	t.Run("a theme that declares a CDN", func(t *testing.T) {
+		declared := []string{"*.cdn-example.invalid"}
+		p := newProber(t, stubTheme{id: "alpha", score: 90, allowedHosts: declared})
+		res, err := p.Run(context.Background(), "https://example.invalid", &recordUI{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Draft == nil {
+			t.Fatalf("no draft: %s (%s)", res.Verdict, res.Detail)
+		}
+		if got := res.Draft.AllowedHosts; len(got) != 1 || got[0] != declared[0] {
+			t.Fatalf("draft allowedHosts = %v, want %v", got, declared)
+		}
+		// Copied, not aliased. A source entry that shared the theme's slice
+		// would let a user's edit reach back into the theme.
+		res.Draft.AllowedHosts[0] = "edited.invalid"
+		if declared[0] != "*.cdn-example.invalid" {
+			t.Errorf("editing the draft changed the theme's own list: %v", declared)
+		}
+	})
+
+	t.Run("a theme that declares nothing", func(t *testing.T) {
+		p := newProber(t, stubTheme{id: "alpha", score: 90})
+		res, err := p.Run(context.Background(), "https://example.invalid", &recordUI{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Draft == nil {
+			t.Fatalf("no draft: %s (%s)", res.Verdict, res.Detail)
+		}
+		// Not an empty slice either: a source that names no extra hosts should
+		// serialise without an allowedHosts key at all.
+		if res.Draft.AllowedHosts != nil {
+			t.Errorf("draft allowedHosts = %v, want nil", res.Draft.AllowedHosts)
+		}
+	})
 }

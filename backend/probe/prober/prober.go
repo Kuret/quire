@@ -322,7 +322,7 @@ func (r *run) exec(ctx context.Context, rawurl string) (Result, error) {
 
 	// Stage 5 — capability check.
 	r.start(StageCapability)
-	draft := r.draft(base, th.ID())
+	draft := r.draft(base, th)
 	cap := r.stageCapability(ctx, th, draft)
 	r.done(StageCapability, cap.summary())
 
@@ -547,7 +547,7 @@ func (r *run) unrecognisedDetail() string {
 
 // draft is the stage 6 source entry, built before stage 5 because the
 // capability check needs a Source to exercise the theme against.
-func (r *run) draft(base *url.URL, themeID string) *theme.Source {
+func (r *run) draft(base *url.URL, th theme.Theme) *theme.Source {
 	name := ""
 	if r.page != nil {
 		name = siteName(r.page.Title())
@@ -565,10 +565,33 @@ func (r *run) draft(base *url.URL, themeID string) *theme.Source {
 		ID:      r.p.newID(),
 		Name:    name,
 		Lang:    lang,
-		Theme:   themeID,
+		Theme:   th.ID(),
 		BaseURL: strings.TrimSuffix(base.String(), "/"),
-		AddedAt: r.p.now().UTC(),
+		// PLAN §7.2/§7.5 stage 6: seed the source's allowedHosts from what the
+		// theme declares it needs, so a theme whose images live on a separate
+		// registrable domain works on the first run.
+		//
+		// Seeded here rather than in stageAccept for two reasons. The draft is
+		// what stage 5 exercises the theme against, so the capability check
+		// runs under the same policy the stored source will have — otherwise
+		// stage 5 could pass on a policy nobody ends up using. And it is
+		// *copied onto the source*, not read back from the theme at request
+		// time, so the list is visible to the user, editable by them, and
+		// unchanged if a later version of the theme changes its mind.
+		AllowedHosts: allowedHosts(th),
+		AddedAt:      r.p.now().UTC(),
 	}
+}
+
+// allowedHosts copies a theme's declared hosts, defensively: the theme owns
+// that slice and a source entry that aliased it would let an edit to one show
+// up in the other.
+func allowedHosts(th theme.Theme) []string {
+	declared := th.AllowedHosts()
+	if len(declared) == 0 {
+		return nil
+	}
+	return append([]string(nil), declared...)
 }
 
 // stageAccept is PLAN §7.5 stage 6, plus the refusals stage 5 can produce.
