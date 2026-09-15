@@ -269,6 +269,35 @@ logic as possible.
   and turns a negative length — which is a protocol error — into a ~4 GiB
   allocation on a device with 47 MB of free rootfs. §7.1's table inherits this
   correction.
+- **CORRECTION — the AppLoad socket is `SOCK_SEQPACKET`, not a byte stream.**
+  `management.cpp:137`: `socket(AF_UNIX, SOCK_SEQPACKET, 0)`. Three
+  consequences, all of which bit us on real hardware in M1:
+  1. **Dial it as `unixpacket`.** Go's `"unix"` network is `SOCK_STREAM` and
+     the connect fails outright with `EPROTOTYPE` — *"protocol wrong type for
+     socket"*. This is silent from the UI: AppLoad starts the backend, the
+     backend exits 1, the frontend loads fine and simply never gets a reply.
+  2. **Message boundaries are preserved, so send the header and the payload as
+     two separate packets.** AppLoad's read loop does two `read()` calls, and
+     each consumes one whole packet, discarding any excess past the buffer. A
+     combined write is one packet, so the payload would be silently thrown
+     away. Conversely, send **no** payload packet when the payload is empty:
+     AppLoad skips its second read at length 0, so a stray empty packet gets
+     consumed as the *next* header, reads 0 bytes, and tears down the
+     connection. (AppLoad's own send path is asymmetric here — it emits the
+     payload packet unconditionally — so a receiver should tolerate a stray
+     empty packet rather than error on it.)
+  3. Stream-style partial-read reassembly (`io.ReadFull` loops) is simply the
+     wrong shape: there is no such thing as a partial packet. A header read
+     that does not return exactly 8 bytes is a protocol error.
+- **The 10 MiB cap is not the real limit — `SO_SNDBUF` is, and it is far
+  lower.** A 4 MiB payload is rejected by the kernel with *"message too long"*
+  on this device. `MAX_MESSAGE_LENGTH` is AppLoad's ceiling, not an achievable
+  size. This reinforces §7.1's rule that images never travel over the socket;
+  treat anything above a few hundred KB as needing a file path instead.
+- **AppLoad mounts an app's `resources.rcc` under a random per-launch prefix**
+  — observed `qrc:/ILCPSKLRYV/ui/Main.qml`. **Never hard-code `qrc:/ui/...` in
+  QML**; use relative paths and let the loader resolve them. `manifest.entry`
+  is still written as the in-rcc path (`/ui/Main.qml`).
 - **qt-resource-rebuilder**: xovi extension that loads `.qmd` (QMLDiff) and
   `.rcc` files automatically from `$XOVI_EXTHOME/qt-resource-rebuilder/`.
   Default `$XOVI_EXTHOME` is `/home/root/xovi`.
@@ -707,7 +736,10 @@ Both header fields are **signed `int32`**, native-endian — see the correction 
 
 All payloads JSON. Images are **never** sent over the socket — write to disk,
 send a path. The 10 MiB cap and the per-hook mutex make large transfers a bad
-idea.
+idea — and the *real* ceiling is lower still: the socket is `SOCK_SEQPACKET`,
+so a whole message must fit one datagram and `SO_SNDBUF` rejects 4 MiB with
+"message too long" on this device (§3.1). Budget for a few hundred KB, not
+megabytes.
 
 ### 7.2 Theme engine
 
