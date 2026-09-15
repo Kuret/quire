@@ -528,10 +528,54 @@ So, when sending to the host:
   `status < 1` and tear the connection down.
 
 The host's own send path (`sendMessageTo`, ~line 37) is **asymmetric** to that
-— it `send()`s the payload unconditionally, even when empty. Every current call
-site happens to pass a non-empty string, but a receiver should tolerate a stray
-empty packet rather than treat it as a short header. Quire skips them; see
-`recvHeader` in `backend/appload/conn.go`.
+— it `send()`s the payload unconditionally, even when empty:
+
+```c
+send(sock, &header, sizeof(header), 0);
+send(sock, bytes.constData(), bytes.length(), 0);   /* even when length == 0 */
+```
+
+So every empty-payload message *from* the host is two packets, and a receiver
+must always consume the second. Getting this wrong killed the app on the first
+`Ping`: the stray packet was read as the next header, reported as EOF, and the
+backend exited "cleanly" while the user watched the app vanish.
+
+### A zero-length datagram vs a closed peer — MSG_EOR does NOT work here
+
+Through Go's `net.Conn` these are indistinguishable: both are a 0-byte read,
+which `net` reports as `io.EOF`.
+
+The textbook fix is `recvmsg()` + `MSG_EOR` in `msg_flags`. **It does not work
+on this device.** Measured directly (AF_UNIX SOCK_SEQPACKET, OS 3.25.1.1,
+aarch64):
+
+```
+zero-length datagram   n=0 err=<nil> flags=0x0 EOR=false TRUNC=false
+5-byte datagram        n=5 err=<nil> flags=0x0 EOR=false TRUNC=false
+after peer close       n=0 err=<nil> flags=0x0 EOR=false TRUNC=false
+```
+
+`MSG_EOR` is never set on this socket type at all, not even for a non-empty
+datagram, so the flag carries no information. Do not build on it.
+
+**What does work: end of stream is sticky, a datagram is not.** Once the peer
+closes, every read returns 0 immediately, forever. A zero-length datagram is
+consumed by the read that returns it. So a non-blocking `MSG_PEEK` straight
+after a 0-byte read separates them:
+
+| peek result | meaning |
+|---|---|
+| `EAGAIN` | queue empty, peer open → it was a zero-length record |
+| `n > 0` | another record behind it → it was a zero-length record |
+| `n == 0` | sticky zero → end of stream |
+
+Two zero-length records back to back still read as end of stream; the host never
+emits that, and such a record carries no information anyway. See `packet.go` and
+`packet_linux.go`.
+
+Peek *before* consuming the empty payload packet, too — if the host ever stopped
+sending one, the next thing queued would be a real header, and swallowing it
+would desynchronise the connection permanently.
 
 There is no such thing as a partial packet, so stream-style `io.ReadFull`
 reassembly is wrong here: a header packet that is not exactly 8 bytes, or a
