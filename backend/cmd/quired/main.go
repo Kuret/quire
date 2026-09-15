@@ -24,8 +24,10 @@ import (
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/covers"
+	"github.com/rickl/quire/backend/download"
 	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/logging"
 	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
@@ -34,6 +36,10 @@ import (
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
 )
+
+// logDir is where the rotating log lives, once it is known. Empty means
+// logging to a file is not available, and the in-app viewer says so.
+var logDir string
 
 // version is the build stamp; -ldflags "-X main.version=..." can override it.
 var version = "dev"
@@ -44,9 +50,27 @@ var uptimePath = "/proc/uptime"
 func main() {
 	// AppLoad gives the backend a pipe to xochitl's stderr, so structured
 	// logging here lands in the xochitl journal.
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// Logging goes to stderr *and* to a rotating file. AppLoad pipes stderr to
+	// xochitl's journal, which is what anyone with SSH reads; the file is what
+	// the person holding the tablet can read, from inside the app (PLAN §6 M7).
+	// If the file cannot be opened that is not a reason to refuse to start —
+	// it costs diagnosis, not function.
+	var logFile *logging.Writer
+	logOut := io.Writer(os.Stderr)
+	if dir, err := dataDir(); err == nil {
+		if w, err := logging.NewWriter(filepath.Join(dir, "logs")); err == nil {
+			logFile = w
+			logDir = filepath.Join(dir, "logs")
+			logOut = io.MultiWriter(os.Stderr, w)
+		}
+	}
+	log := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	log = log.With("app", "quired", "version", version)
 	slog.SetDefault(log)
+	if logFile != nil {
+		defer logFile.Close()
+		log.Info("logging to file", "path", logFile.Path(), "maxBytes", logging.MaxBytes)
+	}
 
 	if len(os.Args) < 2 {
 		log.Error("no socket path given", "usage", "quired <appload-socket>")
@@ -54,7 +78,13 @@ func main() {
 	}
 	socket := os.Args[1]
 
-	log.Info("starting", "socket", socket, "go", runtime.Version(), "arch", runtime.GOARCH, "pid", os.Getpid())
+	// Page resizing allocates in ~170 MB steps, and unbounded Go GC pacing on
+	// a 2 GB device shared with xochitl ends in an OOM kill rather than a slow
+	// download (docs/DEVICE-NOTES.md §10.4).
+	memLimit := download.SetMemoryLimit()
+
+	log.Info("starting", "socket", socket, "go", runtime.Version(), "arch", runtime.GOARCH,
+		"pid", os.Getpid(), "memLimitMiB", memLimit>>20)
 
 	svc, session, err := newService(log)
 	if err != nil {
@@ -126,6 +156,19 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 
 	switch msgType {
 	case appload.MessagePing:
+		// An optional {"log": true} asks for the tail as well. It rides on
+		// Ping rather than taking a message type of its own: the log viewer is
+		// a page of the settings screen, and it already pings.
+		var req struct {
+			Log   bool `json:"log"`
+			Lines int  `json:"lines"`
+		}
+		if len(payload) > 0 {
+			_ = json.Unmarshal(payload, &req)
+		}
+		if req.Log {
+			return sendStatusWithLog(conn, log, svc, req.Lines)
+		}
 		return sendStatus(conn, log, svc)
 
 	case appload.MessageSystemNewCoordinator:
@@ -168,7 +211,30 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 // unprompted. It carries the startup notice, so there is exactly one message
 // the shell has to receive before it can draw itself correctly.
 func sendStatus(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
+	return send(conn, log, svc, nil)
+}
+
+// sendStatusWithLog is sendStatus plus the tail of the log file, for the in-app
+// viewer.
+func sendStatusWithLog(conn *appload.Conn, log *slog.Logger, svc *service.Service, lines int) error {
+	if logDir == "" {
+		return send(conn, log, svc, []string{
+			"Quire is not writing a log file on this device, so there is nothing to show."})
+	}
+	tail, err := logging.Tail(logDir, lines)
+	if err != nil {
+		log.Warn("could not read the log", "err", err)
+		return send(conn, log, svc, []string{"Quire could not read its own log file: " + err.Error()})
+	}
+	if len(tail) == 0 {
+		tail = []string{"The log is empty."}
+	}
+	return send(conn, log, svc, tail)
+}
+
+func send(conn *appload.Conn, log *slog.Logger, svc *service.Service, logTail []string) error {
 	st := newStatus()
+	st.LogTail = logTail
 	if svc != nil {
 		st.Notice = svc.StartupNotice()
 	}
@@ -212,6 +278,11 @@ type status struct {
 	// table is not worth growing for a line of text that is only ever sent
 	// alongside the status.
 	Notice string `json:"notice,omitempty"`
+
+	// LogTail is the most recent log lines, sent only when asked for. Bounded
+	// by backend/logging: the socket is SOCK_SEQPACKET and a whole message has
+	// to fit one datagram (§3.1).
+	LogTail []string `json:"logTail,omitempty"`
 }
 
 func newStatus() status {
