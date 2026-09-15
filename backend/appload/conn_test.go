@@ -487,16 +487,26 @@ func TestUnixpacketPacketCounts(t *testing.T) {
 func TestUnixpacketOversizedPacketIsCaught(t *testing.T) {
 	server, client := unixpacketPair(t)
 
-	payload := bytes.Repeat([]byte("q"), 4<<20) // 4 MiB, under the 10 MiB cap
-	sendErr := make(chan error, 1)
-	go func() { sendErr <- client.Send(MessagePong, payload) }()
+	// 4 MiB is far over any default SO_SNDBUF but under the 10 MiB cap, so the
+	// kernel rejects the datagram outright (EMSGSIZE) rather than blocking.
+	payload := bytes.Repeat([]byte("q"), 4<<20)
+	if err := client.Send(MessagePong, payload); err != nil {
+		t.Logf("Send refused the oversized packet, as it should: %v", err)
+		return
+	}
 
+	// If the kernel did accept it, the payload must come back whole — a
+	// silently truncated packet handed back as if complete is the failure mode
+	// this test exists to rule out.
 	server.c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	_, got, recvErr := server.Recv()
-	if recvErr == nil && !bytes.Equal(got, payload) {
+	_, got, err := server.Recv()
+	if err != nil {
+		t.Logf("Recv rejected the oversized packet, as it should: %v", err)
+		return
+	}
+	if !bytes.Equal(got, payload) {
 		t.Fatalf("Recv returned %d bytes with no error, want %d", len(got), len(payload))
 	}
-	<-sendErr
 }
 
 func TestConcurrentSendsDoNotInterleave(t *testing.T) {
