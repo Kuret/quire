@@ -56,14 +56,17 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 	return s.sendError(out, "document_gone", ReaderGoneRemedy)
 }
 
-// storedVolumes maps every chapter of a series to the volume record that
-// contains it, so the chapter list can offer "Read" on rows whose volume is
-// already downloaded.
+// storedVolumes maps every chapter of a series to the document that holds it,
+// so the chapter list can offer "Read" on rows whose volume is already
+// downloaded.
 //
-// It groups the chapters exactly as runDownload does, because a record is keyed
-// by volume label and the only way back from a label to a chapter is to redo
-// the grouping. Two different groupings would put the Read button on the wrong
-// rows, which is why volumeContaining and this share one function.
+// It reads the chapter IDs recorded with each document rather than re-deriving
+// the grouping. That matters since volumes split to fit xochitl's upload cap:
+// the split depends on the byte sizes of page images that may since have been
+// deleted, so the decision is not reproducible and must be remembered instead.
+//
+// Records written before chapter IDs were kept fall back to redoing the
+// grouping, which is right for them because nothing was ever split back then.
 func (s *Service) storedVolumes(sourceID, seriesID, seriesTitle string,
 	chapters []theme.Chapter) map[string]library.Record {
 
@@ -71,13 +74,41 @@ func (s *Service) storedVolumes(sourceID, seriesID, seriesTitle string,
 	if s.libStore == nil {
 		return out
 	}
-	for _, vol := range groupVolumes(seriesTitle, chapters) {
-		rec, ok := s.libStore.Get(library.Key{Source: sourceID, Series: seriesID, Volume: vol.Label})
-		if !ok {
+
+	var legacy []library.Record
+	for _, rec := range s.libStore.List() {
+		if rec.Source != sourceID || rec.Series != seriesID {
 			continue
 		}
-		for _, c := range vol.Chapters {
-			out[c.ID] = rec
+		if len(rec.Chapters) == 0 {
+			legacy = append(legacy, rec)
+			continue
+		}
+		for _, id := range rec.Chapters {
+			// First part wins. A chapter cut across two documents starts in
+			// the earlier one, which is where a reader opening it wants to be.
+			if prev, ok := out[id]; ok && prev.Part != 0 && prev.Part <= rec.Part {
+				continue
+			}
+			out[id] = rec
+		}
+	}
+
+	if len(legacy) > 0 {
+		byLabel := map[string]library.Record{}
+		for _, rec := range legacy {
+			byLabel[rec.Volume] = rec
+		}
+		for _, vol := range groupVolumes(seriesTitle, chapters) {
+			rec, ok := byLabel[vol.Label]
+			if !ok {
+				continue
+			}
+			for _, c := range vol.Chapters {
+				if _, taken := out[c.ID]; !taken {
+					out[c.ID] = rec
+				}
+			}
 		}
 	}
 	return out
