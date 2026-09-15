@@ -336,6 +336,12 @@ func (t *Theme) ajaxChapters(ctx context.Context, s *theme.Source, id string, o 
 
 // parseChapters reads a chapter list from either a full series page or an AJAX
 // fragment — the markup is identical, which is why one parser serves both.
+//
+// It is also the single exit for every path through Chapters, which is why the
+// PLAN §7.2 ascending-order normalisation happens here rather than at each of
+// the three call sites above. madara's markup lists chapters **newest first**;
+// testdata/chapters-ajax.html is deliberately in that order, and the test
+// asserts we hand back the reverse.
 func (t *Theme) parseChapters(s *theme.Source, o theme.Overrides, doc *goquery.Document) []theme.Chapter {
 	format := o.String(KeyDateFormat)
 	now := t.now()
@@ -369,7 +375,7 @@ func (t *Theme) parseChapters(s *theme.Source, o theme.Overrides, doc *goquery.D
 		}
 		out = append(out, ch)
 	})
-	return out
+	return theme.SortAndMark(out)
 }
 
 // Pages implements theme.Theme. The reader renders one .page-break per image;

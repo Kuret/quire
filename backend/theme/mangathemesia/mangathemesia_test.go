@@ -150,17 +150,23 @@ func TestChaptersComeFromTheSeriesHTML(t *testing.T) {
 		t.Errorf("method = %s, want GET; this theme has no AJAX chapter endpoint", calls[0].Method)
 	}
 
+	// PLAN §7.2: ascending reading order. series.html lists 4, 3.5, 3, 1 —
+	// newest first, as this theme's #chapterlist renders it — and the theme
+	// returns the reverse. The decorative-title case is the interesting one to
+	// have here: "Final Lamp" is chapter 1, and only data-num says so, which
+	// is exactly the kind of identifier a generic sort at the call site would
+	// have had no way to read.
 	want := []struct {
 		id        string
 		title     string
 		number    float64
 		published time.Time
 	}{
-		{"/the-lantern-keeper-chapter-4/", "Chapter 4", 4, time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)},
-		{"/the-lantern-keeper-chapter-3-5/", "Chapter 3.5 Interlude", 3.5, time.Date(2026, 2, 24, 0, 0, 0, 0, time.UTC)},
-		{"/the-lantern-keeper-chapter-3/", "Chapter 3", 3, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)},
 		// The display title is decorative; data-num carries the real number.
 		{"/the-lantern-keeper-chapter-1/", "Final Lamp", 1, time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC)},
+		{"/the-lantern-keeper-chapter-3/", "Chapter 3", 3, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)},
+		{"/the-lantern-keeper-chapter-3-5/", "Chapter 3.5 Interlude", 3.5, time.Date(2026, 2, 24, 0, 0, 0, 0, time.UTC)},
+		{"/the-lantern-keeper-chapter-4/", "Chapter 4", 4, time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d chapters, want %d: %+v", len(got), len(want), got)
@@ -285,7 +291,9 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil || len(chapters) == 0 {
 		t.Fatalf("chapters: %v (%d)", err, len(chapters))
 	}
-	pages, err := th.Pages(ctx, src, chapters[0].ID)
+	// The reader fixture is chapter 4, the newest — and therefore the *last*
+	// entry now that the list is in ascending reading order (PLAN §7.2).
+	pages, err := th.Pages(ctx, src, chapters[len(chapters)-1].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,5 +358,38 @@ func TestSecondSiteNeedsOnlyAConfigEntry(t *testing.T) {
 				t.Fatalf("got %d chapters, want 4", len(chapters))
 			}
 		})
+	}
+}
+
+// PLAN §7.2, 2026-09-15: ascending reading order. series.html lists 4, 3.5, 3,
+// 1 — this theme's #chapterlist renders newest-first, exactly as madara's does.
+//
+// The decorative-title chapter is what makes this more than a reversal test:
+// "Final Lamp" is chapter 1 and only data-num says so. A caller sorting
+// generically on what it could see would have had nothing to sort by.
+func TestChaptersAreAscending(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/the-lantern-keeper/": {File: "series.html"},
+	})
+	th := mangathemesia.NewWithClock(f, clock)
+
+	got, err := th.Chapters(context.Background(), site(), "/manga/the-lantern-keeper/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("got %d chapters; the fixture has four", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].Number < got[i-1].Number {
+			t.Fatalf("chapter %d (%v) comes after %d (%v); the list is still in the "+
+				"site's newest-first order", i, got[i].Number, i-1, got[i-1].Number)
+		}
+	}
+	if got[0].Title != "Final Lamp" {
+		t.Errorf("first chapter is %q, want the decoratively titled chapter 1", got[0].Title)
+	}
+	if !theme.OrderIsKnown(got) {
+		t.Error("a fully numbered list was reported as having an unknown order")
 	}
 }

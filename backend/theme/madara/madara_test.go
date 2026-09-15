@@ -165,17 +165,23 @@ func TestChaptersOverTheCurrentAjaxEndpoint(t *testing.T) {
 		t.Error("current-shape chapters fetched the series page unnecessarily")
 	}
 
+	// PLAN §7.2: ascending reading order, earliest first — which is the
+	// *reverse* of what the fixture contains. chapters-ajax.html lists 4, 3.5,
+	// 3, 1 because that is what madara's markup does, and this list is the
+	// answer the theme has to produce from it. Before the normalisation landed
+	// (2026-09-15) this test expected the fixture's own order, and M5 assembled
+	// a volume called "The Lantern Keeper — 4–1".
 	want := []struct {
 		id        string
 		number    float64
 		published time.Time
 	}{
-		// The <a title="March 2, 2026"> wins over the "2 days ago" text.
-		{"/manga/the-lantern-keeper/chapter-4/", 4, time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)},
-		{"/manga/the-lantern-keeper/chapter-3-5/", 3.5, time.Date(2026, 2, 24, 0, 0, 0, 0, time.UTC)},
-		{"/manga/the-lantern-keeper/chapter-3/", 3, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)},
 		// "Chapter 2 (coming soon)" has no href and must be skipped entirely.
 		{"/manga/the-lantern-keeper/chapter-1/", 1, time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC)},
+		{"/manga/the-lantern-keeper/chapter-3/", 3, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)},
+		{"/manga/the-lantern-keeper/chapter-3-5/", 3.5, time.Date(2026, 2, 24, 0, 0, 0, 0, time.UTC)},
+		// The <a title="March 2, 2026"> wins over the "2 days ago" text.
+		{"/manga/the-lantern-keeper/chapter-4/", 4, time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d chapters, want %d: %+v", len(got), len(want), got)
@@ -219,8 +225,13 @@ func TestChaptersOverTheLegacyAdminAjaxEndpoint(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d chapters, want 2: %+v", len(got), got)
 	}
-	if got[0].ID != "/comics/the-lantern-keeper/chapter-2/" {
-		t.Errorf("chapter 0 ID = %q", got[0].ID)
+	// Ascending (PLAN §7.2). chapters-admin-ajax.html lists 2 then 1, as
+	// madara's markup does; the theme hands back 1 then 2.
+	if got[0].ID != "/comics/the-lantern-keeper/chapter-1/" {
+		t.Errorf("chapter 0 ID = %q, want chapter-1 first", got[0].ID)
+	}
+	if got[1].ID != "/comics/the-lantern-keeper/chapter-2/" {
+		t.Errorf("chapter 1 ID = %q, want chapter-2 second", got[1].ID)
 	}
 
 	// The legacy shape needs the WordPress post ID off the series page, and
@@ -261,10 +272,17 @@ func TestChaptersFallBackToTheSeriesHTML(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d chapters, want 2: %+v", len(got), got)
 	}
-	// "3 days ago" resolves against the injected clock.
+	// "3 days ago" resolves against the injected clock. It belongs to the
+	// newest chapter, which is now *last* — the list is ascending (PLAN §7.2),
+	// so indexing from the front would be reading the wrong one.
 	want := fixedNow.AddDate(0, 0, -3)
-	if !got[0].Published.Equal(want) {
-		t.Errorf("relative date = %v, want %v", got[0].Published, want)
+	newest := got[len(got)-1]
+	if !newest.Published.Equal(want) {
+		t.Errorf("relative date = %v, want %v", newest.Published, want)
+	}
+	// And the ordering itself, so this test would also have caught the bug.
+	if got[0].Number >= newest.Number {
+		t.Errorf("chapters are not ascending: %v then %v", got[0].Number, newest.Number)
 	}
 }
 
@@ -329,7 +347,9 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil || len(chapters) == 0 {
 		t.Fatalf("chapters: %v (%d)", err, len(chapters))
 	}
-	pages, err := th.Pages(ctx, src, chapters[0].ID)
+	// The reader fixture is chapter 4, the newest — which is the *last*
+	// chapter now that the list is in ascending reading order (PLAN §7.2).
+	pages, err := th.Pages(ctx, src, chapters[len(chapters)-1].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,5 +441,47 @@ func TestThirdSiteNeedsOnlyAConfigEntry(t *testing.T) {
 				t.Fatalf("got %d chapters, want %d", len(chapters), site.wantChapters)
 			}
 		})
+	}
+}
+
+// PLAN §7.2, 2026-09-15: Chapters returns ascending reading order.
+//
+// The fixture is adversarial on purpose and always was: madara's markup lists
+// chapters newest first, so chapters-ajax.html contains 4, 3.5, 3, 1 and the
+// theme has to turn that round. Deleting the theme.SortAndMark call in
+// parseChapters makes this fail on the first assertion.
+//
+// This is the bug M5 found. §6 M4 groups a run of chapters into one volume
+// PDF; a descending list produces a PDF that reads backwards, inside a file
+// whose reading position xochitl then owns, and nothing downstream notices.
+func TestChaptersAreAscending(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"POST /manga/the-lantern-keeper/ajax/chapters/": {File: "chapters-ajax.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+
+	got, err := th.Chapters(context.Background(), siteA(), "/manga/the-lantern-keeper/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("got %d chapters; the fixture has four", len(got))
+	}
+
+	for i := 1; i < len(got); i++ {
+		if got[i].Number < got[i-1].Number {
+			t.Fatalf("chapter %d (%v) comes after %d (%v); the list is descending, "+
+				"which is the order madara's markup uses and not the one PLAN §7.2 asks for",
+				i, got[i].Number, i-1, got[i-1].Number)
+		}
+	}
+	if got[0].Number != 1 {
+		t.Errorf("first chapter is %v, want 1", got[0].Number)
+	}
+	if last := got[len(got)-1]; last.Number != 4 {
+		t.Errorf("last chapter is %v, want 4", last.Number)
+	}
+	if !theme.OrderIsKnown(got) {
+		t.Error("a fully numbered list was reported as having an unknown order")
 	}
 }

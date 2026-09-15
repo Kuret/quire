@@ -125,12 +125,21 @@ func TestSeriesAndChaptersFromSelectorsAlone(t *testing.T) {
 	if len(chapters) != 2 {
 		t.Fatalf("got %d chapters, want 2: %+v", len(chapters), chapters)
 	}
-	if chapters[0].ID != "/read/the-lantern-keeper/4" || chapters[0].Number != 4 {
-		t.Errorf("chapter 0 = %+v", chapters[0])
+	// Ascending reading order (PLAN §7.2). listing.html lists the newest
+	// first, as the sites this escape hatch is pointed at generally do, so the
+	// chapter the rest of this test cares about is the *last* one. The escape
+	// hatch gets no exemption from the contract: a user's selectors say where
+	// the chapters are, not which way round they run.
+	newest := chapters[len(chapters)-1]
+	if newest.ID != "/read/the-lantern-keeper/4" || newest.Number != 4 {
+		t.Errorf("newest chapter = %+v", newest)
 	}
 	want := time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)
-	if !chapters[0].Published.Equal(want) {
-		t.Errorf("chapter 0 Published = %v, want %v", chapters[0].Published, want)
+	if !newest.Published.Equal(want) {
+		t.Errorf("newest chapter Published = %v, want %v", newest.Published, want)
+	}
+	if chapters[0].Number >= newest.Number {
+		t.Errorf("chapters are not ascending: %v then %v", chapters[0].Number, newest.Number)
 	}
 }
 
@@ -514,5 +523,44 @@ func TestRegistryValidatesGenericSources(t *testing.T) {
 				t.Fatalf("Validate = %v, want an error containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// PLAN §7.2, 2026-09-15: ascending reading order — and the escape hatch gets
+// no exemption.
+//
+// A user's selectors say where the chapters are on the page. They say nothing
+// about which way round the site lists them, and there is no selector that
+// could: listing.html is newest-first, like the sites this hatch exists for.
+// The same applies to the script hook, which is a user's JavaScript and is not
+// trusted to have got the direction right either.
+func TestChaptersAreAscending(t *testing.T) {
+	t.Run("from selectors", func(t *testing.T) {
+		f := themetest.New(t, map[string]themetest.Route{
+			"GET /read/the-lantern-keeper": {File: "listing.html"},
+		})
+		th := generic.NewWithClock(f, clock)
+
+		got, err := th.Chapters(context.Background(), selectorSource(), "the-lantern-keeper")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAscending(t, got)
+	})
+}
+
+func assertAscending(t *testing.T, got []theme.Chapter) {
+	t.Helper()
+	if len(got) < 2 {
+		t.Fatalf("got %d chapters; the fixture has more than one", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].Number < got[i-1].Number {
+			t.Fatalf("chapter %d (%v) comes after %d (%v); the list is still in the "+
+				"site's own order", i, got[i].Number, i-1, got[i-1].Number)
+		}
+	}
+	if !theme.OrderIsKnown(got) {
+		t.Error("a fully numbered list was reported as having an unknown order")
 	}
 }

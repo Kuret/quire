@@ -315,7 +315,11 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 		}
 		out = append(out, ch)
 	})
-	return out, nil
+	// PLAN §7.2: ascending reading order. The escape hatch knows nothing about
+	// the site it is pointed at — including which way round its chapter list
+	// runs — so it normalises like everyone else and admits it when the
+	// configured selectors yield nothing orderable.
+	return theme.SortAndMark(out), nil
 }
 
 // chaptersFromScript turns the script's return value into chapters. The script
@@ -335,7 +339,10 @@ func (t *Theme) chaptersFromScript(s *theme.Source, vals []scriptItem) []theme.C
 		}
 		out = append(out, theme.Chapter{ID: rel, Title: title, Number: theme.ChapterNumber(title)})
 	}
-	return out
+	// The script hook gets the same treatment as the selector path. A user's
+	// script is not trusted to have got the direction right, and it has no way
+	// to tell us that it did.
+	return theme.SortAndMark(out)
 }
 
 // Pages implements theme.Theme. This is the operation the script hook exists

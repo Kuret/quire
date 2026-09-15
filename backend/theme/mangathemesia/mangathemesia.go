@@ -291,7 +291,10 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 		ch.Published = theme.ParseDate(theme.Text(a.Find(".chapterdate").First()), format, now)
 		out = append(out, ch)
 	})
-	return out, nil
+	// PLAN §7.2: ascending reading order. #chapterlist is rendered newest
+	// first, exactly like madara's; testdata/series.html keeps that order so
+	// the test has something real to correct.
+	return theme.SortAndMark(out), nil
 }
 
 // tsReaderCallRE finds the start of the reader's bootstrap call. It only
