@@ -1040,8 +1040,21 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    reader does not letterbox. M4 emits exactly this box.
 4. Do uploaded documents sync to reMarkable cloud, and does that matter for
    storage quota or for a Connect subscription? *(Affects M5 UX.)*
-5. Does AppLoad provide an on-screen keyboard, or must we build one?
-   *(Affects M3 scope.)*
+5. ~~Does AppLoad provide an on-screen keyboard, or must we build one?~~
+   **ANSWERED 2026-09-15 — we must build one.** AppLoad *does* ship a virtual
+   keyboard (layout JSON, key images, `virtualKeyboardLayout` /
+   `virtualKeyboardRef` plumbing in its `window.qml`) — **but only from v0.5.x
+   onward.** Our pinned **v0.4.2 has it in no form whatsoever**: zero occurrences
+   of the string "keyboard" in the binary, against 60 in v0.5.3.
+   **This is the first real cost of the AppLoad-version constraint** (§3.1
+   correction): the newest AppLoad that runs on 3.25.1.1 predates the keyboard.
+   M3 therefore ships its own on-screen keyboard, as §6 M3 already allowed for.
+   Keep it in QML, keep it dumb, and keep it isolated so it can be deleted
+   wholesale if we ever move to an OS/AppLoad pair that provides one.
+   *Cheaper alternative if M3 runs long:* §7.5 stage 5 already permits probing
+   via "the popular/latest listing if search needs a query", so a v1 without a
+   search box is coherent — browse-only, keyboard deferred. Prefer building the
+   keyboard; fall back to this only deliberately.
 6. ~~What is the current authoritative `lib-multisrc/` theme list?~~
    **ANSWERED 2026-09-15 — full taxonomy in `docs/THEME-NOTES.md`.**
    keiyoushi `lib-multisrc/` has **68** themes (not 61); Komikku has 18; the
