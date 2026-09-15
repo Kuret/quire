@@ -91,6 +91,9 @@ type Service struct {
 
 	previousSessionCrashed bool
 
+	// reprobes rate-limits the automatic re-probe; see maybeReprobe.
+	reprobes reprobeState
+
 	// dlQueue serialises downloads; see enqueueDownload for why there is
 	// exactly one worker behind it.
 	dlOnce  sync.Once
@@ -568,6 +571,12 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 	for _, st := range stubs {
 		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL})
 	}
+	// An *empty listing* is evidence the site changed; an empty search is not.
+	// See maybeReprobe for why that distinction is the whole trigger.
+	if len(rows) == 0 && strings.TrimSpace(query) == "" && page == 1 {
+		go s.maybeReprobe(ctx, out, src, reasonEmptyListing)
+	}
+
 	_ = send(out, appload.MessageSearchResults, map[string]any{
 		"sourceId": sourceID,
 		"query":    query,
@@ -623,6 +632,12 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		}
 		rows = append(rows, r)
 	}
+	// The series page resolved and yielded no chapters at all: that is a parse
+	// that no longer matches the page, not a series with nothing in it.
+	if len(chapters) == 0 {
+		go s.maybeReprobe(ctx, out, src, reasonEmptyChapters)
+	}
+
 	_ = send(out, appload.MessageSeriesDetailResult, map[string]any{
 		"sourceId": sourceID,
 		"series":   series,
