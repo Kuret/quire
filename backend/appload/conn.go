@@ -27,14 +27,24 @@
 //     one packet — discarding anything past the buffer length. So the header
 //     must be its own packet and the payload a second one. A single combined
 //     write would become one packet whose payload AppLoad silently drops.
-//   - AppLoad skips its payload read() when messageLength == 0, so a
-//     zero-length payload packet must not be sent: it would be consumed as the
-//     *next* message's header, read 0 bytes, trip the host's `status < 1`
-//     check and tear the connection down.
+//   - AppLoad skips its payload read() when messageLength == 0, so we must not
+//     send a zero-length payload packet: it would be consumed as the *next*
+//     message's header, read 0 bytes, trip the host's `status < 1` check and
+//     tear the connection down.
+//   - The host's own send path is the mirror image — sendMessageTo() calls
+//     send() for the payload unconditionally, even when empty — so every
+//     empty-payload message it sends us is two packets, and we must always
+//     consume the second. See consumeEmptyPayload.
 //
 // There is no such thing as a partial packet, so none of the stream-oriented
 // io.ReadFull reassembly belongs here; a short header read is a protocol error,
 // not something to loop on.
+//
+// A zero-length record and a closed peer are indistinguishable through
+// net.Conn — both surface as a 0-byte read that the net package reports as
+// io.EOF — so the packet reads go through packetReader, which separates them at
+// the recvmsg layer. Note that MSG_EOR does *not* work for this on the device;
+// packet.go documents the measurement and what is used instead.
 //
 // Note on size: the 10 MiB MAX_MESSAGE_LENGTH is the host's cap, but a
 // SEQPACKET datagram is additionally bounded by the socket buffer (~200 KiB by
@@ -89,10 +99,11 @@ var byteOrder = binary.NativeEndian
 // Recv must be called from a single goroutine. Send is safe for concurrent use:
 // each message is written under a mutex so frames cannot interleave.
 type Conn struct {
-	c net.Conn
+	c  net.Conn
+	pr packetReader
 
 	wmu sync.Mutex
-	// wbuf is reused across Send calls to keep header and payload in one write.
+	// wbuf holds the 8-byte header, reused across Send calls.
 	wbuf []byte
 
 	hdr [headerSize]byte
@@ -100,7 +111,7 @@ type Conn struct {
 
 // NewConn wraps an established net.Conn in the AppLoad framing.
 func NewConn(c net.Conn) *Conn {
-	return &Conn{c: c}
+	return &Conn{c: c, pr: newPacketReader(c)}
 }
 
 // Network is the Go network name for AppLoad's socket. AppLoad creates it as
@@ -190,7 +201,7 @@ func (c *Conn) Recv() (int32, []byte, error) {
 		// Exactly length bytes: on SEQPACKET a short buffer silently discards
 		// the rest of the packet, so never read into a larger one.
 		payload = make([]byte, length)
-		n, err := c.c.Read(payload)
+		n, _, err := c.pr.readPacket(payload)
 		switch {
 		case errors.Is(err, io.EOF):
 			return msgType, nil, fmt.Errorf("appload: peer closed before the payload of type %d: %w", msgType, io.ErrUnexpectedEOF)
@@ -199,6 +210,8 @@ func (c *Conn) Recv() (int32, []byte, error) {
 		case n != int(length):
 			return msgType, nil, fmt.Errorf("appload: type %d: %w (got %d, want %d)", msgType, ErrShortPayload, n, length)
 		}
+	} else {
+		c.consumeEmptyPayload()
 	}
 
 	if msgType == MessageSystemTerminate {
@@ -207,30 +220,54 @@ func (c *Conn) Recv() (int32, []byte, error) {
 	return msgType, payload, nil
 }
 
-// recvHeader reads one header packet.
+// consumeEmptyPayload eats the zero-length packet that follows an
+// empty-payload header.
 //
-// It tolerates stray zero-length packets. AppLoad's own send path is asymmetric
-// to its receive path: sendMessageTo() always send()s the payload *unconditionally*,
-// even when the payload is empty, while its read loop skips the payload read()
-// when messageLength == 0. So a host-sent message with an empty payload leaves a
-// zero-length packet queued where we expect the next header. Every current host
-// call site happens to pass a non-empty string, but that is luck, not contract.
+// AppLoad's sendMessageTo() calls send() for the payload unconditionally, even
+// when the payload is empty, so a message such as Ping is *always* two packets
+// on the wire: the header, then a zero-length one. Its read loop, by contrast,
+// skips the payload read() when messageLength == 0 — which is why our Send is
+// asymmetric the other way and emits no empty packet. Receiving needs the
+// mirror of that: the host always writes one, so we must always consume one.
 //
-// The deliberate choice: skip such packets rather than erroring. Discarding an
-// empty packet can only ever lose a message that carried no information, whereas
-// erroring would tear down a connection over a quirk of the host we do not
-// control. A zero-length read is distinguishable from a close because Go reports
-// a peer close as io.EOF, not as a 0-byte packet.
+// Leaving it queued is what made the backend exit on the first Ping: the stray
+// packet was read as the next message's header and reported as io.EOF.
+//
+// This is deliberately non-blocking and its result is deliberately ignored:
+//
+//   - It peeks before consuming, so a record carrying data is never eaten. If
+//     the host ever stopped sending its empty packet, the next thing queued
+//     would be a real header, and swallowing that would desynchronise the
+//     stream permanently.
+//   - It waits only briefly (emptyPacketWait) for the packet to arrive rather
+//     than blocking, so a host that sends no empty packet cannot wedge us. If
+//     it gives up, recvHeader's zero-length-record skip is the backstop.
+func (c *Conn) consumeEmptyPayload() {
+	c.pr.discardEmptyPacket()
+}
+
+// recvHeader reads one header packet, skipping any stray zero-length record
+// that consumeEmptyPayload did not manage to eat first.
+//
+// The skip is a backstop, not the main mechanism: it only fires when the host's
+// empty payload packet had not yet reached the socket queue at the moment we
+// tried to consume it. It is safe because a zero-length record carries no
+// information by construction.
+//
+// This is only correct because packetReader distinguishes a zero-length record
+// from end of stream via MSG_EOR. Reading through net.Conn instead collapses
+// both into io.EOF, and the skip can never fire — which is precisely the bug
+// that made the backend exit on its first Ping.
 func (c *Conn) recvHeader() (msgType, length int32, err error) {
 	for {
-		n, err := c.c.Read(c.hdr[:])
+		n, record, err := c.pr.readPacket(c.hdr[:])
 		switch {
 		case errors.Is(err, io.EOF):
 			// Clean close between messages.
 			return 0, 0, io.EOF
 		case err != nil:
 			return 0, 0, fmt.Errorf("appload: read header: %w", err)
-		case n == 0:
+		case n == 0 && record:
 			continue // stray empty packet; see the doc comment
 		case n != headerSize:
 			return 0, 0, fmt.Errorf("appload: %w (got %d)", ErrShortHeader, n)
