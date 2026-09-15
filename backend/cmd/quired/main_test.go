@@ -94,7 +94,7 @@ func TestPingAnswersPongWithUptime(t *testing.T) {
 	t.Cleanup(func() { server.Close(); client.Close() })
 
 	done := make(chan error, 1)
-	go func() { done <- serve(server, discardLogger()) }()
+	go func() { done <- serve(server, discardLogger(), nil) }()
 
 	if err := client.Send(appload.MessagePing, nil); err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestUnimplementedTypeGetsAnError(t *testing.T) {
 	t.Cleanup(func() { server.Close(); client.Close() })
 
 	done := make(chan error, 1)
-	go func() { done <- serve(server, discardLogger()) }()
+	go func() { done <- serve(server, discardLogger(), nil) }()
 
 	if err := client.Send(appload.MessageSearch, []byte(`{"sourceId":"x","query":"y"}`)); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestCoordinatorMessagesAreSilent(t *testing.T) {
 	t.Cleanup(func() { server.Close(); client.Close() })
 
 	done := make(chan error, 1)
-	go func() { done <- serve(server, discardLogger()) }()
+	go func() { done <- serve(server, discardLogger(), nil) }()
 
 	for _, typ := range []int32{appload.MessageSystemNewCoordinator, appload.MessageSystemLostCoordinator} {
 		if err := client.Send(typ, nil); err != nil {

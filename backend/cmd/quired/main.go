@@ -9,18 +9,28 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/covers"
+	"github.com/rickl/quire/backend/fetch"
+	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/state"
+	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/generic"
+	"github.com/rickl/quire/backend/theme/madara"
+	"github.com/rickl/quire/backend/theme/mangathemesia"
 )
 
 // version is the build stamp; -ldflags "-X main.version=..." can override it.
@@ -44,6 +54,14 @@ func main() {
 
 	log.Info("starting", "socket", socket, "go", runtime.Version(), "arch", runtime.GOARCH, "pid", os.Getpid())
 
+	svc, err := newService(log)
+	if err != nil {
+		// Without a store there is nowhere to keep the user's sources, and
+		// pretending otherwise would lose whatever they add.
+		log.Error("could not start", "err", err)
+		os.Exit(1)
+	}
+
 	conn, err := appload.Dial(socket)
 	if err != nil {
 		log.Error("connect failed", "err", err)
@@ -52,7 +70,7 @@ func main() {
 	defer conn.Close()
 	log.Info("connected")
 
-	if err := serve(conn, log); err != nil {
+	if err := serve(conn, log, svc); err != nil {
 		log.Error("serve failed", "err", err)
 		os.Exit(1)
 	}
@@ -61,7 +79,10 @@ func main() {
 
 // serve runs the message loop. It returns nil for the two clean shutdown
 // paths — host terminate and EOF — and an error for anything else.
-func serve(conn *appload.Conn, log *slog.Logger) error {
+func serve(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	for {
 		msgType, payload, err := conn.Recv()
 		switch {
@@ -77,14 +98,23 @@ func serve(conn *appload.Conn, log *slog.Logger) error {
 
 		log.Debug("received", "type", msgType, "name", appload.Name(msgType), "bytes", len(payload))
 
-		if err := handle(conn, log, msgType, payload); err != nil {
+		if err := handle(ctx, conn, log, svc, msgType, payload); err != nil {
 			// A write failure means the socket is gone; stop.
 			return err
 		}
 	}
 }
 
-func handle(conn *appload.Conn, log *slog.Logger, msgType int32, payload []byte) error {
+func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *service.Service, msgType int32, payload []byte) error {
+	// Everything M3 added lives in the service. Ping and the host's own
+	// messages stay here, where M1 put them.
+	if svc != nil {
+		handled, err := svc.Handle(ctx, conn, msgType, payload)
+		if handled {
+			return err
+		}
+	}
+
 	switch msgType {
 	case appload.MessagePing:
 		status, err := json.Marshal(newStatus())
@@ -201,4 +231,57 @@ func formatUptime(secs float64) string {
 	default:
 		return fmt.Sprintf("%ds", sec)
 	}
+}
+
+// dataDirEnv overrides where Quire keeps its state. The emulator and the tests
+// use it; on the device the default is right.
+const dataDirEnv = "QUIRE_DATA_DIR"
+
+// dataDir is <app root>/data: AppLoad launches backend/entry from inside the
+// app directory, which is under /home/root and is writable (docs/DEVICE-NOTES.md).
+// Keeping state beside the app means an uninstall takes the state with it, and
+// nothing of Quire's ever lands in the user's document tree.
+func dataDir() (string, error) {
+	if dir := os.Getenv(dataDirEnv); dir != "" {
+		return dir, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate the backend binary: %w", err)
+	}
+	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "data"), nil
+}
+
+// newService wires the backend together: one guarded HTTP client, every theme,
+// the source store and the cover cache.
+//
+// The single fetch.Client is the point. PLAN §7.4's invariants — the rate
+// limits, robots, the SSRF guard, the byte budget — live in it, so every
+// request Quire makes has to go through here. A second client anywhere would be
+// a second network path with none of that.
+func newService(log *slog.Logger) (*service.Service, error) {
+	dir, err := dataDir()
+	if err != nil {
+		return nil, err
+	}
+	client := fetch.NewClient(fetch.Options{Version: version})
+
+	reg := theme.NewRegistry()
+	reg.MustRegister(madara.New(client))
+	reg.MustRegister(mangathemesia.New(client))
+	reg.MustRegister(generic.New(client))
+
+	store, err := state.Open(filepath.Join(dir, "state"), reg)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("state opened", "path", store.Path(), "sources", len(store.List()))
+
+	return service.New(service.Options{
+		Store:    store,
+		Registry: reg,
+		Fetcher:  client,
+		Covers:   covers.New(filepath.Join(dir, "covers"), client),
+		Log:      log,
+	}), nil
 }

@@ -1,0 +1,123 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a Madara (WordPress wp-manga plugin) search results page
+  generates: WordPress's stock /?s=&post_type=wp-manga query answered with a
+  list of .c-tabs-item__content blocks, each holding a .tab-thumb image and a
+  .post-title heading whose anchor is the series permalink.
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing source URLs
+  or anything that functions as a catalogue, and §1.4 forbids copying others'
+  expression. The markup *structure* is a documented, observable property of a
+  commercially distributed plugin; the content here is invented and the host is
+  example.invalid (RFC 2606), which can never resolve.
+
+  Deliberate variations exercised by the test:
+    - the third item uses <h4> rather than <h3> (skin variation)
+    - covers are lazy-loaded via data-src with a base64 placeholder in src
+    - one link points at a tag page, which must NOT become a search result
+    - one link points off-site, which must NOT become a search result
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search Results for "lantern" &#8211; Example Reader</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+</head>
+<body class="search search-results post-type-archive-wp-manga">
+<div class="wrap">
+  <div class="site-content">
+    <div class="c-blog__heading style-2">
+      <h1 class="h4">Search Results for: lantern</h1>
+    </div>
+
+    <div class="tab-content-wrap">
+      <div class="c-tabs-item">
+
+        <div class="c-tabs-item__content">
+          <div class="tab-thumb c-image-hover">
+            <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
+              <img width="110" height="155"
+                   src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+                   data-src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg"
+                   class="img-responsive lazyload" alt="The Lantern Keeper">
+            </a>
+          </div>
+          <div class="tab-summary">
+            <div class="post-title">
+              <h3 class="h4">
+                <a href="https://example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a>
+              </h3>
+            </div>
+            <div class="post-content">
+              <div class="post-content_item mg_genres">
+                <div class="summary-heading"><h5>Genre(s)</h5></div>
+                <div class="summary-content">
+                  <a href="https://example.invalid/manga-genre/fantasy/" rel="tag">Fantasy</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="c-tabs-item__content">
+          <div class="tab-thumb c-image-hover">
+            <a href="/manga/salt-and-cedar/" title="Salt and Cedar">
+              <img width="110" height="155"
+                   src="https://example.invalid/wp-content/uploads/2026/02/salt-cedar-193x278.jpg"
+                   class="img-responsive" alt="Salt and Cedar">
+            </a>
+          </div>
+          <div class="tab-summary">
+            <div class="post-title">
+              <h3 class="h4"><a href="/manga/salt-and-cedar/">  Salt and
+                Cedar  </a></h3>
+            </div>
+          </div>
+        </div>
+
+        <div class="c-tabs-item__content">
+          <div class="tab-thumb c-image-hover">
+            <a href="https://example.invalid/manga/paper-lanterns-of-the-ninth-ward/">
+              <img srcset="https://example.invalid/wp-content/uploads/2026/03/ninth-ward-193x278.jpg 193w,
+                           https://example.invalid/wp-content/uploads/2026/03/ninth-ward-386x556.jpg 386w"
+                   class="img-responsive" alt="Paper Lanterns of the Ninth Ward">
+            </a>
+          </div>
+          <div class="tab-summary">
+            <div class="post-title">
+              <h4><a href="https://example.invalid/manga/paper-lanterns-of-the-ninth-ward/">Paper Lanterns of the Ninth Ward</a></h4>
+            </div>
+          </div>
+        </div>
+
+        <!-- A tag archive, not a series. Must be filtered out. -->
+        <div class="c-tabs-item__content">
+          <div class="tab-summary">
+            <div class="post-title">
+              <h3 class="h4"><a href="https://example.invalid/manga-tag/lantern/">Everything tagged lantern</a></h3>
+            </div>
+          </div>
+        </div>
+
+        <!-- An off-site link. Must be filtered out. -->
+        <div class="c-tabs-item__content">
+          <div class="tab-summary">
+            <div class="post-title">
+              <h3 class="h4"><a href="https://elsewhere.invalid/manga/not-ours/">Not Ours</a></h3>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="wp-pagenavi">
+      <a class="page larger" href="https://example.invalid/page/2/?s=lantern&#038;post_type=wp-manga">2</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>
