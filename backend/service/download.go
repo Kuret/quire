@@ -86,6 +86,10 @@ type downloadProgress struct {
 	ChapterCount int    `json:"chapterCount,omitempty"`
 	FirstChapter string `json:"firstChapter,omitempty"`
 	LastChapter  string `json:"lastChapter,omitempty"`
+
+	// VolumeLabel is the source's own volume label when it has one, so the UI
+	// can say "Volume 3" where the site does.
+	VolumeLabel string `json:"volumeLabel,omitempty"`
 }
 
 // downloadJob is one queued request and the connection that asked for it.
@@ -176,15 +180,26 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 
 	first := chapterLabel(vol.Chapters[0])
 	last := chapterLabel(vol.Chapters[len(vol.Chapters)-1])
+	n := len(vol.Chapters)
+
+	// Name the source's own volume when there is one: "Volume 3" is something
+	// the reader recognises from the site. A number Quire made up by counting
+	// chapters is not, so that case says what it actually did instead.
+	var what string
+	if vol.SourceLabelled {
+		what = fmt.Sprintf("Volume %s of %s is %d chapters, %s to %s.", vol.Label, vol.Series, n, first, last)
+	} else {
+		what = fmt.Sprintf("%s doesn’t number its volumes, so Quire groups it into runs of %d. "+
+			"This one is %s to %s.", vol.Series, assemble.DefaultChaptersPerVolume, first, last)
+	}
 
 	p.Phase = phaseConfirm
 	p.Series, p.Title = vol.Series, vol.Title
-	p.ChapterCount = len(vol.Chapters)
+	p.ChapterCount = n
 	p.FirstChapter, p.LastChapter = first, last
-	p.Message = fmt.Sprintf(
-		"Volume %s of %s is %d chapters, %s to %s. Quire downloads a whole volume at a time, "+
-			"so your place in the reader carries across chapters. Download all %d?",
-		vol.Label, vol.Series, len(vol.Chapters), first, last, len(vol.Chapters))
+	p.VolumeLabel = vol.Label
+	p.Message = fmt.Sprintf("%s Quire downloads a whole volume at a time, so your place in the "+
+		"reader carries across chapters. Download all %d?", what, n)
 	_ = send(out, appload.MessageDownloadProgress, p)
 }
 
