@@ -302,6 +302,15 @@ Rectangle {
     }
 
     Component.onCompleted: {
+        // These are belt and braces, not the mechanism.
+        //
+        // AppLoad discards messages aimed at a backend whose socket is not yet
+        // up ("No active socket for ID:quire"), and this runs at exactly the
+        // moment that race is live. The backend therefore *pushes* the source
+        // list and the status when it sees the frontend attach, which is the
+        // earliest point a send can work. Asking here as well costs two frames
+        // and covers the case where the backend was already attached before
+        // this QML loaded.
         root.send(Msg.ListSources)
         root.send(Msg.Ping)
     }
