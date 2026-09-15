@@ -237,7 +237,11 @@ Rectangle {
             if (chaptersModel.get(i).chapterId !== msg.volumeId)
                 continue
             chaptersModel.setProperty(i, "downloadState", msg.phase ? msg.phase : "")
-            chaptersModel.setProperty(i, "downloadMessage", msg.message ? msg.message : "")
+            // A stopped download returns the row to where it started: the
+            // message would otherwise sit there looking like progress that has
+            // frozen (PLAN §7.1).
+            chaptersModel.setProperty(i, "downloadMessage",
+                                      msg.phase === "cancelled" ? "" : (msg.message ? msg.message : ""))
             if (msg.documentUuid)
                 chaptersModel.setProperty(i, "documentUuid", msg.documentUuid)
 
@@ -421,6 +425,9 @@ Rectangle {
             model: chaptersModel
             onDownloadRequested: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "volumeId": chapterId})
+            onDownloadCancelled: root.send(Msg.CancelDownload,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId})
             onDownloadConfirmed: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "volumeId": chapterId, "confirmed": true})

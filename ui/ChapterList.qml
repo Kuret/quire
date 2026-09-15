@@ -19,6 +19,7 @@ Item {
 
     signal downloadRequested(string chapterId)
     signal downloadConfirmed(string chapterId)
+    signal downloadCancelled(string chapterId)
     signal readRequested(string documentUuid)
 
     // The chapter whose confirm strip is open. Only ever one: the strip asks a
@@ -32,20 +33,21 @@ Item {
         if (documentUuid)
             return "Read"
         switch (state) {
-        case "confirm": return "Cancel"
-        case "done":    return "In library"
-        case "failed":  return "Retry"
-        case "":        return "Download"
-        default:        return "Working…"
+        case "confirm":   return "Cancel"
+        case "done":      return "In library"
+        case "failed":    return "Retry"
+        case "cancelled": return "Download"
+        case "":          return "Download"
+        // A download in flight offers the way out. A volume is minutes of work
+        // and up to 90 MB on a battery, so an inert button here is the thing
+        // that makes the app feel broken (PLAN §7.1).
+        default:          return "Stop"
         }
     }
 
-    // canTap is true when the button does something. A download in flight is
-    // not cancellable yet, so the button is inert rather than lying.
+    // canTap is true when the button does something. Every state now does.
     function canTap(state, documentUuid) {
-        if (documentUuid)
-            return true
-        return state === "" || state === "failed" || state === "confirm"
+        return true
     }
 
     function tapped(chapterId, state, documentUuid) {
@@ -53,11 +55,19 @@ Item {
             screen.readRequested(documentUuid)
             return
         }
-        if (state === "confirm") {
+        switch (state) {
+        case "confirm":
             screen.confirmingId = ""
             return
+        case "":
+        case "failed":
+        case "cancelled":
+        case "done":
+            screen.downloadRequested(chapterId)
+            return
+        default:
+            screen.downloadCancelled(chapterId)
         }
-        screen.downloadRequested(chapterId)
     }
 
     ListView {
