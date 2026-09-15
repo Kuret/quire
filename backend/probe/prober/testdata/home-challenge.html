@@ -1,0 +1,40 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape of a CDN browser-challenge interstitial: a 503 served by
+  a managed edge, an interstitial <title>, and the vendor's own challenge-
+  platform script path. PLAN §7.5 stage 3 must refuse this outright, and PLAN
+  §7.6 forbids any code path that gets past it.
+
+  Why synthetic — and read this before trusting it. PLAN §7.5 asks each
+  challenge signal to be checked against a live example; PLAN §1.3 forbids this
+  repository from naming an aggregator and the project cannot reach one from
+  CI. The markers below are the vendor's *published* endpoint path and header
+  names, not a recording: what this fixture proves is that our detector fires on
+  those markers, not that a live interstitial looks exactly like this. See
+  docs/THEME-NOTES.md, "Challenge detection — what is verified".
+
+  The one thing this fixture is careful about: it contains no theme signal at
+  all, so a test that sees "blocked_challenge" cannot be passing for the wrong
+  reason (i.e. because nothing was recognised).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Just a moment...</title>
+    <meta http-equiv="refresh" content="8; url=/cdn-cgi/challenge-platform/h/b/orchestrate/managed/v1?ray=0000000000000000">
+</head>
+<body class="no-js">
+<div class="main-wrapper" role="main">
+    <div class="main-content">
+        <h1 class="zone-name-title">example.invalid</h1>
+        <p id="challenge-running">Checking your browser before accessing example.invalid.</p>
+        <noscript>
+            <div id="challenge-error-title">Enable JavaScript and cookies to continue.</div>
+        </noscript>
+    </div>
+</div>
+<script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  A perfectly ordinary, perfectly readable web page of a shape no theme in the
+  registry implements: a plain WordPress-ish blog. PLAN §7.5 stage 4 must answer
+  "unrecognised" and name what it tried, rather than half-recognising it.
+
+  It is deliberately *not* minimal. A tiny page would also trip stage 3's
+  generic JS-gate signal, and then the test would pass for the wrong reason: the
+  verdict has to be unrecognised, not blocked_challenge.
+
+  Why synthetic: PLAN §1.3 and §1.4, as for every fixture in this repository.
+  The host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>The Quarry Road Journal</title>
+    <link rel="stylesheet" href="https://example.invalid/wp-content/themes/quarry/style.css">
+</head>
+<body class="home blog">
+<header class="site-header">
+    <h1 class="site-title">The Quarry Road Journal</h1>
+    <p class="site-description">Notes on stonework, weather and the long way round</p>
+</header>
+
+<main class="content">
+    <article class="post">
+        <h2><a href="https://example.invalid/2026/03/limestone-in-march/">Limestone in March</a></h2>
+        <p class="entry-meta">Posted on 3 March 2026 by the editor</p>
+        <p>The quarry reopened this week after the frost, and the first cut came
+        out cleaner than anyone expected. We walked the top road at dawn and
+        counted eleven herons on the flooded floor of the lower pit, which is
+        eleven more than last spring.</p>
+        <p>Work resumes on the north face on Monday, weather allowing. The
+        stonemasons' co-operative has asked for another fortnight before the
+        first delivery, and given the state of the access track that seems
+        entirely reasonable.</p>
+    </article>
+
+    <article class="post">
+        <h2><a href="https://example.invalid/2026/02/on-mortar/">On mortar, again</a></h2>
+        <p class="entry-meta">Posted on 18 February 2026 by the editor</p>
+        <p>Every year somebody writes in to say that lime mortar is a fashion,
+        and every year the same wall falls down to prove otherwise. We are not
+        going to relitigate this, but here are the photographs.</p>
+        <p>The short version: match the mortar to the stone, not to the century
+        you wish the building had been put up in.</p>
+    </article>
+
+    <article class="post">
+        <h2><a href="https://example.invalid/2026/01/winter-list/">The winter list</a></h2>
+        <p class="entry-meta">Posted on 9 January 2026 by the editor</p>
+        <p>Gates, gutters, the pump house roof, and the long-promised index of
+        back issues. In roughly that order, and probably not before April.</p>
+    </article>
+</main>
+
+<footer class="site-footer">
+    <p>The Quarry Road Journal — published from a shed, irregularly.</p>
+</footer>
+</body>
+</html>

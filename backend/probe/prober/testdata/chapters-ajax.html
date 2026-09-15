@@ -1,0 +1,47 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the bare HTML fragment a *current*-shape Madara site returns from
+  POST {seriesURL}ajax/chapters/ : a <ul class="main version-chap"> of
+  li.wp-manga-chapter entries. There is no <html> wrapper; the response really
+  is a fragment, which is why the parser must tolerate one.
+
+  Deliberate variations exercised by the test:
+    - chapter 4 is a half-chapter ("Chapter 3.5"), so the number must be float
+    - chapter 1 carries a relative date in <a title="absolute">, so the
+      absolute form in the title attribute must win over "2 days ago"
+    - the last chapter has a plain <i> absolute date and no anchor
+    - one entry has no href and must be skipped rather than yielding a blank
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<ul class="main version-chap no-volumn">
+
+  <li class="wp-manga-chapter">
+    <a href="https://example.invalid/manga/the-lantern-keeper/chapter-4/">Chapter 4 - The Forty-Second Lamp</a>
+    <span class="chapter-release-date">
+      <a href="https://example.invalid/manga/the-lantern-keeper/chapter-4/" title="March 2, 2026">2 days ago</a>
+    </span>
+  </li>
+
+  <li class="wp-manga-chapter">
+    <a href="/manga/the-lantern-keeper/chapter-3-5/">Chapter 3.5 - Interlude</a>
+    <span class="chapter-release-date"><i>February 24, 2026</i></span>
+  </li>
+
+  <li class="wp-manga-chapter">
+    <a href="/manga/the-lantern-keeper/chapter-3/">Chapter 3</a>
+    <span class="chapter-release-date"><i>February 17, 2026</i></span>
+  </li>
+
+  <li class="wp-manga-chapter">
+    <span>Chapter 2 (coming soon)</span>
+    <span class="chapter-release-date"><i></i></span>
+  </li>
+
+  <li class="wp-manga-chapter">
+    <a href="/manga/the-lantern-keeper/chapter-1/">Chapter 1 - Forty-One</a>
+    <span class="chapter-release-date"><i>February 3, 2026</i></span>
+  </li>
+
+</ul>
