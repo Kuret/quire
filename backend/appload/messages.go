@@ -47,10 +47,32 @@ const (
 	// MessageConfirmAddSource is UI→BE, JSON {url, theme, name, lang}.
 	MessageConfirmAddSource MessageType = 15
 
+	// MessageProbeAnswer is UI→BE, JSON {id}. The probe has two points where
+	// PLAN §7.5 requires the *user* to decide rather than the code guessing — a
+	// redirect that left the domain they typed, and two themes too close to
+	// call — so the stream of type 13 messages has to be answerable.
+	MessageProbeAnswer MessageType = 16
+	// MessageSetSourceEnabled is UI→BE, JSON {sourceId, enabled}: PLAN §6 M3's
+	// per-source toggle.
+	MessageSetSourceEnabled MessageType = 17
+	// MessageRemoveSource is UI→BE, JSON {sourceId}.
+	MessageRemoveSource MessageType = 18
+
 	// MessageSearch is UI→BE, JSON {sourceId, query}.
 	MessageSearch MessageType = 20
 	// MessageSearchResults is BE→UI, JSON array.
 	MessageSearchResults MessageType = 21
+	// MessageBrowse is UI→BE, JSON {sourceId, page}: the popular/latest listing,
+	// which is also what PLAN §7.5 stage 5 falls back to when search needs a
+	// query. Its reply is MessageSearchResults, because a listing and a search
+	// produce the same rows.
+	MessageBrowse MessageType = 22
+	// MessageRequestCover is UI→BE, JSON {sourceId, seriesId, url}. Images are
+	// never sent over this socket (PLAN §7.1): the backend writes a downscaled
+	// copy to disk and answers with its path.
+	MessageRequestCover MessageType = 23
+	// MessageCoverReady is BE→UI, JSON {seriesId, path}.
+	MessageCoverReady MessageType = 24
 
 	// MessageSeriesDetail is UI→BE, JSON {sourceId, seriesId}.
 	MessageSeriesDetail MessageType = 30
@@ -84,8 +106,14 @@ var messageNames = map[MessageType]string{
 	MessageProbeProgress:         "ProbeProgress",
 	MessageProbeVerdict:          "ProbeVerdict",
 	MessageConfirmAddSource:      "ConfirmAddSource",
+	MessageProbeAnswer:           "ProbeAnswer",
+	MessageSetSourceEnabled:      "SetSourceEnabled",
+	MessageRemoveSource:          "RemoveSource",
 	MessageSearch:                "Search",
 	MessageSearchResults:         "SearchResults",
+	MessageBrowse:                "Browse",
+	MessageRequestCover:          "RequestCover",
+	MessageCoverReady:            "CoverReady",
 	MessageSeriesDetail:          "SeriesDetail",
 	MessageSeriesDetailResult:    "SeriesDetailResult",
 	MessageEnqueueDownload:       "EnqueueDownload",

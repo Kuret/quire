@@ -21,9 +21,15 @@ var ProbeSource = 12
 var ProbeProgress = 13
 var ProbeVerdict = 14
 var ConfirmAddSource = 15
+var ProbeAnswer = 16
+var SetSourceEnabled = 17
+var RemoveSource = 18
 
 var Search = 20
 var SearchResults = 21
+var Browse = 22
+var RequestCover = 23
+var CoverReady = 24
 
 var SeriesDetail = 30
 var SeriesDetailResult = 31
