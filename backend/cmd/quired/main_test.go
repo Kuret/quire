@@ -170,7 +170,8 @@ func TestUnimplementedTypeGetsAnError(t *testing.T) {
 	}
 }
 
-func TestCoordinatorMessagesAreSilent(t *testing.T) {
+// A frontend detaching stays silent: there is nobody to tell.
+func TestLostCoordinatorIsSilent(t *testing.T) {
 	a, b := net.Pipe()
 	server, client := appload.NewConn(a), appload.NewConn(b)
 	t.Cleanup(func() { server.Close(); client.Close() })
@@ -178,10 +179,8 @@ func TestCoordinatorMessagesAreSilent(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- serve(server, discardLogger(), nil) }()
 
-	for _, typ := range []int32{appload.MessageSystemNewCoordinator, appload.MessageSystemLostCoordinator} {
-		if err := client.Send(typ, nil); err != nil {
-			t.Fatal(err)
-		}
+	if err := client.Send(appload.MessageSystemLostCoordinator, nil); err != nil {
+		t.Fatal(err)
 	}
 	// Nothing should have been written back; a following Ping must be the
 	// first thing we read.
@@ -194,6 +193,41 @@ func TestCoordinatorMessagesAreSilent(t *testing.T) {
 	}
 	if typ != appload.MessagePong {
 		t.Fatalf("type = %d, want Pong (a coordinator message got a reply)", typ)
+	}
+
+	client.Close()
+	<-done
+}
+
+// A frontend *attaching* is answered unprompted, which is the whole fix for
+// the startup race: AppLoad discards messages aimed at a backend whose socket
+// is not up yet, so a request sent from QML's Component.onCompleted is
+// sometimes thrown away and the UI waits forever for a reply that will never
+// come. The frontend arriving is the earliest moment a send can succeed.
+func TestAttachIsAnsweredUnprompted(t *testing.T) {
+	a, b := net.Pipe()
+	server, client := appload.NewConn(a), appload.NewConn(b)
+	t.Cleanup(func() { server.Close(); client.Close() })
+
+	done := make(chan error, 1)
+	go func() { done <- serve(server, discardLogger(), nil) }()
+
+	if err := client.Send(appload.MessageSystemNewCoordinator, nil); err != nil {
+		t.Fatal(err)
+	}
+	typ, payload, err := client.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != appload.MessagePong {
+		t.Fatalf("type = %d, want Pong pushed on attach", typ)
+	}
+	var st status
+	if err := json.Unmarshal(payload, &st); err != nil {
+		t.Fatalf("pushed status is not JSON: %v (%q)", err, payload)
+	}
+	if !st.OK {
+		t.Error("ok = false")
 	}
 
 	client.Close()

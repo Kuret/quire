@@ -56,7 +56,7 @@ func main() {
 
 	log.Info("starting", "socket", socket, "go", runtime.Version(), "arch", runtime.GOARCH, "pid", os.Getpid())
 
-	svc, err := newService(log)
+	svc, session, err := newService(log)
 	if err != nil {
 		// Without a store there is nowhere to keep the user's sources, and
 		// pretending otherwise would lose whatever they add.
@@ -73,8 +73,15 @@ func main() {
 	log.Info("connected")
 
 	if err := serve(conn, log, svc); err != nil {
+		// Left open on purpose: an error exit is an abnormal end, and the next
+		// session should say so.
 		log.Error("serve failed", "err", err)
 		os.Exit(1)
+	}
+	// A clean exit clears the marker; anything else — a crash, the OOM killer,
+	// a power cut — leaves it, and the next launch tells the user quietly.
+	if err := session.Close(); err != nil {
+		log.Warn("could not clear the session marker", "err", err)
 	}
 	log.Info("exiting cleanly")
 }
@@ -119,17 +126,26 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 
 	switch msgType {
 	case appload.MessagePing:
-		status, err := json.Marshal(newStatus())
-		if err != nil {
-			// Cannot happen with a fixed struct, but never send a half frame.
-			log.Error("marshal status", "err", err)
-			return sendError(conn, "internal", "could not build status")
-		}
-		return conn.Send(appload.MessagePong, status)
+		return sendStatus(conn, log, svc)
 
 	case appload.MessageSystemNewCoordinator:
 		log.Info("frontend attached")
-		return nil
+		// Push, do not wait to be asked.
+		//
+		// AppLoad *drops* messages aimed at a backend whose socket is not up
+		// yet — it logs "No active socket for ID:quire" and discards the frame.
+		// So a request sent from QML's Component.onCompleted races this very
+		// event and is sometimes thrown away, leaving the UI empty forever
+		// because nothing asks again. The frontend arriving is the earliest
+		// moment a send can possibly succeed, which makes it the right moment
+		// to send everything the shell needs to draw itself.
+		if err := sendStatus(conn, log, svc); err != nil {
+			return err
+		}
+		if svc == nil {
+			return nil
+		}
+		return svc.FrontendAttached(conn)
 
 	case appload.MessageSystemLostCoordinator:
 		log.Info("frontend detached")
@@ -140,6 +156,23 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 		return sendError(conn, "not_implemented",
 			fmt.Sprintf("%s is not implemented yet", appload.Name(msgType)))
 	}
+}
+
+// sendStatus answers a Ping, and is also what a freshly attached frontend gets
+// unprompted. It carries the startup notice, so there is exactly one message
+// the shell has to receive before it can draw itself correctly.
+func sendStatus(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
+	st := newStatus()
+	if svc != nil {
+		st.Notice = svc.StartupNotice()
+	}
+	body, err := json.Marshal(st)
+	if err != nil {
+		// Cannot happen with a fixed struct, but never send a half frame.
+		log.Error("marshal status", "err", err)
+		return sendError(conn, "internal", "could not build status")
+	}
+	return conn.Send(appload.MessagePong, body)
 }
 
 func sendError(conn *appload.Conn, code, message string) error {
@@ -167,6 +200,12 @@ type status struct {
 	Uptime        string  `json:"uptime"`
 	UptimeError   string  `json:"uptimeError,omitempty"`
 	Now           string  `json:"now"`
+
+	// Notice is a one-off sentence for the user, in plain language, or empty.
+	// It rides here rather than in a message type of its own: PLAN §7.1's
+	// table is not worth growing for a line of text that is only ever sent
+	// alongside the status.
+	Notice string `json:"notice,omitempty"`
 }
 
 func newStatus() status {
@@ -284,11 +323,22 @@ func dataDir() (string, error) {
 // limits, robots, the SSRF guard, the byte budget — live in it, so every
 // request Quire makes has to go through here. A second client anywhere would be
 // a second network path with none of that.
-func newService(log *slog.Logger) (*service.Service, error) {
+func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	dir, err := dataDir()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	stateDir := filepath.Join(dir, "state")
+	session, previousCrashed, err := state.OpenSession(stateDir)
+	if err != nil {
+		// Not fatal: losing the ability to notice a crash next time is not a
+		// reason to refuse to start.
+		log.Warn("could not mark the session as open", "err", err)
+	}
+	if previousCrashed {
+		log.Warn("the previous session did not end cleanly", "marker", session.Path())
+	}
+
 	client := fetch.NewClient(fetch.Options{Version: version})
 
 	reg := theme.NewRegistry()
@@ -297,18 +347,18 @@ func newService(log *slog.Logger) (*service.Service, error) {
 	reg.MustRegister(mangadex.New(client))
 	reg.MustRegister(generic.New(client))
 
-	store, err := state.Open(filepath.Join(dir, "state"), reg)
+	store, err := state.Open(stateDir, reg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.Info("state opened", "path", store.Path(), "sources", len(store.List()))
 
 	// The library store holds the document UUIDs, and losing it means losing
 	// the "Read" button for everything already downloaded, so a broken file is
 	// a startup failure rather than something to shrug at.
-	libStore, err := library.OpenStore(filepath.Join(dir, "state"))
+	libStore, err := library.OpenStore(stateDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.Info("library store opened", "path", libStore.Path(), "volumes", len(libStore.List()))
 
@@ -334,5 +384,7 @@ func newService(log *slog.Logger) (*service.Service, error) {
 		Library:      lib,
 		LibraryStore: libStore,
 		DownloadDir:  filepath.Join(dir, "downloads"),
-	}), nil
+
+		PreviousSessionCrashed: previousCrashed,
+	}), session, nil
 }
