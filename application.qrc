@@ -10,6 +10,7 @@
         <file>ui/Main.qml</file>
         <file>ui/Messages.js</file>
         <file>ui/Style.js</file>
+        <file>ui/Paging.js</file>
         <file>ui/SourceList.qml</file>
         <file>ui/AddSource.qml</file>
         <file>ui/SeriesGrid.qml</file>
@@ -17,5 +18,6 @@
         <file>ui/ReaderHandoff.qml</file>
         <file>ui/Settings.qml</file>
         <file>ui/Keyboard.qml</file>
+        <file>ui/PagerBar.qml</file>
     </qresource>
 </RCC>
