@@ -325,6 +325,56 @@ behaviour changed.
   it requires an xochitl restart to take effect, so it is a **first-run setup
   step**, not something to toggle per download.
 
+### ✅ Q1c ANSWERED — the upload folder is sticky global server state
+
+Measured 2026-09-15 with `POST /upload` from an on-device Go binary, each
+request on a **brand new TCP connection** (`DisableKeepAlives`), and in one case
+from a **different process** than the `GET`:
+
+| what was done | where the document landed |
+|---|---|
+| `GET /documents/<Comics>` on conn A, `POST /upload` on conn B | **Comics** |
+| `POST /upload` alone, no `GET` at all, new process | **Comics** — still |
+| `GET /documents/` (root), then `POST /upload` | **root** |
+
+So the answer to "does the last-listed folder persist across connections" is
+**yes, and then some**. It is not per-connection and not per-client: it is one
+mutable variable inside xochitl that any client can move, and it survives until
+somebody moves it again. `GET /documents/` resets it to the root.
+
+Consequences, both implemented in `backend/library`:
+
+- **`GET /documents/<guid>` immediately before every `POST /upload`.** Not once
+  per batch — the user's own browser on the USB web interface is another client
+  and can retarget it between two of our uploads.
+- **Serialise.** Every operation that touches the interface goes through one
+  mutex, and the upload's result is verified by reading the folder back rather
+  than assumed.
+
+### ❌ There is no folder-create route
+
+The whole HTTP surface is three routes. `strings` on `/usr/bin/xochitl` yields
+exactly `/documents/`, `/download/` and `/upload`, and the shipped web app
+(`/assets/index.js`) references only those. `POST`, `PUT`, `PATCH` and `MKCOL`
+on `/documents/` all answer `200` with the listing — the handler ignores the
+method.
+
+Confirmed the other way too: a `CollectionType` record written directly to
+`/home/root/.local/share/remarkable/xochitl/` with a valid random UUID **never
+appears** in `GET /documents/`, with or without a `touch` on the directory.
+That is the §5 "xochitl does not watch its document directory" finding again.
+
+So `Comics/<series>` cannot be created while xochitl is running. Quire resolves
+as far down the path as it can and uploads into the deepest folder that exists,
+reporting the missing one to the user in words.
+
+### The uploaded filename becomes `visibleName`, `.pdf` and all
+
+`POST /upload`'s multipart `filename=` is used verbatim, except that xochitl
+**appends `.pdf` when it is missing** — `quire-m5-test-noext` became
+`quire-m5-test-noext.pdf`. Spaces, dots and parentheses all survive. There is no
+way to get a name without the extension through this endpoint.
+
 ### `VissibleName` — both spellings, in different places
 
 The **web API** listing returns *both* `VisibleName` and `VissibleName` (sic).
@@ -355,8 +405,29 @@ From the spike upload, `aab1cdbf-5f71-4ab2-8da0-91d6603b721e`.
 
 - `createdTime` / `lastModified` / `lastOpened` are **strings** of epoch millis.
   `lastOpenedPage` is a bare int. Do not "tidy" these types.
-- `parent`: `""` = root. Otherwise the **UUID of a `CollectionType`**.
+- `parent`: `""` = root. Otherwise the **UUID of a `CollectionType`** — *or* one
+  of two literal strings. See the correction below.
 - `type`: `DocumentType` | `CollectionType`.
+
+#### Correction — `parent` also takes the literal strings `root` and `trash`
+
+Found while listing every folder on the device (2026-09-15). Records that came
+down from the cloud are written as **single-line JSON** and use different root
+and trash markers than the pretty-printed ones xochitl writes locally:
+
+```json
+{"visibleName":"Comics","type":"CollectionType","parent":"root","createdTime":"1774903705599", ... ,"synced":true,"deleted":false}
+```
+
+- `"parent": "root"` — top level. Same meaning as `""`.
+- `"parent": "trash"` — in the bin.
+- Synced records also carry `version`, `synced`, `modified`, `deleted` and
+  `metadatamodified`, which locally-created ones do not.
+
+**The web API normalises all of this away**: `GET /documents/` reports that same
+folder with `"Parent": ""`, and does not list trashed items at all. So anything
+reading the web API can treat `""` as the only root value; anything reading
+`.metadata` off disk cannot.
 
 ### A real folder (`CollectionType`)
 
