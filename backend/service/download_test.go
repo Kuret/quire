@@ -262,7 +262,8 @@ func TestDownloadEndsWithAStoredDocumentUUID(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
 
 	done := waitForPhase(t, rec, "done")
 
@@ -322,21 +323,48 @@ func TestDownloadEndsWithAStoredDocumentUUID(t *testing.T) {
 	}
 }
 
-// The series folder does not exist, so the volume goes in the nearest folder
-// that does — and the user is told where to make the one that is missing,
-// because xochitl's web interface cannot make it for them.
-func TestDownloadReportsAMissingSeriesFolder(t *testing.T) {
+// A per-series subfolder is optional by design (PLAN §6 M5): the library is
+// flat, so its absence is not worth a word to the user.
+func TestAMissingSeriesFolderIsNotWorthMentioning(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
 	addSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
 
 	done := waitForPhase(t, rec, "done")
+	if note, _ := done["note"].(string); note != "" {
+		t.Errorf("note %q; a flat library has nothing to complain about", note)
+	}
+	if message, _ := done["message"].(string); !strings.Contains(message, "Comics") {
+		t.Errorf("done message %q does not say where the volume went", message)
+	}
+}
+
+// No Comics folder is the one-time setup step. The volume still lands — the
+// bytes are already fetched — and the user is told how to fix it for next time.
+func TestDownloadWithoutComicsStillLandsAndSaysSo(t *testing.T) {
+	svc, store, _, fake, rec := newDownloadService(t)
+	addSource(t, store)
+
+	fake.mu.Lock()
+	fake.entries = nil
+	fake.mu.Unlock()
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+
+	done := waitForPhase(t, rec, "done")
+	if uuid, _ := done["documentUuid"].(string); uuid == "" {
+		t.Fatal("the download was refused for want of a folder")
+	}
 	note, _ := done["note"].(string)
-	if !strings.Contains(note, "Comics") {
-		t.Errorf("note %q does not tell the user where to make the folder", note)
+	if note != library.ComicsRemedy {
+		t.Errorf("note %q, want the one-time setup instruction", note)
 	}
 }
 
@@ -348,7 +376,8 @@ func TestDownloadStreamsProgress(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
 	waitForPhase(t, rec, "done")
 
 	seen := map[string]bool{}
@@ -395,5 +424,79 @@ func TestDownloadNeedsAllThreeIdentifiers(t *testing.T) {
 	}
 	if e.Code != "bad_request" {
 		t.Errorf("code %q", e.Code)
+	}
+}
+
+// A tap on Download does not start a multi-chapter download. PLAN §6 M3 wants
+// the UI to say what it is doing, and queueing ten chapters and a few hundred
+// megabytes silently is not that.
+func TestFirstTapAsksBeforeDownloadingAVolume(t *testing.T) {
+	svc, store, _, fake, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+
+	ask := waitForPhase(t, rec, "confirm")
+
+	count, _ := ask["chapterCount"].(float64)
+	if count < 2 {
+		t.Fatalf("chapterCount %v, want the whole volume", ask["chapterCount"])
+	}
+	message, _ := ask["message"].(string)
+	for _, want := range []string{"chapters", "Download all"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("question %q does not mention %q", message, want)
+		}
+	}
+	if ask["firstChapter"] == "" || ask["lastChapter"] == "" {
+		t.Errorf("the question does not say which chapters: %+v", ask)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.uploaded) != 0 {
+		t.Errorf("%d uploads happened before the user confirmed", len(fake.uploaded))
+	}
+}
+
+// Confirming is one step, not a wizard: the same message with confirmed:true
+// runs the download.
+func TestConfirmingRunsTheDownload(t *testing.T) {
+	svc, store, _, _, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+	waitForPhase(t, rec, "confirm")
+
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	waitForPhase(t, rec, "done")
+}
+
+// The volume is named for the flat library it lands in: Comics holds every
+// series side by side, so the series has to be in the document name.
+func TestTheDocumentIsNamedSeriesAndVolume(t *testing.T) {
+	svc, store, _, fake, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	waitForPhase(t, rec, "done")
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.names) != 1 {
+		t.Fatalf("names %v", fake.names)
+	}
+	name := fake.names[0]
+	if !strings.Contains(name, "Lantern Keeper") || !strings.Contains(name, "Vol ") {
+		t.Errorf("document name %q, want \"<Series> — Vol N.pdf\"", name)
 	}
 }

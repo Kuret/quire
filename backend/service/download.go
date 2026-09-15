@@ -25,6 +25,7 @@ import (
 // a Message that is already the sentence to show: PLAN §2 keeps the wording
 // here.
 const (
+	phaseConfirm    = "confirm"
 	phaseQueued     = "queued"
 	phasePreparing  = "preparing"
 	phaseFetching   = "fetching"
@@ -44,6 +45,12 @@ type downloadRequest struct {
 	SourceID string `json:"sourceId"`
 	SeriesID string `json:"seriesId"`
 	VolumeID string `json:"volumeId"`
+
+	// Confirmed is set on the second send, after the user has been told what
+	// the volume covers. A tap that quietly queues ten chapters and a few
+	// hundred megabytes is not the UI saying what it is doing (PLAN §6 M3), so
+	// the first send answers with a question instead of starting work.
+	Confirmed bool `json:"confirmed"`
 }
 
 // downloadProgress is the MessageDownloadProgress payload.
@@ -72,6 +79,13 @@ type downloadProgress struct {
 	// Note carries something the user should know but that did not stop the
 	// download — a missing library folder, most of all.
 	Note string `json:"note,omitempty"`
+
+	// ChapterCount, FirstChapter and LastChapter describe what a volume covers.
+	// They are sent with the confirm phase so the UI can show the shape of the
+	// job without parsing Message.
+	ChapterCount int    `json:"chapterCount,omitempty"`
+	FirstChapter string `json:"firstChapter,omitempty"`
+	LastChapter  string `json:"lastChapter,omitempty"`
 }
 
 // downloadJob is one queued request and the connection that asked for it.
@@ -113,6 +127,69 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 		return s.sendError(out, "busy",
 			"Quire is already busy with as many downloads as it will queue. Try again when one has finished.")
 	}
+}
+
+// askToConfirm answers the first tap with what the volume actually is.
+//
+// A single-chapter volume is enqueued without asking: there is nothing to
+// warn about, and a confirm step that always says "download this one chapter?"
+// is a step the user learns to tap through without reading.
+func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequest) {
+	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
+
+	th, src, err := s.themeFor(req.SourceID)
+	if err != nil {
+		_ = s.sendError(out, "not_found", plain(err))
+		return
+	}
+	series, err := th.Series(ctx, src, req.SeriesID)
+	if err != nil {
+		_ = s.sendError(out, "series_failed", plain(err))
+		return
+	}
+	chapters, err := th.Chapters(ctx, src, req.SeriesID)
+	if err != nil {
+		_ = s.sendError(out, "chapters_failed", plain(err))
+		return
+	}
+	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID)
+	if !ok {
+		_ = s.sendError(out, "not_found",
+			fmt.Sprintf("That chapter is no longer in %s's chapter list.", series.Title))
+		return
+	}
+
+	if len(vol.Chapters) <= 1 {
+		req.Confirmed = true
+		if err := s.enqueueDownload(ctx, out, req); err != nil {
+			s.log.Warn("could not enqueue a single-chapter volume", "err", err)
+		}
+		return
+	}
+
+	first := chapterLabel(vol.Chapters[0])
+	last := chapterLabel(vol.Chapters[len(vol.Chapters)-1])
+
+	p.Phase = phaseConfirm
+	p.Series, p.Title = vol.Series, vol.Title
+	p.ChapterCount = len(vol.Chapters)
+	p.FirstChapter, p.LastChapter = first, last
+	p.Message = fmt.Sprintf(
+		"Volume %s of %s is %d chapters, %s to %s. Quire downloads a whole volume at a time, "+
+			"so your place in the reader carries across chapters. Download all %d?",
+		vol.Label, vol.Series, len(vol.Chapters), first, last, len(vol.Chapters))
+	_ = send(out, appload.MessageDownloadProgress, p)
+}
+
+// chapterLabel is how a chapter is named in a sentence to the user.
+func chapterLabel(c assemble.Chapter) string {
+	if t := strings.TrimSpace(c.Title); t != "" {
+		return t
+	}
+	if n := strings.TrimSpace(c.Number); n != "" {
+		return "chapter " + n
+	}
+	return c.ID
 }
 
 // downloadQueueDepth is how many requests wait behind the one running. It is
