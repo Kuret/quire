@@ -729,6 +729,16 @@ with the pen → persists and syncs. Quire stores no page number anywhere.
 
 - State store: single-file, crash-safe (BoltDB, or JSON with atomic rename).
   Schema-versioned with forward migrations from day one.
+  **Migration #1 is already identified — use it as the worked example.** Sources
+  stored before the §7.2 `AllowedHosts` change have an empty `allowedHosts`, so a
+  MangaDex source added earlier would pass search/series/chapters and then fail
+  at download with an SSRF refusal. Seed from the theme's declaration on load.
+  **Do not implement this as "seed whenever the list is empty"** — that silently
+  undoes a user who deliberately cleared it. A versioned migration that runs once
+  is the distinction, which is precisely why the store is versioned from day one.
+  *(No released version exists yet, so nothing in the wild is affected; this is a
+  free chance to exercise the migration path with a real case rather than a
+  synthetic one.)*
 - Handle: user deletes the document in xochitl (dangling UUID — detect, offer
   re-download); theme implementation changes; site layout changes mid-series;
   wifi drops mid-download; device sleeps mid-download.
