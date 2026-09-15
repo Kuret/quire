@@ -405,16 +405,40 @@ install, restart xochitl and look for:
 
 That line is emitted when the manifest parses. Confirmed on 2026-09-15.
 
-### Wire protocol — PLAN §7.1 is wrong about the header type
+### The socket is SOCK_SEQPACKET, not SOCK_STREAM
+
+`rm-appload/src/management.cpp:137`:
+
+```c
+int sockFD = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+```
+
+Go's `"unix"` network is SOCK_STREAM, so connecting to it fails and the backend
+dies before doing anything:
+
+```
+quired ... level=ERROR msg="connect failed"
+  err="dial unix /tmp/quire.sock: connect: protocol wrong type for socket"
+[AppLoad]: Process for "quire" finished with exit code 1
+```
+
+**Use `net.Dial("unixpacket", path)`** — that is Go's SOCK_SEQPACKET.
+
+**macOS has no AF_UNIX SOCK_SEQPACKET** (`socket: protocol not supported`), so
+a test that binds a real one must skip on darwin and be run on the device or in
+Linux CI. `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c`, copy the binary
+over, run it in `/tmp` — works, and is how the framing below was verified.
+
+### Wire protocol — PLAN §7.1 is wrong in two ways
 
 ```c
 struct PacketHeader { int type; int messageLength; };
 #define MAX_MESSAGE_LENGTH 10485760   /* 10 MiB */
 ```
 
-**Two native-endian *signed* int32s**, not the u32s PLAN §6 M1 / §7.1 describe.
-Negative `type` values are reserved for system messages, so reading the type as
-unsigned misreads every one of them:
+**1. The header is two native-endian *signed* int32s**, not the u32s PLAN §6 M1
+/ §7.1 describe. Negative `type` values are reserved for system messages, so
+reading the type as unsigned misreads every one of them:
 
 | type | meaning |
 |---|---|
@@ -423,9 +447,46 @@ unsigned misreads every one of them:
 | -3 | `MESSAGE_SYSTEM_LOST_COORDINATOR` — the frontend detached |
 
 `messageLength` is signed too: a negative length is a protocol error, not a
-huge unsigned value. Validate the length against the 10 MiB cap **before**
-allocating — a garbled length otherwise OOMs the device. See
-`backend/appload/conn.go`.
+huge unsigned value. The host compares it against the cap *signed* and never
+checks for negatives, so do that check yourself. Validate the length **before**
+allocating — a garbled length otherwise OOMs the device.
+
+**2. It is not a byte stream, so "length-prefixed framing" is the wrong mental
+model.** Each `read()`/`send()` moves exactly one packet, and a read into a
+too-small buffer silently discards the rest of that packet. AppLoad's receive
+loop (`_listeningThread`, ~line 185) does:
+
+```c
+int status = read(clientFD, &header, sizeof(header));   /* packet 1 */
+if(status < 1) break;                                   /* 0 bytes kills the connection */
+if(header.messageLength > 0)
+    status = read(clientFD, inboundBuffer, header.messageLength);  /* packet 2 */
+```
+
+So, when sending to the host:
+
+- **Header and payload must be two separate packets.** One combined write is
+  one packet, and the host's first `read()` would copy only 8 bytes of it and
+  throw the payload away.
+- **An empty payload must send the header packet only.** The host skips its
+  second `read()` when `messageLength == 0`, so a stray zero-length packet
+  would be consumed as the *next* message's header, return 0 bytes, trip
+  `status < 1` and tear the connection down.
+
+The host's own send path (`sendMessageTo`, ~line 37) is **asymmetric** to that
+— it `send()`s the payload unconditionally, even when empty. Every current call
+site happens to pass a non-empty string, but a receiver should tolerate a stray
+empty packet rather than treat it as a short header. Quire skips them; see
+`recvHeader` in `backend/appload/conn.go`.
+
+There is no such thing as a partial packet, so stream-style `io.ReadFull`
+reassembly is wrong here: a header packet that is not exactly 8 bytes, or a
+payload packet shorter than its header announced, is a framing error, not
+something to loop for more data on.
+
+A datagram is additionally bounded by `SO_SNDBUF`, well under the 10 MiB cap: a
+4 MiB payload fails with `EMSGSIZE` on this device, 64 KiB round-trips fine.
+PLAN §7.1 already forbids bulk transfers over this socket; this is why.
 
 ### QML side
 
@@ -439,15 +500,27 @@ outlives the frontend.
 ### Verified end to end on device
 
 `quired` cross-compiled for `linux/arm64` (CGO off, static), started with a
-unix socket path as argv[1], answered `Ping`(1) with `Pong`(2):
+SOCK_SEQPACKET socket path as argv[1] by a harness impersonating the host,
+answered `Ping`(1) with `Pong`(2):
 
 ```
-{"ok":true,"version":"6b3aa69","goVersion":"go1.25.14","arch":"arm64",
- "os":"linux","pid":9998,"uptimeSeconds":1703.6,"uptime":"28m 24s", ...}
+{"ok":true,"version":"31f4282","goVersion":"go1.25.14","arch":"arm64",
+ "os":"linux","pid":15748,"uptimeSeconds":2581.24,"uptime":"43m 01s", ...}
 ```
 
-matching `/proc/uptime` (`1703.61 6468.05`) at the same instant, and exited
+matching `/proc/uptime` (`2581.25 9818.85`) at the same instant, and exited
 cleanly on `MESSAGE_SYSTEM_TERMINATE`.
+
+The frontend half is confirmed by the host's own log when the app is launched:
+
+```
+[AppLoad]: Loading "qrc:/ILCPSKLRYV/ui/Main.qml"
+```
+
+— so `resources.rcc` at format-version 3 registers and deserialises under Qt
+6.8.2, and the manifest's `entry` path resolves. AppLoad mounts the resource
+tree under a **random per-launch prefix**, so never hard-code `qrc:/ui/...` in
+QML; use relative paths.
 
 ---
 
