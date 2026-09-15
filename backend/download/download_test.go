@@ -554,6 +554,7 @@ func TestNewAppliesMemoryLimit(t *testing.T) {
 	t.Cleanup(func() { debug.SetMemoryLimit(restore) })
 	t.Setenv("GOMEMLIMIT", "")
 	debug.SetMemoryLimit(math.MaxInt64)
+	download.ResetMemoryLimitOnce()
 
 	download.New(&stubFetcher{}, download.Options{})
 	if got := debug.SetMemoryLimit(-1); got > download.RecommendedMemoryLimit {
