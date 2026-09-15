@@ -94,6 +94,28 @@ type Service struct {
 	// reprobes rate-limits the automatic re-probe; see maybeReprobe.
 	reprobes reprobeState
 
+	// watchMu guards PLAN §12.2's watched-series check: the single run in
+	// flight, its cancel, and the one chapter list last served to the UI (which
+	// is what a fresh watch is seeded from). See watch.go.
+	watchMu       sync.Mutex
+	watchRunning  bool
+	watchCancel   context.CancelFunc
+	lastDetailKey watchKey
+	lastDetailIDs []string
+
+	// pager caches the listing the frontend is paging through, so that a page
+	// turn is not an HTTP request (PLAN §12.1). See paging.go.
+	pagerMu  sync.Mutex
+	pagerKey pagerKey
+	pager    *seriesPager
+
+	// coverMu guards the cover batch in flight. The frontend sends the set of
+	// tiles now on screen; the previous set is cancelled, because a page turn
+	// makes those requests work nobody will see (PLAN §12.1).
+	coverMu     sync.Mutex
+	coverBatch  context.Context
+	coverCancel context.CancelFunc
+
 	// dlQueue serialises downloads; see enqueueDownload for why there is
 	// exactly one worker behind it.
 	dlOnce  sync.Once
@@ -215,6 +237,14 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 				s.log.Warn("could not drop cached covers", "source", req.SourceID, "err", err)
 			}
 		}
+		// The cached listing belonged to a source that no longer exists.
+		s.dropPagers()
+		// The store drops this source's watched series with it (PLAN §12.2),
+		// so the list on screen has to be told, or it keeps drawing rows for a
+		// source that is gone.
+		if err := s.sendWatchList(out); err != nil {
+			return true, err
+		}
 		return true, s.sendSources(out)
 
 	case appload.MessageSearch:
@@ -222,17 +252,19 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			SourceID string `json:"sourceId"`
 			Query    string `json:"query"`
 			Page     int    `json:"page"`
+			PageSize int    `json:"pageSize"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		go s.runSearch(ctx, out, req.SourceID, req.Query, req.Page)
+		go s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize)
 		return true, nil
 
 	case appload.MessageBrowse:
 		var req struct {
 			SourceID string `json:"sourceId"`
 			Page     int    `json:"page"`
+			PageSize int    `json:"pageSize"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
@@ -240,7 +272,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		// Browse is search with no query: on every theme we have, that is the
 		// site's own recent/popular listing, which is also what PLAN §7.5 stage
 		// 5 falls back to.
-		go s.runSearch(ctx, out, req.SourceID, "", req.Page)
+		go s.runSearch(ctx, out, req.SourceID, "", req.Page, req.PageSize)
 		return true, nil
 
 	case appload.MessageSeriesDetail:
@@ -255,15 +287,28 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		return true, nil
 
 	case appload.MessageRequestCover:
+		// The payload is the set of tiles *now on screen*. A single
+		// {seriesId,url} is still accepted and means a set of one.
 		var req struct {
 			SourceID string `json:"sourceId"`
 			SeriesID string `json:"seriesId"`
 			URL      string `json:"url"`
+			Covers   []struct {
+				SeriesID string `json:"seriesId"`
+				URL      string `json:"url"`
+			} `json:"covers"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		go s.runCover(ctx, out, req.SourceID, req.SeriesID, req.URL)
+		want := make([]coverWant, 0, len(req.Covers)+1)
+		for _, c := range req.Covers {
+			want = append(want, coverWant{SeriesID: c.SeriesID, URL: c.URL})
+		}
+		if len(want) == 0 && req.SeriesID != "" {
+			want = append(want, coverWant{SeriesID: req.SeriesID, URL: req.URL})
+		}
+		s.runCoverBatch(ctx, out, req.SourceID, want)
 		return true, nil
 
 	case appload.MessageOpenInReader:
@@ -303,6 +348,46 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		return true, s.enqueueDownload(ctx, out, req)
+
+	case appload.MessageWatchSeries:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+			Title    string `json:"title"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.watchSeries(out, req.SourceID, req.SeriesID, req.Title)
+
+	case appload.MessageUnwatchSeries:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.unwatchSeries(out, req.SourceID, req.SeriesID)
+
+	case appload.MessageCheckWatched:
+		// "Check now", so the per-source cooldown is overridden. An empty
+		// payload means all of them; naming a series checks that one.
+		var req struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+		}
+		if len(payload) > 0 {
+			if err := decode(payload, &req); err != nil {
+				return true, s.sendError(out, "bad_request", err.Error())
+			}
+		}
+		var only *watchKey
+		if req.SourceID != "" && req.SeriesID != "" {
+			only = &watchKey{SourceID: req.SourceID, SeriesID: req.SeriesID}
+		}
+		s.startWatchCheck(out, true, only)
+		return true, nil
 	}
 	return false, nil
 }
@@ -553,7 +638,13 @@ func (s *Service) themeFor(sourceID string) (theme.Theme, *theme.Source, error) 
 	return th, src, nil
 }
 
-func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query string, page int) {
+// defaultPageSize is used only when the frontend did not say how many tiles fit
+// its viewport — an older frontend, or a test. PLAN §12.1 forbids hardcoding a
+// page size in the UI precisely because the real one comes from the geometry;
+// this is a fallback, not the rule.
+const defaultPageSize = 9
+
+func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query string, page, pageSize int) {
 	th, src, err := s.themeFor(sourceID)
 	if err != nil {
 		_ = s.sendError(out, "not_found", err.Error())
@@ -562,26 +653,48 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 	if page < 1 {
 		page = 1
 	}
-	stubs, err := th.Search(ctx, src, query, page)
-	if err != nil {
+	if pageSize < 1 {
+		pageSize = defaultPageSize
+	}
+
+	// The display page the frontend asked for is served out of the cache; the
+	// pager reaches for the network only when the cache runs short (PLAN §12.1
+	// — one tap must not equal one HTTP request).
+	pager := s.pagerFor(pagerKey{sourceID: sourceID, query: query})
+	res, err := pager.Page(ctx, page, pageSize, func(ctx context.Context, sourcePage int) ([]theme.SeriesStub, error) {
+		return th.Search(ctx, src, query, sourcePage)
+	})
+	if err != nil && len(res.Items) == 0 {
 		_ = s.sendError(out, "search_failed", plain(err))
 		return
 	}
-	rows := make([]seriesRow, 0, len(stubs))
-	for _, st := range stubs {
+	if err != nil {
+		// There is a screenful to show and a reason the next one is missing.
+		// Both are true, so say both rather than picking one.
+		s.log.Warn("could not extend the listing", "source", sourceID, "err", err)
+		_ = s.sendError(out, "search_failed", plain(err))
+	}
+
+	rows := make([]seriesRow, 0, len(res.Items))
+	for _, st := range res.Items {
 		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL})
 	}
 	// An *empty listing* is evidence the site changed; an empty search is not.
 	// See maybeReprobe for why that distinction is the whole trigger.
-	if len(rows) == 0 && strings.TrimSpace(query) == "" && page == 1 {
+	if len(rows) == 0 && err == nil && strings.TrimSpace(query) == "" && page == 1 {
 		go s.maybeReprobe(ctx, out, src, reasonEmptyListing)
 	}
 
 	_ = send(out, appload.MessageSearchResults, map[string]any{
 		"sourceId": sourceID,
 		"query":    query,
-		"page":     page,
-		"series":   rows,
+		"page":     res.Page,
+		"pageSize": pageSize,
+		// 0 means "the source has not said how much there is". The frontend
+		// shows "Page 3" rather than inventing a denominator.
+		"totalPages": res.TotalPages,
+		"hasMore":    res.HasMore,
+		"series":     rows,
 	})
 }
 
@@ -643,28 +756,19 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		"series":   series,
 		"chapters": rows,
 	})
-}
 
-func (s *Service) runCover(ctx context.Context, out Sender, sourceID, seriesID, url string) {
-	if s.covers == nil {
-		return
+	// PLAN §12.2. Serving the chapter list is the one moment Quire can honestly
+	// say the user has looked at the series, so it is where "new" is cleared —
+	// and where a watch made a moment later gets its baseline from, rather than
+	// announcing the back catalogue.
+	if len(chapters) > 0 {
+		ids := make([]string, 0, len(chapters))
+		for _, c := range chapters {
+			ids = append(ids, c.ID)
+		}
+		s.rememberServedChapters(sourceID, seriesID, ids)
+		s.seriesSeen(out, sourceID, seriesID, ids)
 	}
-	src, ok := s.store.Get(sourceID)
-	if !ok {
-		return
-	}
-	path, err := s.covers.Path(ctx, src, url)
-	if err != nil {
-		// A missing cover is a blank tile, not an error dialogue: the grid is
-		// still usable and the titles are still readable.
-		s.log.Debug("cover unavailable", "source", sourceID, "series", seriesID, "err", err)
-		return
-	}
-	_ = send(out, appload.MessageCoverReady, map[string]any{
-		"sourceId": sourceID,
-		"seriesId": seriesID,
-		"path":     path,
-	})
 }
 
 // --- plumbing --------------------------------------------------------------

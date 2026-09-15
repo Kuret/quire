@@ -108,6 +108,14 @@ func routes() map[string]themetest.Route {
 		"GET /manga/the-lantern-keeper/":                {File: "series.html"},
 		"POST /manga/the-lantern-keeper/ajax/chapters/": {File: "chapters-ajax.html"},
 		"GET /manga/the-lantern-keeper/chapter-4/":      {File: "reader.html"},
+
+		// Source page 2 of each listing, empty. PLAN §12.1's pager reads one item
+		// past the display page so that "Next" is never offered into nothing,
+		// which means the fake site has to be able to say "no more". A site that
+		// simply stops answering is a different case; reprobe_test.go has it.
+		"GET /page/2/?post_type=wp-manga&s=a":       {Body: emptyListing},
+		"GET /page/2/?post_type=wp-manga&s=":        {Body: emptyListing},
+		"GET /page/2/?post_type=wp-manga&s=lantern": {Body: emptyListing},
 	}
 }
 
