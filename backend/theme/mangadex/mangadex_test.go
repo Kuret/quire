@@ -210,7 +210,8 @@ func TestChapters(t *testing.T) {
 	want := []theme.Chapter{
 		{
 			ID:        "/chapter/" + chapterUUID,
-			Title:     "Vol. 1 Chapter 1: The Long Walk",
+			Title:     "Chapter 1: The Long Walk",
+			Volume:    "1",
 			Number:    1,
 			Published: time.Date(2026, 1, 4, 9, 30, 0, 0, time.UTC),
 			Scanlator: "Tower Survey Scans",
@@ -226,7 +227,8 @@ func TestChapters(t *testing.T) {
 			// A oneshot: theme.Chapter documents Number as -1 when the title
 			// carries none.
 			ID:        "/chapter/aaaaaaaa-3333-4333-8333-333333333333",
-			Title:     "Vol. 2 Oneshot: The Surveyor's Notebook",
+			Title:     "Oneshot: The Surveyor's Notebook",
+			Volume:    "2",
 			Number:    -1,
 			Published: time.Date(2026, 4, 2, 7, 15, 0, 0, time.UTC),
 			Scanlator: "Ninth Ward Translations",
@@ -643,6 +645,57 @@ func TestAllowedHostsDeclaresThePageImageCDN(t *testing.T) {
 		if strings.Contains(h, "mangadex.org") {
 			t.Errorf("%q is already inside the source's own registrable domain; "+
 				"declaring it implies a widening that is not happening", h)
+		}
+	}
+}
+
+// PLAN §7.2, 2026-09-15: Chapters returns ascending reading order.
+//
+// Asserted rather than assumed. The theme asks for order[chapter]=asc and
+// MangaDex honours it, so testing against the ordinary fixtures would prove
+// only that the server sorted — not that the theme would notice if it stopped.
+// feed-descending.json is the same endpoint answering newest-first, which is a
+// documented, supported ordering of it.
+func TestChaptersAreAscendingEvenWhenTheServerIsNot(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		feedKey(0): {File: "feed-descending.json"},
+	})
+	th := mangadex.NewWithClock(f, clock)
+
+	got, err := th.Chapters(context.Background(), site(), "/manga/"+mangaUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Titles, so a failure reads as reading order rather than as UUIDs.
+	var titles []string
+	for _, c := range got {
+		titles = append(titles, c.Title)
+	}
+	want := []string{
+		"Chapter 1: The First Step",
+		// The unnumbered extra keeps the neighbours the site gave it rather
+		// than being flung to one end by a sort.
+		"Oneshot: Omake",
+		"Chapter 3: The Third Ascent",
+		"Chapter 3.5: Interlude",
+		"Chapter 4: The Last Landing",
+	}
+	if strings.Join(titles, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("reading order:\n got %v\nwant %v", titles, want)
+	}
+	if !theme.OrderIsKnown(got) {
+		t.Error("the order was established but reported as unknown")
+	}
+
+	// The volume label survives onto the field, which is what PLAN §6 M4
+	// groups on. It is no longer buried in the display title.
+	if got[0].Volume != "1" || got[len(got)-1].Volume != "2" {
+		t.Errorf("volumes = %q..%q, want 1..2", got[0].Volume, got[len(got)-1].Volume)
+	}
+	for _, c := range got {
+		if strings.HasPrefix(c.Title, "Vol.") {
+			t.Errorf("title %q still carries the volume; it belongs in Volume", c.Title)
 		}
 	}
 }

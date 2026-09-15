@@ -1,0 +1,119 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "The same feed shape as feed.json, but newest-first. It exists to be",
+    "adversarial: MangaDex honours order[chapter]=asc and the theme asks for",
+    "it, so every other MangaDex fixture here is already in reading order and",
+    "a test over one of them would prove nothing about the PLAN §7.2",
+    "normalisation.",
+    "",
+    "This is not a hypothetical shape. order[chapter]=desc is a documented,",
+    "supported value; the pages of a multi-request feed are concatenated in",
+    "request order and a retry could reorder them; and a chapter with no",
+    "number has no defined position in the server's sort at all. The theme",
+    "normalises rather than trusting the server, and this is what proves it.",
+    "",
+    "Why synthetic: PLAN §1.3 and §1.4.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - strictly descending chapter numbers, 4 down to 1",
+    "  - a decimal (3.5) between 4 and 3, which must land between 3 and 4 and",
+    "    not at either end",
+    "  - an unnumbered chapter sitting between 3 and 1, which must keep those",
+    "    neighbours rather than being flung to one end by a sort",
+    "  - volume labels, which must survive onto theme.Chapter.Volume"
+  ],
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "dddddddd-4444-4444-8444-444444444444",
+      "type": "chapter",
+      "attributes": {
+        "volume": "2",
+        "chapter": "4",
+        "title": "The Last Landing",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-05-01T09:00:00+00:00",
+        "readableAt": "2026-05-01T09:00:00+00:00",
+        "version": 1,
+        "pages": 20
+      },
+      "relationships": []
+    },
+    {
+      "id": "dddddddd-3535-4353-8353-353535353535",
+      "type": "chapter",
+      "attributes": {
+        "volume": "2",
+        "chapter": "3.5",
+        "title": "Interlude",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-04-24T09:00:00+00:00",
+        "readableAt": "2026-04-24T09:00:00+00:00",
+        "version": 1,
+        "pages": 6
+      },
+      "relationships": []
+    },
+    {
+      "id": "dddddddd-3333-4333-8333-333333333333",
+      "type": "chapter",
+      "attributes": {
+        "volume": "1",
+        "chapter": "3",
+        "title": "The Third Ascent",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-04-17T09:00:00+00:00",
+        "readableAt": "2026-04-17T09:00:00+00:00",
+        "version": 1,
+        "pages": 18
+      },
+      "relationships": []
+    },
+    {
+      "id": "dddddddd-0000-4000-8000-000000000000",
+      "type": "chapter",
+      "attributes": {
+        "volume": "1",
+        "chapter": "",
+        "title": "Omake",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-04-10T09:00:00+00:00",
+        "readableAt": "2026-04-10T09:00:00+00:00",
+        "version": 1,
+        "pages": 4
+      },
+      "relationships": []
+    },
+    {
+      "id": "dddddddd-1111-4111-8111-111111111111",
+      "type": "chapter",
+      "attributes": {
+        "volume": "1",
+        "chapter": "1",
+        "title": "The First Step",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-04-03T09:00:00+00:00",
+        "readableAt": "2026-04-03T09:00:00+00:00",
+        "version": 1,
+        "pages": 22
+      },
+      "relationships": []
+    }
+  ],
+  "limit": 500,
+  "offset": 0,
+  "total": 5
+}

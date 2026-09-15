@@ -389,6 +389,7 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 			out = append(out, theme.Chapter{
 				ID:        chapterID(e.ID),
 				Title:     chapterTitle(a),
+				Volume:    strings.TrimSpace(a.Volume),
 				Number:    theme.ChapterNumber(a.Chapter),
 				Published: parseTime(a.PublishAt),
 				Scanlator: firstName(e, "scanlation_group"),
@@ -399,7 +400,18 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 			break
 		}
 	}
-	return out, nil
+	// PLAN §7.2: ascending reading order — and normalised here rather than
+	// trusted from the server.
+	//
+	// The request above asks for order[chapter]=asc and MangaDex honours it,
+	// so this is very nearly a no-op. It runs anyway, for three reasons that
+	// are not hypothetical: the pages are concatenated in *request* order and
+	// a retry could reorder them, MangaDex sorts "12.5" between 12 and 13 but
+	// is entitled to change its mind about that, and a chapter with no number
+	// has no defined position in its sort at all. The cost is one pass over a
+	// slice we already own; the failure it prevents is a volume PDF that reads
+	// backwards, which nothing downstream would notice.
+	return theme.SortAndMark(out), nil
 }
 
 // Pages implements theme.Theme.

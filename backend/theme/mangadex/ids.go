@@ -82,19 +82,17 @@ func unmarshal(raw json.RawMessage, out any) error {
 
 // chapterTitle composes the display title.
 //
-// theme.Chapter has no volume field, and MangaDex is the only theme so far
-// that reliably knows the volume, so it goes in the title where the user can
-// see it. The forms, in the order they are tried:
+// The volume is *not* in here any more. theme.Chapter grew a Volume field on
+// 2026-09-15 because PLAN §6 M4 groups chapters into volume PDFs and needs the
+// label as data, not as a string a caller would have to parse back out of a
+// title. MangaDex is the first theme that reliably knows one. The forms:
 //
-//	Vol. 3 Chapter 12: The Long Walk
+//	Chapter 12: The Long Walk
 //	Chapter 12
 //	Oneshot                     (no chapter number at all)
 //	Oneshot: The Long Walk
 func chapterTitle(a chapterAttributes) string {
 	var b strings.Builder
-	if v := strings.TrimSpace(a.Volume); v != "" {
-		fmt.Fprintf(&b, "Vol. %s ", v)
-	}
 	if c := strings.TrimSpace(a.Chapter); c != "" {
 		fmt.Fprintf(&b, "Chapter %s", c)
 	} else {
