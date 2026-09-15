@@ -94,6 +94,70 @@ type Options struct {
 	// MaxBytes is the per-page budget. Exceeding it returns ErrTooLarge.
 	// Zero disables the check.
 	MaxBytes int64
+
+	// Scaler selects the resampling kernel. The zero value is the default,
+	// measured on the device — see the Scaler docs.
+	Scaler Scaler
+
+	// Prescale box-averages the source down to roughly 2× the target before
+	// the kernel runs. It is a large speed win on big sources and is on by
+	// default; set it false to resample in one pass.
+	Prescale bool
+}
+
+// Scaler names a resampling kernel.
+//
+// # Measured on the device, not the host (docs/DEVICE-NOTES.md §10)
+//
+// The device is an i.MX8MM: four Cortex-A53 cores, no NEON help from x/image.
+// Decode + resize + encode of a 2480 × 3508 page to the panel grid, best of
+// several runs, single-threaded:
+//
+//	kernel                     without prescale   with box prescale
+//	CatmullRom                       (see §10)          (see §10)
+//	ApproxBiLinear                   (see §10)          (see §10)
+//
+// CatmullRom with the box prescale is the default: manga is line art, and
+// softening it is the one thing that visibly hurts on a 227 DPI e-ink panel,
+// so the quality kernel is kept for the final step and the cheap pass only
+// removes bulk the kernel would have averaged away anyway.
+type Scaler int
+
+const (
+	// ScalerCatmullRom is a sharp bicubic kernel: the right choice for line
+	// art, and the default.
+	ScalerCatmullRom Scaler = iota
+
+	// ScalerApproxBiLinear is x/image's fast path. Faster, visibly softer on
+	// inked lines and screentone; kept for measurement and for anyone who
+	// needs the speed more than the edges.
+	ScalerApproxBiLinear
+
+	// ScalerBiLinear is the exact bilinear kernel.
+	ScalerBiLinear
+)
+
+func (s Scaler) scaler() xdraw.Scaler {
+	switch s {
+	case ScalerApproxBiLinear:
+		return xdraw.ApproxBiLinear
+	case ScalerBiLinear:
+		return xdraw.BiLinear
+	default:
+		return xdraw.CatmullRom
+	}
+}
+
+// String names the kernel, for logs and benchmark output.
+func (s Scaler) String() string {
+	switch s {
+	case ScalerApproxBiLinear:
+		return "ApproxBiLinear"
+	case ScalerBiLinear:
+		return "BiLinear"
+	default:
+		return "CatmullRom"
+	}
 }
 
 // DefaultMaxPageBytes is the per-page budget. A dense 1620 × 2160 colour page
@@ -102,7 +166,7 @@ type Options struct {
 const DefaultMaxPageBytes = 1 << 20
 
 // DefaultOptions returns the panel-native settings: 1620 × 2160, JPEG q85,
-// white padding, 1% aspect tolerance.
+// white padding, 1% aspect tolerance, CatmullRom behind a box prescale.
 func DefaultOptions() Options {
 	return Options{
 		MaxWidth:        PanelWidth,
@@ -111,6 +175,8 @@ func DefaultOptions() Options {
 		Background:      color.White,
 		AspectTolerance: 0.01,
 		MaxBytes:        DefaultMaxPageBytes,
+		Scaler:          ScalerCatmullRom,
+		Prescale:        true,
 	}
 }
 
@@ -221,6 +287,9 @@ func fit(src image.Image, opts Options) (image.Image, bool) {
 // render draws src scaled into imgRect on a canvas of dstRect, filling the
 // remainder with the background colour.
 func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) image.Image {
+	if opts.Prescale {
+		src = boxPrescale(src, imgRect.Dx(), imgRect.Dy())
+	}
 	var dst stddraw.Image
 	if opts.Grayscale {
 		dst = image.NewGray(dstRect)
@@ -230,10 +299,47 @@ func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) ima
 	if !imgRect.Eq(dstRect) {
 		xdraw.Draw(dst, dstRect, image.NewUniform(opts.Background), image.Point{}, xdraw.Src)
 	}
-	// CatmullRom is the best of x/image/draw's kernels for downscaling line
-	// art; the cost is paid once, at save time.
-	xdraw.CatmullRom.Scale(dst, imgRect, src, src.Bounds(), xdraw.Src, nil)
+	opts.Scaler.scaler().Scale(dst, imgRect, src, src.Bounds(), xdraw.Src, nil)
 	return dst
+}
+
+// boxPrescale averages src down by the largest integer factor that keeps it at
+// or above 2× the final size, and returns the result for the quality kernel to
+// finish. Below a factor of 2 it is a no-op.
+//
+// The point is arithmetic: CatmullRom's cost is proportional to the *source*
+// pixels it reads, so a 4× box pass first removes 15/16 of that work, while a
+// box average over a full factor×factor block loses almost nothing a
+// subsequent resample would have kept. See the kernel comparison on Scaler.
+func boxPrescale(src image.Image, dstW, dstH int) image.Image {
+	b := src.Bounds()
+	factor := min(b.Dx()/(dstW*2), b.Dy()/(dstH*2))
+	if factor < 2 {
+		return src
+	}
+
+	w, h := b.Dx()/factor, b.Dy()/factor
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	n := uint32(factor * factor)
+	for y := range h {
+		for x := range w {
+			var r, g, bl uint32
+			for dy := range factor {
+				for dx := range factor {
+					pr, pg, pb, _ := src.At(b.Min.X+x*factor+dx, b.Min.Y+y*factor+dy).RGBA()
+					r += pr >> 8
+					g += pg >> 8
+					bl += pb >> 8
+				}
+			}
+			i := out.PixOffset(x, y)
+			out.Pix[i+0] = uint8(r / n)
+			out.Pix[i+1] = uint8(g / n)
+			out.Pix[i+2] = uint8(bl / n)
+			out.Pix[i+3] = 0xff
+		}
+	}
+	return out
 }
 
 func scaleDim(w, h int, s float64) (int, int) {

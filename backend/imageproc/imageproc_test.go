@@ -230,6 +230,24 @@ func TestNormaliseRejectsOversizedPage(t *testing.T) {
 	}
 }
 
+// The prescale must not change the output geometry, only the cost of getting
+// there.
+func TestPrescaleKeepsGeometry(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
+	for _, prescale := range []bool{false, true} {
+		opts := imageproc.DefaultOptions()
+		opts.Prescale = prescale
+		opts.MaxBytes = 0 // this test is about geometry, not the byte budget
+		res, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+		if err != nil {
+			t.Fatalf("prescale=%v: %v", prescale, err)
+		}
+		if res.Width != imageproc.PanelWidth || res.Height != imageproc.PanelHeight {
+			t.Errorf("prescale=%v: output %dx%d, want the panel grid", prescale, res.Width, res.Height)
+		}
+	}
+}
+
 func TestNormaliseRejectsGarbage(t *testing.T) {
 	if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader([]byte("not an image")), imageproc.DefaultOptions()); err == nil {
 		t.Fatal("expected a decode error")
