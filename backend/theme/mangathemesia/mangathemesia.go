@@ -96,6 +96,12 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// SuggestedName implements theme.Theme.
+//
+// Empty, for the same reason as madara: a distributed WordPress theme has no
+// name of its own to lend the sites running it.
+func (t *Theme) SuggestedName() string { return "" }
+
 // AllowedHosts implements theme.Theme.
 //
 // Nil, for the same reason as madara: independently hosted WordPress sites

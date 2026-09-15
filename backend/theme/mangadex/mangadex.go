@@ -158,6 +158,13 @@ func (t *Theme) ID() string { return ID }
 // would imply a widening that is not happening.
 const imageCDN = "*.mangadex.network"
 
+// SuggestedName implements theme.Theme.
+//
+// The one theme that can answer this, because it drives exactly one site.
+// Without it a new source is named from the API root's <title> and comes out
+// as "MangaDex API documentation".
+func (t *Theme) SuggestedName() string { return "MangaDex" }
+
 // AllowedHosts implements theme.Theme.
 func (t *Theme) AllowedHosts() []string { return []string{imageCDN} }
 

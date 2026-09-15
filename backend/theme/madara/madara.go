@@ -119,6 +119,14 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// SuggestedName implements theme.Theme.
+//
+// Empty: madara is a plugin running on hundreds of independently branded
+// sites, so there is no name this theme could offer that would be right for
+// more than one of them. Stage 6 falls back to the page title, which for a
+// site family is genuinely the best available answer.
+func (t *Theme) SuggestedName() string { return "" }
+
 // AllowedHosts implements theme.Theme.
 //
 // Nil, and confirmed rather than assumed: this is a family of hundreds of

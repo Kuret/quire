@@ -121,6 +121,12 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// SuggestedName implements theme.Theme.
+//
+// Empty. The escape hatch is pointed at a site nobody has written a theme for,
+// so it knows nothing about that site — least of all what it is called.
+func (t *Theme) SuggestedName() string { return "" }
+
 // AllowedHosts implements theme.Theme.
 //
 // Nil. The generic theme is the escape hatch for a site nobody has written a

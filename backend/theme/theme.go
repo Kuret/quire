@@ -76,6 +76,33 @@ type Theme interface {
 	// CDN in common to name, and guessing at one would widen the boundary for
 	// every site in the family.
 	AllowedHosts() []string
+
+	// SuggestedName is the display name a source of this shape should carry by
+	// default, or "" for "no opinion".
+	//
+	// PLAN §7.5 stage 6 names a new source from the site's <title>, which is
+	// the right default for a family of independent sites and is wrong for a
+	// single one. The first real use of the mangadex theme produced a source
+	// called "MangaDex API documentation" — accurate, since that is what an
+	// API root's title says, and meaningless to anyone who did not type the
+	// URL themselves.
+	//
+	// So: a suggestion wins over the title, and "" falls back to it.
+	//
+	// The three site-family themes return "". madara and mangathemesia each
+	// cover hundreds of independently branded sites and have no shared name to
+	// offer; for them the page title genuinely is the best available answer,
+	// and inventing one would be worse than the title ever is.
+	//
+	// **This is not a hook for title cleaning.** Stripping " — Home",
+	// " | Official Site" or " API documentation" is an unwinnable game that
+	// eventually mangles a site whose real name ends in one of those. A theme
+	// either knows its site's name outright or has no opinion. Everything else
+	// is the user's rename to make.
+	//
+	// It is on the required interface for the same reason AllowedHosts is:
+	// "" is a fine answer, but it should be an answered one.
+	SuggestedName() string
 }
 
 // OverrideValidator is implemented by a theme that has overrides — which, in

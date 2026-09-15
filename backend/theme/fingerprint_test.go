@@ -260,3 +260,35 @@ func TestDeclaredAllowedHosts(t *testing.T) {
 		})
 	}
 }
+
+// PLAN §7.2, 2026-09-15: a theme may suggest the display name a source of its
+// shape should carry, and "" means "no opinion".
+//
+// The split is the whole point. A single site knows its own name; a family of
+// hundreds of independently branded installs does not, and for those the page
+// title genuinely is the best available default. What none of them does is
+// *clean* a title — no theme here strips " — Home" or " API documentation",
+// because that game cannot be won and the loss is a mangled name for a site
+// whose real one ends that way.
+func TestSuggestedNames(t *testing.T) {
+	cases := []struct {
+		th   theme.Theme
+		want string
+		why  string
+	}{
+		{madara.New(nil), "", "hundreds of independently branded WordPress installs"},
+		{mangathemesia.New(nil), "", "likewise; a distributed theme lends no name"},
+		{generic.New(nil), "", "the escape hatch knows nothing about the site it is pointed at"},
+		{mangadex.New(nil), "MangaDex", "one site, which knows what it is called; without this a " +
+			"new source is named from the API root's <title> and reads " +
+			"\"MangaDex API documentation\""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.th.ID(), func(t *testing.T) {
+			if got := tc.th.SuggestedName(); got != tc.want {
+				t.Errorf("SuggestedName() = %q, want %q (%s)", got, tc.want, tc.why)
+			}
+		})
+	}
+}
