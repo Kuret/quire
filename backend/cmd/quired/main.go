@@ -25,6 +25,7 @@ import (
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/fetch"
+	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
@@ -279,11 +280,36 @@ func newService(log *slog.Logger) (*service.Service, error) {
 	}
 	log.Info("state opened", "path", store.Path(), "sources", len(store.List()))
 
+	// The library store holds the document UUIDs, and losing it means losing
+	// the "Read" button for everything already downloaded, so a broken file is
+	// a startup failure rather than something to shrug at.
+	libStore, err := library.OpenStore(filepath.Join(dir, "state"))
+	if err != nil {
+		return nil, err
+	}
+	log.Info("library store opened", "path", libStore.Path(), "volumes", len(libStore.List()))
+
+	lib := library.New(library.Options{Log: log})
+
+	// The loopback alias is added here as well as before every upload. Doing
+	// it at startup means the endpoint is reachable untethered from the first
+	// moment, and doing it again later covers the fact that it does not
+	// survive a reboot (docs/DEVICE-NOTES.md §5).
+	if err := lib.EnsureReachable(context.Background()); err != nil {
+		// Not fatal: browsing, searching and covers all work without the
+		// library, and the download path repeats this check and reports the
+		// same sentence to the user when they ask for something.
+		log.Warn("the reMarkable library is not reachable yet", "err", err)
+	}
+
 	return service.New(service.Options{
-		Store:    store,
-		Registry: reg,
-		Fetcher:  client,
-		Covers:   covers.New(filepath.Join(dir, "covers"), client),
-		Log:      log,
+		Store:        store,
+		Registry:     reg,
+		Fetcher:      client,
+		Covers:       covers.New(filepath.Join(dir, "covers"), client),
+		Log:          log,
+		Library:      lib,
+		LibraryStore: libStore,
+		DownloadDir:  filepath.Join(dir, "downloads"),
 	}), nil
 }
