@@ -10,11 +10,21 @@
 
 import QtQuick 2.5
 import "Style.js" as Style
+import "Paging.js" as Paging
 
 Item {
     id: screen
 
     property alias model: list.model
+
+    // PLAN §12.1: the list turns pages rather than scrolling. The whole list is
+    // already in hand here — the backend sends every configured source in one
+    // message — so choosing the window into it is presentational and stays in
+    // the view. Only the series grid, where the list is fetched lazily, needs
+    // the backend's pager.
+    property int page: 1
+    readonly property int pageSize: Paging.rowsPerPage(viewport.height, Style.rowHeight)
+    readonly property int totalPages: Paging.pageCount(list.count, screen.pageSize)
 
     signal addRequested()
     signal openRequested(string sourceId, string name)
@@ -29,7 +39,14 @@ Item {
     // Which row has its confirm-remove strip open. Removing a source is one tap
     // away from a full library of downloads still being there but nothing to
     // update them from, so it asks first.
+    //
+    // The strip is drawn over the bottom of the list rather than inside the
+    // row: an expanding row would push the rows below it off a page whose size
+    // is fixed, and a half row is exactly what PLAN §12.1 forbids. The name
+    // rides along because the strip is no longer inside the delegate that knows
+    // it.
     property string confirmingId: ""
+    property string confirmingName: ""
 
     // The source being renamed, and the name being typed. Renaming is here
     // rather than on a screen of its own because it is one field: the name is
@@ -41,6 +58,7 @@ Item {
 
     function startRename(sourceId, name) {
         screen.confirmingId = ""
+        screen.confirmingName = ""
         screen.renamingId = sourceId
         screen.renameText = name
     }
@@ -108,165 +126,115 @@ Item {
         }
     }
 
-    ListView {
-        id: list
-        anchors { top: noticeStrip.bottom; left: parent.left; right: parent.right; bottom: addBar.top }
-        clip: true
-        // No flick animation: a kinetic scroll on e-ink is a column of ghosts.
-        boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: 10000
-        maximumFlickVelocity: 1600
+    // The viewport is fixed: it does not change when a row's confirm strip
+    // opens, because that strip is an overlay above the pager rather than an
+    // expansion inside the list. A list that reflows under the finger is the
+    // scrolling problem wearing a different hat (PLAN §12.1).
+    Item {
+        id: viewport
+        anchors {
+            top: noticeStrip.bottom
+            left: parent.left; right: parent.right
+            bottom: pagerBar.top
+        }
 
-        delegate: Item {
-            width: list.width
-            height: Style.rowHeight + (screen.confirmingId === model.sourceId ? Style.buttonHeight : 0)
+        ListView {
+            id: list
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            // Whole rows only. The remainder is blank rather than a half row.
+            height: Paging.rowsPerPage(viewport.height, Style.rowHeight) * Style.rowHeight
+            clip: true
 
-            Item {
-                id: row
-                width: parent.width
+            // Nothing scrolls. contentY is set outright, which is one settled
+            // repaint rather than a stream of partial ones.
+            interactive: false
+            cacheBuffer: 0
+            contentY: Paging.firstIndex(screen.page, screen.pageSize) * Style.rowHeight
+
+            // Removing the last source on the last page would otherwise leave
+            // the user on a page that no longer exists.
+            onCountChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
+
+            delegate: Item {
+                width: list.width
                 height: Style.rowHeight
 
-                Column {
-                    anchors {
-                        left: parent.left; leftMargin: Style.margin
-                        right: toggle.left; rightMargin: Style.gap
-                        verticalCenter: parent.verticalCenter
-                    }
-                    spacing: 4
-
-                    Text {
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: model.name
-                        font.pointSize: Style.bodySize
-                        color: model.enabled ? Style.ink : Style.muted
-                    }
-                    Text {
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: model.status + " · " + model.baseUrl
-                        font.pointSize: Style.smallSize
-                        color: Style.muted
-                    }
-                }
-
-                MouseArea {
-                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: toggle.left }
-                    enabled: model.enabled
-                    onClicked: screen.openRequested(model.sourceId, model.name)
-                    onPressAndHold: screen.confirmingId =
-                        screen.confirmingId === model.sourceId ? "" : model.sourceId
-                }
-
-                // The per-source toggle. A checkbox rather than a switch: a
-                // switch wants an animation to read as one.
                 Item {
-                    id: toggle
-                    anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
-                    width: 120
-                    height: Style.buttonHeight
+                    id: row
+                    width: parent.width
+                    height: Style.rowHeight
 
-                    Rectangle {
-                        anchors.fill: parent
-                        color: toggleArea.pressed ? Style.pressed : Style.paper
-                        border.width: 2
-                        border.color: Style.ink
-                        radius: 6
+                    Column {
+                        anchors {
+                            left: parent.left; leftMargin: Style.margin
+                            right: toggle.left; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
 
                         Text {
-                            anchors.centerIn: parent
-                            text: model.enabled ? "On" : "Off"
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: model.name
+                            font.pointSize: Style.bodySize
+                            color: model.enabled ? Style.ink : Style.muted
+                        }
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: model.status + " · " + model.baseUrl
                             font.pointSize: Style.smallSize
-                            color: Style.ink
+                            color: Style.muted
                         }
                     }
 
                     MouseArea {
-                        id: toggleArea
-                        anchors.fill: parent
-                        onClicked: screen.toggleRequested(model.sourceId, !model.enabled)
-                    }
-                }
-            }
-
-            // The confirm strip, opened by holding a row.
-            Item {
-                anchors { top: row.bottom; left: parent.left; right: parent.right }
-                height: screen.confirmingId === model.sourceId ? Style.buttonHeight : 0
-                visible: height > 0
-
-                Text {
-                    anchors {
-                        left: parent.left; leftMargin: Style.margin
-                        right: renameButton.left; rightMargin: Style.gap
-                        verticalCenter: parent.verticalCenter
-                    }
-                    elide: Text.ElideRight
-                    text: "Remove this source? Downloaded volumes stay in your library."
-                    font.pointSize: Style.smallSize
-                    color: Style.muted
-                }
-
-                Rectangle {
-                    id: renameButton
-                    objectName: "renameButton"
-                    anchors {
-                        right: removeButton.left; rightMargin: Style.gap
-                        verticalCenter: parent.verticalCenter
-                    }
-                    width: 160
-                    height: Style.buttonHeight - Style.gap
-                    color: renameArea.pressed ? Style.pressed : Style.paper
-                    border.width: 2
-                    border.color: Style.ink
-                    radius: 6
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "Rename"
-                        font.pointSize: Style.smallSize
-                        color: Style.ink
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: toggle.left }
+                        enabled: model.enabled
+                        onClicked: screen.openRequested(model.sourceId, model.name)
+                        onPressAndHold: {
+                            var open = screen.confirmingId !== model.sourceId
+                            screen.confirmingId = open ? model.sourceId : ""
+                            screen.confirmingName = open ? model.name : ""
+                        }
                     }
 
-                    MouseArea {
-                        id: renameArea
-                        anchors.fill: parent
-                        onClicked: screen.startRename(model.sourceId, model.name)
-                    }
-                }
+                    // The per-source toggle. A checkbox rather than a switch: a
+                    // switch wants an animation to read as one.
+                    Item {
+                        id: toggle
+                        anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                        width: 120
+                        height: Style.buttonHeight
 
-                Rectangle {
-                    id: removeButton
-                    anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
-                    width: 160
-                    height: Style.buttonHeight - Style.gap
-                    color: removeArea.pressed ? Style.pressed : Style.paper
-                    border.width: 2
-                    border.color: Style.ink
-                    radius: 6
+                        Rectangle {
+                            anchors.fill: parent
+                            color: toggleArea.pressed ? Style.pressed : Style.paper
+                            border.width: 2
+                            border.color: Style.ink
+                            radius: 6
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "Remove"
-                        font.pointSize: Style.smallSize
-                        color: Style.ink
-                    }
+                            Text {
+                                anchors.centerIn: parent
+                                text: model.enabled ? "On" : "Off"
+                                font.pointSize: Style.smallSize
+                                color: Style.ink
+                            }
+                        }
 
-                    MouseArea {
-                        id: removeArea
-                        anchors.fill: parent
-                        onClicked: {
-                            screen.removeRequested(model.sourceId)
-                            screen.confirmingId = ""
+                        MouseArea {
+                            id: toggleArea
+                            anchors.fill: parent
+                            onClicked: screen.toggleRequested(model.sourceId, !model.enabled)
                         }
                     }
                 }
-            }
 
-            Rectangle {
-                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                height: Style.hairline
-                color: Style.rule
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: Style.hairline
+                    color: Style.rule
+                }
             }
         }
     }
@@ -274,7 +242,7 @@ Item {
     // The empty state. PLAN §1.3 is the reason it exists and the reason it is
     // worded as an instruction rather than an apology.
     Column {
-        anchors.centerIn: list
+        anchors.centerIn: viewport
         width: Math.min(parent.width - Style.margin * 2, 700)
         spacing: Style.gap
         visible: list.count === 0
@@ -296,6 +264,110 @@ Item {
             font.pointSize: Style.bodySize
             color: Style.muted
         }
+    }
+
+    // ---- the confirm strip -------------------------------------------------
+    //
+    // Drawn over the foot of the list rather than inside the row it belongs to.
+    // Inside the row it would push the rows below it down and off a page of
+    // fixed size; here nothing reflows, the question always appears in the same
+    // place, and only one is ever open (two open questions is two ways to tap
+    // the wrong answer).
+    Rectangle {
+        id: confirmStrip
+        objectName: "confirmStrip"
+        anchors { left: parent.left; right: parent.right; bottom: pagerBar.top }
+        height: Style.rowHeight
+        color: Style.paper
+        visible: screen.confirmingId.length > 0
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        Text {
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                right: renameButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            elide: Text.ElideRight
+            text: "Remove " + screen.confirmingName +
+                  "? Downloaded volumes stay in your library."
+            font.pointSize: Style.smallSize
+            color: Style.muted
+        }
+
+        Rectangle {
+            id: renameButton
+            objectName: "renameButton"
+            anchors {
+                right: removeButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 160
+            height: Style.buttonHeight - Style.gap
+            color: renameArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Rename"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: renameArea
+                anchors.fill: parent
+                onClicked: screen.startRename(screen.confirmingId, screen.confirmingName)
+            }
+        }
+
+        Rectangle {
+            id: removeButton
+            anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
+            width: 160
+            height: Style.buttonHeight - Style.gap
+            color: removeArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Remove"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: removeArea
+                anchors.fill: parent
+                onClicked: {
+                    screen.removeRequested(screen.confirmingId)
+                    screen.confirmingId = ""
+                    screen.confirmingName = ""
+                }
+            }
+        }
+    }
+
+    // ---- paging ------------------------------------------------------------
+
+    PagerBar {
+        id: pagerBar
+        objectName: "sourcePager"
+        anchors { left: parent.left; right: parent.right; bottom: addBar.top }
+        page: screen.page
+        totalPages: screen.totalPages
+        hasMore: screen.page < screen.totalPages
+        onPreviousRequested: screen.page = Paging.clampPage(screen.page - 1, screen.totalPages)
+        onNextRequested: screen.page = Paging.clampPage(screen.page + 1, screen.totalPages)
     }
 
     Item {
