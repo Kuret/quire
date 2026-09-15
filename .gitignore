@@ -1,2 +1,10 @@
 output/
 output-rmpp/
+
+# Extracted reMarkable resources: proprietary code pulled off the device for
+# local reference only (see tools/rccdump/README.md and docs/QMD-NOTES.md).
+# NEVER commit anything under here.
+/qmlroot/
+
+# go build output
+/rccdump
