@@ -10,6 +10,11 @@
 //     Resuming is therefore just "skip the pages already on disk" — there is no
 //     separate state file to fall out of step with the filesystem.
 //
+//   - **Two concurrency knobs, not one.** Fetch fan-out (Concurrency) and
+//     encode workers (EncodeWorkers) are bounded separately: a fetch is
+//     latency-bound and free locally, an encode pegs a core. See
+//     DefaultEncodeWorkers.
+//
 //   - **Byte accounting.** Stored bytes are counted as they land. Crossing
 //     WarnBytes calls OnWarn once; crossing MaxBytes fails the run. Before each
 //     page the free space on the target filesystem is checked against
@@ -53,9 +58,20 @@ type Fetcher interface {
 	Get(ctx context.Context, url string) (io.ReadCloser, error)
 }
 
-// DefaultConcurrency is the starting point PLAN §6 M4 prescribes for
-// concurrent page fetches.
+// DefaultConcurrency is the fetch fan-out PLAN §6 M4 prescribes: six page
+// requests in flight.
 const DefaultConcurrency = 6
+
+// DefaultEncodeWorkers is how many pages are decoded, resized and re-encoded
+// at once.
+//
+// Fetching and encoding are bounded separately because they are bounded by
+// different things. A fetch is latency-bound and costs nothing locally; an
+// encode pegs a core for the best part of a second on this hardware
+// (docs/DEVICE-NOTES.md §10). Running six encoders on a four-core i.MX8MM that
+// is also running xochitl buys no throughput and costs interactive latency in
+// the reader, so the default leaves cores free.
+const DefaultEncodeWorkers = 2
 
 // DefaultMinFreeBytes is how much room the target filesystem must keep. A
 // volume is a few hundred MB; leaving 512 MiB means a download stops well
@@ -85,11 +101,12 @@ type Chapter struct {
 
 // Progress is reported after each page completes.
 type Progress struct {
-	PagesDone    int   // pages on disk, including ones skipped as already present
-	PagesTotal   int   // pages in this run
-	PagesFetched int   // pages actually fetched over the network this run
-	BytesStored  int64 // bytes written to disk this run
-	BytesFetched int64 // bytes read from the fetcher this run
+	PagesDone        int   // pages on disk, including ones skipped as already present
+	PagesTotal       int   // pages in this run
+	PagesFetched     int   // pages actually fetched over the network this run
+	PagesRequantised int   // pages re-encoded at the lower quality to fit the budget
+	BytesStored      int64 // bytes written to disk this run
+	BytesFetched     int64 // bytes read from the fetcher this run
 }
 
 // Options configures a Queue. The zero value is usable and implies the
@@ -98,6 +115,10 @@ type Options struct {
 	// Concurrency is the number of page fetches in flight. Zero means
 	// DefaultConcurrency.
 	Concurrency int
+
+	// EncodeWorkers is the number of pages being decoded, resized and encoded
+	// at once. Zero means DefaultEncodeWorkers.
+	EncodeWorkers int
 
 	// Image controls normalisation. The zero value means
 	// imageproc.DefaultOptions.
@@ -142,6 +163,9 @@ func (o *Options) applyDefaults() {
 	if o.Concurrency <= 0 {
 		o.Concurrency = DefaultConcurrency
 	}
+	if o.EncodeWorkers <= 0 {
+		o.EncodeWorkers = DefaultEncodeWorkers
+	}
 	if o.Image.MaxWidth == 0 && o.Image.MaxHeight == 0 {
 		o.Image = imageproc.DefaultOptions()
 	}
@@ -182,6 +206,9 @@ func New(f Fetcher, opts Options) *Queue {
 // Concurrency reports the configured number of in-flight fetches.
 func (q *Queue) Concurrency() int { return q.opts.Concurrency }
 
+// EncodeWorkers reports the configured number of concurrent encodes.
+func (q *Queue) EncodeWorkers() int { return q.opts.EncodeWorkers }
+
 // Stats summarises a run.
 type Stats struct {
 	Progress
@@ -189,7 +216,11 @@ type Stats struct {
 	// It exists so "start at 6 and measure" can be measured rather than
 	// asserted.
 	MaxInFlight int
-	Elapsed     time.Duration
+
+	// MaxEncoding is the highest number of concurrent encodes observed.
+	MaxEncoding int
+
+	Elapsed time.Duration
 }
 
 // Run downloads every page of every chapter into dir and returns the chapters
@@ -213,16 +244,18 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 	}
 
 	r := &run{
-		q:      q,
-		dir:    dir,
-		total:  len(jobs),
-		warned: q.opts.WarnBytes <= 0,
+		q:       q,
+		dir:     dir,
+		total:   len(jobs),
+		warned:  q.opts.WarnBytes <= 0,
+		encoder: make(chan struct{}, q.opts.EncodeWorkers),
 	}
 
 	err = r.execute(ctx, jobs)
 
 	stats.Progress = r.snapshot()
 	stats.MaxInFlight = int(r.maxInFlight.Load())
+	stats.MaxEncoding = int(r.maxEncoding.Load())
 	stats.Elapsed = time.Since(start)
 	if err != nil {
 		return nil, stats, err
@@ -283,6 +316,11 @@ type run struct {
 
 	inFlight    atomic.Int64
 	maxInFlight atomic.Int64
+
+	// encoder bounds the CPU-heavy half independently of the fetch fan-out.
+	encoder     chan struct{}
+	encoding    atomic.Int64
+	maxEncoding atomic.Int64
 }
 
 func (r *run) snapshot() Progress {
@@ -366,12 +404,7 @@ func (r *run) do(ctx context.Context, j job) error {
 	}
 
 	n := r.inFlight.Add(1)
-	for {
-		m := r.maxInFlight.Load()
-		if n <= m || r.maxInFlight.CompareAndSwap(m, n) {
-			break
-		}
-	}
+	observeMax(&r.maxInFlight, n)
 	defer r.inFlight.Add(-1)
 
 	var lastErr error
@@ -434,7 +467,7 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 		}
 	}()
 
-	res, err := imageproc.Normalise(tmp, counted, r.q.opts.Image)
+	res, err := r.normalise(ctx, tmp, counted)
 	if err != nil {
 		return 0, counted.n, err
 	}
@@ -449,6 +482,32 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 	}
 	committed = true
 	return res.Bytes, counted.n, nil
+}
+
+// normalise runs the CPU-heavy half under the encode semaphore, so a large
+// fetch fan-out cannot put more decoders on the CPU than configured.
+func (r *run) normalise(ctx context.Context, dst io.Writer, src io.Reader) (imageproc.Result, error) {
+	select {
+	case r.encoder <- struct{}{}:
+	case <-ctx.Done():
+		return imageproc.Result{}, ctx.Err()
+	}
+	defer func() { <-r.encoder }()
+
+	observeMax(&r.maxEncoding, r.encoding.Add(1))
+	defer r.encoding.Add(-1)
+
+	return imageproc.Normalise(dst, src, r.q.opts.Image)
+}
+
+// observeMax raises m to n if n is larger.
+func observeMax(m *atomic.Int64, n int64) {
+	for {
+		cur := m.Load()
+		if n <= cur || m.CompareAndSwap(cur, n) {
+			return
+		}
+	}
 }
 
 func (r *run) checkSpace() error {

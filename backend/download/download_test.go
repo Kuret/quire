@@ -437,12 +437,39 @@ func TestRunRejectsCollidingChapterIDs(t *testing.T) {
 	}
 }
 
+// The encode half is bounded independently of the fetch fan-out: on a
+// four-core device, six fetches must not put six decoders on the CPU.
+func TestEncodeWorkersBoundSeparately(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 1620, 2160)}
+	q := download.New(f, download.Options{Concurrency: 8, EncodeWorkers: 2, MinFreeBytes: -1})
+
+	_, stats, err := q.Run(t.Context(), dir, chapters(1, 16))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats.MaxEncoding > 2 {
+		t.Errorf("MaxEncoding = %d, exceeds the 2 configured encode workers", stats.MaxEncoding)
+	}
+	if stats.MaxEncoding < 2 {
+		t.Errorf("MaxEncoding = %d: the encode workers never both ran", stats.MaxEncoding)
+	}
+	if stats.MaxInFlight <= stats.MaxEncoding {
+		t.Errorf("MaxInFlight = %d, MaxEncoding = %d: the fetch fan-out is being throttled to the encode limit",
+			stats.MaxInFlight, stats.MaxEncoding)
+	}
+	t.Logf("fetch fan-out peaked at %d, encodes at %d", stats.MaxInFlight, stats.MaxEncoding)
+}
+
 func TestDefaultConcurrency(t *testing.T) {
 	if got := download.New(&stubFetcher{}, download.Options{}).Concurrency(); got != download.DefaultConcurrency {
 		t.Errorf("default concurrency = %d, want %d", got, download.DefaultConcurrency)
 	}
 	if download.DefaultConcurrency != 6 {
 		t.Errorf("DefaultConcurrency = %d; PLAN §6 M4 says start at 6", download.DefaultConcurrency)
+	}
+	if got := download.New(&stubFetcher{}, download.Options{}).EncodeWorkers(); got != download.DefaultEncodeWorkers {
+		t.Errorf("default encode workers = %d, want %d", got, download.DefaultEncodeWorkers)
 	}
 }
 
