@@ -19,6 +19,8 @@ import (
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/covers"
+	"github.com/rickl/quire/backend/download"
+	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
@@ -39,6 +41,21 @@ type Options struct {
 	Covers   *covers.Cache
 	Log      *slog.Logger
 
+	// Library and LibraryStore are M5: the reMarkable library and the record
+	// of what Quire has put in it. Both nil means downloads are refused with
+	// a plain answer rather than half-done — the AppLoad PC emulator has no
+	// xochitl to upload to.
+	Library      *library.Library
+	LibraryStore *library.Store
+
+	// DownloadDir is where page images and assembled PDFs live. It must be
+	// under /home: / has ~47 MB free (docs/DEVICE-NOTES.md §3.3).
+	DownloadDir string
+
+	// DownloadOptions tunes the page queue. The zero value is the defaults
+	// backend/download documents.
+	DownloadOptions download.Options
+
 	// Now is injectable for tests.
 	Now func() time.Time
 
@@ -55,6 +72,16 @@ type Service struct {
 	log    *slog.Logger
 	now    func() time.Time
 	guard  prober.AddressGuard
+
+	library         *library.Library
+	libStore        *library.Store
+	downloadDir     string
+	downloadOptions download.Options
+
+	// dlQueue serialises downloads; see enqueueDownload for why there is
+	// exactly one worker behind it.
+	dlOnce  sync.Once
+	dlQueue chan downloadJob
 
 	// mu guards the single in-flight probe. There is deliberately only one:
 	// the wizard is a single screen, and a second probe started behind it would
@@ -75,6 +102,11 @@ func New(opts Options) *Service {
 		now:    opts.Now,
 		guard:  opts.ProbeGuard,
 		drafts: map[string]*theme.Source{},
+
+		library:         opts.Library,
+		libStore:        opts.LibraryStore,
+		downloadDir:     opts.DownloadDir,
+		downloadOptions: opts.DownloadOptions,
 	}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -206,6 +238,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		go s.runCover(ctx, out, req.SourceID, req.SeriesID, req.URL)
 		return true, nil
+
+	case appload.MessageEnqueueDownload:
+		var req downloadRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.enqueueDownload(ctx, out, req)
 	}
 	return false, nil
 }
