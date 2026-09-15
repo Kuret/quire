@@ -90,6 +90,13 @@ type Service struct {
 	dlOnce  sync.Once
 	dlQueue chan downloadJob
 
+	// dlMu guards the cancellation registry. dlActive holds the cancel func of
+	// the download currently running; dlCancelled remembers a Stop that
+	// arrived while the request was still queued.
+	dlMu        sync.Mutex
+	dlActive    map[downloadKey]context.CancelFunc
+	dlCancelled map[downloadKey]bool
+
 	// mu guards the single in-flight probe. There is deliberately only one:
 	// the wizard is a single screen, and a second probe started behind it would
 	// interleave its progress messages with the first's.
@@ -271,6 +278,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "not_found", plain(err))
 		}
 		return true, s.sendSources(out)
+
+	case appload.MessageCancelDownload:
+		var req downloadRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.cancelDownload(out, req)
 
 	case appload.MessageEnqueueDownload:
 		var req downloadRequest

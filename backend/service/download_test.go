@@ -40,6 +40,10 @@ type fakeLibrary struct {
 	uploaded [][]byte
 	names    []string
 	n        int
+
+	// onUpload, if set, is called after a successful upload with the lock
+	// released. It lets a test act at the exact moment a part lands.
+	onUpload func()
 }
 
 func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +78,12 @@ func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"status":"Upload successful"}`)
+		if f.onUpload != nil {
+			hook := f.onUpload
+			f.mu.Unlock()
+			hook()
+			f.mu.Lock()
+		}
 		return
 	}
 

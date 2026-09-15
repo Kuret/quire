@@ -26,6 +26,7 @@ import (
 // here.
 const (
 	phaseConfirm    = "confirm"
+	phaseCancelled  = "cancelled"
 	phaseQueued     = "queued"
 	phasePreparing  = "preparing"
 	phaseFetching   = "fetching"
@@ -96,6 +97,87 @@ type downloadProgress struct {
 type downloadJob struct {
 	out Sender
 	req downloadRequest
+}
+
+// downloadKey identifies a download for cancelling. It is the request's three
+// IDs and not the volume label, because the label is only known after the
+// chapter list has been fetched — and the user may well want out before then.
+type downloadKey struct {
+	Source string
+	Series string
+	Volume string
+}
+
+func (r downloadRequest) key() downloadKey {
+	return downloadKey{Source: r.SourceID, Series: r.SeriesID, Volume: r.VolumeID}
+}
+
+// cancelDownload stops a download, whether it is running or still queued.
+//
+// Cancellation is prompt because it cancels a context that is threaded all the
+// way to the HTTP request for the current page. Polling a flag between pages
+// would make cancel feel broken in exactly the case it matters — a page fetch
+// that has stalled — since that is when the gap between pages is longest.
+func (s *Service) cancelDownload(out Sender, req downloadRequest) error {
+	key := req.key()
+
+	s.dlMu.Lock()
+	cancel, running := s.dlActive[key]
+	if !running {
+		// Still in the queue, or the user tapped Stop between the worker
+		// picking it up and it registering. Mark it; the worker checks.
+		if s.dlCancelled == nil {
+			s.dlCancelled = map[downloadKey]bool{}
+		}
+		s.dlCancelled[key] = true
+	}
+	s.dlMu.Unlock()
+
+	if running {
+		cancel()
+		// The download's own goroutine sends the cancelled message once it has
+		// actually stopped, so the UI never shows "stopped" while work
+		// continues.
+		return nil
+	}
+
+	return send(out, appload.MessageDownloadProgress, downloadProgress{
+		SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
+		Phase:   phaseCancelled,
+		Message: "Stopped.",
+	})
+}
+
+// takeCancelled reports whether this download was cancelled before it started,
+// clearing the mark.
+func (s *Service) takeCancelled(key downloadKey) bool {
+	s.dlMu.Lock()
+	defer s.dlMu.Unlock()
+	if s.dlCancelled[key] {
+		delete(s.dlCancelled, key)
+		return true
+	}
+	return false
+}
+
+// beginDownload registers a cancellable context for a running download.
+func (s *Service) beginDownload(ctx context.Context, key downloadKey) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	s.dlMu.Lock()
+	if s.dlActive == nil {
+		s.dlActive = map[downloadKey]context.CancelFunc{}
+	}
+	s.dlActive[key] = cancel
+	s.dlMu.Unlock()
+
+	return ctx, func() {
+		s.dlMu.Lock()
+		delete(s.dlActive, key)
+		delete(s.dlCancelled, key)
+		s.dlMu.Unlock()
+		cancel()
+	}
 }
 
 // enqueueDownload accepts a request and returns immediately.
@@ -225,6 +307,15 @@ func (s *Service) downloadWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case job := <-s.dlQueue:
+			if s.takeCancelled(job.req.key()) {
+				_ = send(job.out, appload.MessageDownloadProgress, downloadProgress{
+					SourceID: job.req.SourceID, SeriesID: job.req.SeriesID,
+					VolumeID: job.req.VolumeID,
+					Phase:    phaseCancelled,
+					Message:  "Stopped before it started.",
+				})
+				continue
+			}
 			s.runDownload(ctx, job.out, job.req)
 		}
 	}
@@ -232,8 +323,41 @@ func (s *Service) downloadWorker(ctx context.Context) {
 
 // runDownload is the whole path: chapter list → pages → images on disk → one
 // PDF → the reMarkable library → a remembered UUID.
-func (s *Service) runDownload(ctx context.Context, out Sender, req downloadRequest) {
+func (s *Service) runDownload(parent context.Context, out Sender, req downloadRequest) {
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
+
+	ctx, done := s.beginDownload(parent, req.key())
+	defer done()
+
+	// uploaded counts the parts of a split volume already in the library when a
+	// cancel lands. They stay: each is a complete, correctly indexed document
+	// with its own thumbnail, and xochitl's web interface has no delete route
+	// to take one back with even if we wanted to (M5). Dropping the record
+	// while leaving the document would be strictly worse — an orphan in the
+	// user's library that Quire cannot account for.
+	uploaded := 0
+
+	stopped := func() {
+		p.Phase = phaseCancelled
+		switch {
+		case uploaded == 1:
+			p.Message = "Stopped. The part already saved is in your library."
+		case uploaded > 1:
+			p.Message = fmt.Sprintf("Stopped. The %d parts already saved are in your library.", uploaded)
+		default:
+			p.Message = "Stopped. The pages already downloaded are kept, so starting again will carry on from here."
+		}
+		s.log.Info("download cancelled", "source", req.SourceID, "series", req.SeriesID,
+			"volume", req.VolumeID, "partsUploaded", uploaded)
+		_ = send(out, appload.MessageDownloadProgress, p)
+	}
+
+	// cancelled distinguishes "the user pressed Stop" from "something broke".
+	// parent.Err() being nil is the test: if the parent is gone the whole
+	// backend is shutting down and there is nobody to tell.
+	cancelled := func(err error) bool {
+		return errors.Is(err, context.Canceled) && parent.Err() == nil
+	}
 
 	fail := func(format string, args ...any) {
 		p.Phase = phaseFailed
@@ -256,11 +380,19 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 	}
 	series, err := th.Series(ctx, src, req.SeriesID)
 	if err != nil {
+		if cancelled(err) {
+			stopped()
+			return
+		}
 		fail("Quire could not read that series: %s", plain(err))
 		return
 	}
 	chapters, err := th.Chapters(ctx, src, req.SeriesID)
 	if err != nil {
+		if cancelled(err) {
+			stopped()
+			return
+		}
 		fail("Quire could not read the chapter list: %s", plain(err))
 		return
 	}
@@ -285,6 +417,10 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 	for _, ch := range vol.Chapters {
 		urls, err := th.Pages(ctx, src, ch.ID)
 		if err != nil {
+			if cancelled(err) {
+				stopped()
+				return
+			}
 			fail("Quire could not find the pages of %s: %s", ch.Title, plain(err))
 			return
 		}
@@ -299,10 +435,14 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 
 	dir := filepath.Join(s.downloadDir, safeSegment(src.ID), safeSegment(req.SeriesID))
 
+	// The pages already on disk are left exactly where they are. Resume works
+	// by skipping files that exist (PLAN §6 M4), so cancelling at page 300 of
+	// 325 and starting again must not refetch 300 pages. Cancel means stop,
+	// not discard.
 	pages, stats, err := s.downloadPages(ctx, out, src, dir, chs, &p)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			fail("Download stopped.")
+		if cancelled(err) {
+			stopped()
 			return
 		}
 		fail("Quire could not download the pages: %s", plain(err))
@@ -332,14 +472,25 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 		totalPages int
 	)
 	for _, part := range parts {
+		if err := ctx.Err(); err != nil && cancelled(err) {
+			stopped()
+			return
+		}
 		label := part.Title
 		if len(parts) > 1 {
 			label = fmt.Sprintf("%s (%d of %d)", part.Title, part.Part, part.Parts)
 		}
 
 		step(phaseAssembling, fmt.Sprintf("Building the PDF of %s…", label))
+		// assemble builds into a temp file and renames it into place only once
+		// it is whole, so a cancellation here leaves no half-written PDF for
+		// the library to find.
 		manifest, err := assemble.Assemble(ctx, dir, part.Volume, assemble.DefaultOptions())
 		if err != nil {
+			if cancelled(err) {
+				stopped()
+				return
+			}
 			fail("Quire could not build the PDF: %s", plain(err))
 			return
 		}
@@ -350,9 +501,14 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 		step(phaseStoring, fmt.Sprintf("Putting %s in your reMarkable library…", label))
 		res, place, err := s.storeVolume(ctx, part, dir, manifest)
 		if err != nil {
+			if cancelled(err) {
+				stopped()
+				return
+			}
 			fail("%s", plain(err))
 			return
 		}
+		uploaded++
 		lastResult, lastPlace, lastName = res, place, res.VisibleName
 
 		rec := library.Record{
@@ -422,6 +578,18 @@ func (s *Service) downloadPages(ctx context.Context, out Sender, src *theme.Sour
 // storeVolume uploads the assembled PDF and reports where it landed.
 func (s *Service) storeVolume(ctx context.Context, vol volumePlan, dir string,
 	manifest *assemble.Manifest) (library.Result, library.Placement, error) {
+
+	// Uploading is deliberately not cancellable.
+	//
+	// Once the POST is on the wire the document either exists on the tablet or
+	// does not, and the UUID is only knowable by reading the folder back
+	// afterwards. Abandoning that read-back on a cancel leaves a document in
+	// the user's library that Quire has no record of — and xochitl's web
+	// interface has no delete route to take it back with. So a Stop that
+	// arrives mid-upload is honoured at the *next part boundary* instead,
+	// which costs a few seconds over loopback and cannot orphan anything.
+	ctx, release := context.WithTimeout(context.WithoutCancel(ctx), 3*library.DefaultTimeout)
+	defer release()
 
 	if err := s.library.EnsureReachable(ctx); err != nil {
 		return library.Result{}, library.Placement{}, err
