@@ -105,29 +105,36 @@ type Options struct {
 	// Scaler selects the resampling kernel. The zero value is the default,
 	// measured on the device — see the Scaler docs.
 	Scaler Scaler
-
-	// Prescale box-averages the source down to roughly 2× the target before
-	// the kernel runs. It is a large speed win on big sources and is on by
-	// default; set it false to resample in one pass.
-	Prescale bool
 }
 
 // Scaler names a resampling kernel.
 //
 // # Measured on the device, not the host (docs/DEVICE-NOTES.md §10)
 //
-// The device is an i.MX8MM: four Cortex-A53 cores, no NEON help from x/image.
-// Decode + resize + encode of a 2480 × 3508 page to the panel grid, best of
-// several runs, single-threaded:
+// Four Cortex-A53 cores, one page at a time, decode + resize + encode of a
+// 2480 × 3508 scan onto the panel grid:
 //
-//	kernel                     without prescale   with box prescale
-//	CatmullRom                       (see §10)          (see §10)
-//	ApproxBiLinear                   (see §10)          (see §10)
+//	CatmullRom       4.15 s/page   sharp; the default
+//	BiLinear         3.17 s/page   -24%, softer edges, still area-correct
+//	ApproxBiLinear   1.67 s/page   -60%, but samples only four source pixels
+//	                               per destination pixel regardless of the
+//	                               ratio, so it aliases screentone
 //
-// CatmullRom with the box prescale is the default: manga is line art, and
-// softening it is the one thing that visibly hurts on a 227 DPI e-ink panel,
-// so the quality kernel is kept for the final step and the cheap pass only
-// removes bulk the kernel would have averaged away anyway.
+// Of that, ~0.52 s is the JPEG decode and ~0.39 s the encode, so the kernel is
+// the whole of the difference.
+//
+// CatmullRom stays the default. Manga is line art on a 227 DPI e-ink panel:
+// softening it is the one visible regression, and ApproxBiLinear's aliasing on
+// screentone is worse than softness. The cost is paid once, at save time, and
+// the queue bounds how many encodes run at once so the reader keeps its cores
+// (see download.DefaultEncodeWorkers).
+//
+// A cheap box pre-pass to ~2× target before the quality kernel — the usual
+// trick for large downscales — was implemented and measured, and **removed**:
+// comic sources run 1.5–3× larger than the panel, and a pre-pass needs a
+// ≥4× total ratio before it can leave 2× for the kernel. It never engaged on a
+// real page, and at 5000 × 7000 it still did not (12.34 s with it, 12.39 s
+// without).
 type Scaler int
 
 const (
@@ -189,8 +196,7 @@ const DefaultMaxPageBytes = 1 << 20
 const DefaultRetryQuality = 65
 
 // DefaultOptions returns the panel-native settings: 1620 × 2160, JPEG q85
-// (q65 on a retry), white padding, 1% aspect tolerance, CatmullRom behind a
-// box prescale.
+// (q65 on a retry), white padding, 1% aspect tolerance, CatmullRom resampling.
 func DefaultOptions() Options {
 	return Options{
 		MaxWidth:        PanelWidth,
@@ -201,7 +207,6 @@ func DefaultOptions() Options {
 		AspectTolerance: 0.01,
 		MaxBytes:        DefaultMaxPageBytes,
 		Scaler:          ScalerCatmullRom,
-		Prescale:        true,
 	}
 }
 
@@ -348,9 +353,6 @@ func fit(src image.Image, opts Options) (image.Image, bool) {
 // remainder with the background colour.
 func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) image.Image {
 	src = fastSource(src)
-	if opts.Prescale {
-		src = boxPrescale(src, imgRect.Dx(), imgRect.Dy())
-	}
 	var dst stddraw.Image
 	if opts.Grayscale {
 		dst = image.NewGray(dstRect)
@@ -424,45 +426,6 @@ func fastSource(src image.Image) image.Image {
 	b := src.Bounds()
 	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	stddraw.Draw(out, out.Bounds(), src, b.Min, stddraw.Src)
-	return out
-}
-
-// boxPrescale averages src down by the largest integer factor that keeps it at
-// or above 2× the final size, and returns the result for the quality kernel to
-// finish. Below a factor of 2 it is a no-op.
-//
-// The point is arithmetic: CatmullRom's cost is proportional to the *source*
-// pixels it reads, so a 4× box pass first removes 15/16 of that work, while a
-// box average over a full factor×factor block loses almost nothing a
-// subsequent resample would have kept. See the kernel comparison on Scaler.
-func boxPrescale(src image.Image, dstW, dstH int) image.Image {
-	b := src.Bounds()
-	factor := min(b.Dx()/(dstW*2), b.Dy()/(dstH*2))
-	if factor < 2 {
-		return src
-	}
-
-	w, h := b.Dx()/factor, b.Dy()/factor
-	out := image.NewRGBA(image.Rect(0, 0, w, h))
-	n := uint32(factor * factor)
-	for y := range h {
-		for x := range w {
-			var r, g, bl uint32
-			for dy := range factor {
-				for dx := range factor {
-					pr, pg, pb, _ := src.At(b.Min.X+x*factor+dx, b.Min.Y+y*factor+dy).RGBA()
-					r += pr >> 8
-					g += pg >> 8
-					bl += pb >> 8
-				}
-			}
-			i := out.PixOffset(x, y)
-			out.Pix[i+0] = uint8(r / n)
-			out.Pix[i+1] = uint8(g / n)
-			out.Pix[i+2] = uint8(bl / n)
-			out.Pix[i+3] = 0xff
-		}
-	}
 	return out
 }
 

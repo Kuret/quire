@@ -244,7 +244,7 @@ func TestNormaliseRequantisesOnce(t *testing.T) {
 	low, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), imageproc.Options{
 		MaxWidth: opts.MaxWidth, MaxHeight: opts.MaxHeight, Quality: 40,
 		Background: opts.Background, AspectTolerance: opts.AspectTolerance,
-		Scaler: opts.Scaler, Prescale: opts.Prescale,
+		Scaler: opts.Scaler,
 	})
 	if err != nil {
 		t.Fatalf("low-quality baseline: %v", err)
@@ -289,24 +289,6 @@ func TestNormaliseRetryDisabled(t *testing.T) {
 	opts.RetryQuality = 0
 	if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); !errors.Is(err, imageproc.ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", err)
-	}
-}
-
-// The prescale must not change the output geometry, only the cost of getting
-// there.
-func TestPrescaleKeepsGeometry(t *testing.T) {
-	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
-	for _, prescale := range []bool{false, true} {
-		opts := imageproc.DefaultOptions()
-		opts.Prescale = prescale
-		opts.MaxBytes = 0 // this test is about geometry, not the byte budget
-		res, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
-		if err != nil {
-			t.Fatalf("prescale=%v: %v", prescale, err)
-		}
-		if res.Width != imageproc.PanelWidth || res.Height != imageproc.PanelHeight {
-			t.Errorf("prescale=%v: output %dx%d, want the panel grid", prescale, res.Width, res.Height)
-		}
 	}
 }
 

@@ -63,24 +63,21 @@ func BenchmarkNormalise(b *testing.B) {
 	for _, src := range sources {
 		raw := comicPage(src.w, src.h)
 		for _, s := range scalers {
-			for _, prescale := range []bool{false, true} {
-				name := fmt.Sprintf("%s/%s/prescale=%v", src.name, s, prescale)
-				b.Run(name, func(b *testing.B) {
-					opts := imageproc.DefaultOptions()
-					opts.Scaler = s
-					opts.Prescale = prescale
-					b.SetBytes(int64(len(raw)))
-					b.ReportAllocs()
-					var out bytes.Buffer
-					for b.Loop() {
-						out.Reset()
-						if _, err := imageproc.Normalise(&out, bytes.NewReader(raw), opts); err != nil {
-							b.Fatal(err)
-						}
+			b.Run(fmt.Sprintf("%s/%s", src.name, s), func(b *testing.B) {
+				opts := imageproc.DefaultOptions()
+				opts.Scaler = s
+				opts.MaxBytes = 0 // measuring cost, not enforcing the budget
+				b.SetBytes(int64(len(raw)))
+				b.ReportAllocs()
+				var out bytes.Buffer
+				for b.Loop() {
+					out.Reset()
+					if _, err := imageproc.Normalise(&out, bytes.NewReader(raw), opts); err != nil {
+						b.Fatal(err)
 					}
-					b.ReportMetric(float64(out.Len()), "outbytes")
-				})
-			}
+				}
+				b.ReportMetric(float64(out.Len()), "outbytes")
+			})
 		}
 	}
 }
