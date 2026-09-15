@@ -9,6 +9,7 @@ import (
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/madara"
+	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
 )
 
@@ -45,8 +46,19 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(mangathemesia.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// mangadex is registered here for the same reason the other two are: it
+	// must score 0 on every page below. It gates on the host rather than on
+	// markup, and every fixture page is served from example.invalid, so a
+	// non-zero score would mean the gate had stopped gating.
+	if err := reg.Register(mangadex.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
+
+// scorers is how many themes Registry.Fingerprint scores. The generic escape
+// hatch is excluded by the registry itself, so it is not counted here.
+const scorers = 3
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -101,8 +113,11 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			page := loadPage(t, filepath.FromSlash(tc.file))
 			scores := reg.Fingerprint(page)
-			if len(scores) != 2 {
-				t.Fatalf("got %d scores, want 2", len(scores))
+			// Every registered theme must score, so the count tracks the
+			// registry above rather than being a literal that quietly drifts
+			// when a theme is added and stops being asked.
+			if len(scores) != scorers {
+				t.Fatalf("got %d scores, want %d", len(scores), scorers)
 			}
 			t.Logf("scores: %+v", scores)
 
