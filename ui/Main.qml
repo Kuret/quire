@@ -382,6 +382,7 @@ Rectangle {
             onOpenRequested: root.openSource(sourceId, name)
             onToggleRequested: root.send(Msg.SetSourceEnabled, {"sourceId": sourceId, "enabled": enabled})
             onRemoveRequested: root.send(Msg.RemoveSource, {"sourceId": sourceId})
+            onRenameRequested: root.send(Msg.RenameSource, {"sourceId": sourceId, "name": name})
         }
 
         AddSource {

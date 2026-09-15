@@ -20,11 +20,34 @@ Item {
     signal openRequested(string sourceId, string name)
     signal toggleRequested(string sourceId, bool enabled)
     signal removeRequested(string sourceId)
+    signal renameRequested(string sourceId, string name)
 
     // Which row has its confirm-remove strip open. Removing a source is one tap
     // away from a full library of downloads still being there but nothing to
     // update them from, so it asks first.
     property string confirmingId: ""
+
+    // The source being renamed, and the name being typed. Renaming is here
+    // rather than on a screen of its own because it is one field: the name is
+    // guessed from the site's <title> at probe time and that guess is
+    // sometimes wrong ("MangaDex API documentation"), so editing it should cost
+    // a tap, not a navigation.
+    property string renamingId: ""
+    property string renameText: ""
+
+    function startRename(sourceId, name) {
+        screen.confirmingId = ""
+        screen.renamingId = sourceId
+        screen.renameText = name
+    }
+
+    function commitRename() {
+        if (screen.renameText.trim().length === 0)
+            return
+        screen.renameRequested(screen.renamingId, screen.renameText.trim())
+        screen.renamingId = ""
+        screen.renameText = ""
+    }
 
     ListView {
         id: list
@@ -114,13 +137,47 @@ Item {
                 visible: height > 0
 
                 Text {
-                    anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                    anchors {
+                        left: parent.left; leftMargin: Style.margin
+                        right: renameButton.left; rightMargin: Style.gap
+                        verticalCenter: parent.verticalCenter
+                    }
+                    elide: Text.ElideRight
                     text: "Remove this source? Downloaded volumes stay in your library."
                     font.pointSize: Style.smallSize
                     color: Style.muted
                 }
 
                 Rectangle {
+                    id: renameButton
+                    objectName: "renameButton"
+                    anchors {
+                        right: removeButton.left; rightMargin: Style.gap
+                        verticalCenter: parent.verticalCenter
+                    }
+                    width: 160
+                    height: Style.buttonHeight - Style.gap
+                    color: renameArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Rename"
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: renameArea
+                        anchors.fill: parent
+                        onClicked: screen.startRename(model.sourceId, model.name)
+                    }
+                }
+
+                Rectangle {
+                    id: removeButton
                     anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
                     width: 160
                     height: Style.buttonHeight - Style.gap
@@ -215,6 +272,127 @@ Item {
                 anchors.fill: parent
                 onClicked: screen.addRequested()
             }
+        }
+    }
+
+    // ---- rename ------------------------------------------------------------
+    //
+    // A panel over the list rather than a screen of its own: it is one field,
+    // and the device has no system keyboard available to an AppLoad app
+    // (PLAN §11 Q5), so the text comes from ui/Keyboard.qml exactly as the
+    // add-source form does.
+    Rectangle {
+        id: renamePanel
+        objectName: "renamePanel"
+        anchors.fill: parent
+        color: Style.paper
+        visible: screen.renamingId.length > 0
+
+        // Swallow taps so the list underneath cannot be operated while this is
+        // open.
+        MouseArea { anchors.fill: parent }
+
+        Column {
+            anchors {
+                top: parent.top; topMargin: Style.margin
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+            spacing: Style.gap
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "What should this source be called?"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Rectangle {
+                width: parent.width
+                height: Style.buttonHeight
+                color: Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                TextInput {
+                    id: nameField
+                    objectName: "nameField"
+                    anchors {
+                        fill: parent
+                        leftMargin: Style.gap
+                        rightMargin: Style.gap
+                    }
+                    verticalAlignment: TextInput.AlignVCenter
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                    // schema/source.schema.json: 1-120 characters.
+                    maximumLength: 120
+                    activeFocusOnPress: false
+                    text: screen.renameText
+                    onTextChanged: screen.renameText = text
+                }
+            }
+
+            Row {
+                spacing: Style.gap
+
+                Rectangle {
+                    objectName: "renameSaveButton"
+                    width: 220
+                    height: Style.buttonHeight
+                    color: saveArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: screen.renameText.trim().length > 0 ? Style.ink : Style.rule
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Save"
+                        font.pointSize: Style.bodySize
+                        color: screen.renameText.trim().length > 0 ? Style.ink : Style.rule
+                    }
+
+                    MouseArea {
+                        id: saveArea
+                        anchors.fill: parent
+                        enabled: screen.renameText.trim().length > 0
+                        onClicked: screen.commitRename()
+                    }
+                }
+
+                Rectangle {
+                    width: 220
+                    height: Style.buttonHeight
+                    color: cancelRenameArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pointSize: Style.bodySize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: cancelRenameArea
+                        anchors.fill: parent
+                        onClicked: { screen.renamingId = ""; screen.renameText = "" }
+                    }
+                }
+            }
+        }
+
+        Keyboard {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            layout: "text"
+            onKeyTyped: screen.renameText += character
+            onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
+            onClearAll: screen.renameText = ""
+            onSubmit: screen.commitRename()
         }
     }
 }
