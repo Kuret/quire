@@ -555,6 +555,25 @@ The core of the project. See §7.2 for the interface and §7.3 for the theme set
   hook, for one-off sites matching no theme. Escape hatch, not the main path.
 - Fixtures: record real HTTP responses once, commit them, test offline forever.
   Never hit the live network in unit tests.
+  **CORRECTION (2026-09-15) — this clause contradicts §1.3 and §1.4 and cannot
+  be followed literally.** Recording a real aggregator's responses would put its
+  domain and its content in this repository, which §1.3 forbids outright. The
+  resolution, implemented in M2:
+  - Fixtures are **synthetic but faithful** — written by us to reproduce the
+    *markup shape* that a published piece of software emits. Madara is a
+    distributed WordPress plugin and MangaThemesia a distributed theme; the
+    shape of their output is an observable fact about that software, not
+    anyone's expression.
+  - Every host is `example.invalid` (RFC 2606). No aggregator domain appears
+    anywhere in the repo — not in a fixture, filename, test name or comment.
+  - Each fixture carries a header stating what it reproduces and why it is
+    synthetic.
+  - **Be honest about what this proves:** fixtures pin *our parser's* behaviour
+    and nothing more. What proves a real site works is §7.5 **stage 5's
+    capability check at runtime**, against whatever site the user chose to add.
+    Never describe fixture coverage as evidence that any live site parses.
+  Tests additionally install a DNS kill-switch, so an unrouted request fails the
+  test rather than silently reaching the network.
 - Every theme documents its fingerprint and quirks in `docs/THEME-NOTES.md`.
 
 **Acceptance:** two structurally different themes implemented; search → series
@@ -818,7 +837,7 @@ both are the safest bets.
 
 | Theme | Shape | Notes |
 |---|---|---|
-| `madara` | WordPress plugin, `wp-manga` post type | Largest family by a wide margin. Chapter list often behind an `admin-ajax.php` POST rather than in the initial HTML. Per-site variation in path segments (`manga` / `series` / `comics`) — hence `overrides`. |
+| `madara` | WordPress plugin, `wp-manga` post type | **Note:** upstream has since split into `madara` and `madaralegacy`. We keep **one** theme with an `ajaxStyle` override rather than two, because the shapes differ in exactly one endpoint — reasoning in `docs/THEME-NOTES.md`. Largest family by a wide margin. Chapter list often behind an `admin-ajax.php` POST rather than in the initial HTML. Per-site variation in path segments (`manga` / `series` / `comics`) — hence `overrides`. |
 | `mangathemesia` | WordPress theme, formerly WPMangaStream | Second largest. Page list typically embedded in an inline `ts_reader.run({...})` JSON blob rather than in the DOM. |
 
 **Tier 2 — modern JSON-API families; mechanically the easiest once identified**
@@ -855,8 +874,24 @@ afternoon instead of a weekend.
 Non-negotiable, and not configurable by a source entry:
 
 - Global and per-host concurrency caps; minimum inter-request delay per host.
+  **The floor, set in M2 and stated here because §7.2's schema alone is
+  misleading:** 4 global / 2 per-host / 2 s minimum inter-request delay
+  (= 30 rpm). `source.schema.json` permits `requestsPerMinute` up to 120, but a
+  source asking for 120 still gets 30 — **the schema bounds what a user may
+  write; this floor bounds what Quire actually does.** Per-source `rateLimit`
+  narrows, never widens.
 - `robots.txt` fetched, cached, honoured. If robots disallows the paths a theme
   needs, the probe reports it and the source is not added.
+  **Decided 2026-09-15 — what to do when `robots.txt` cannot be read.** Three
+  cases, deliberately not collapsed into two:
+  - **404 / no file → allowed.** Conventional and uncontroversial.
+  - **5xx or transport error → treat as *unknown*, not as permission.** Retry
+    with backoff; while unknown, do not proceed. This follows from §7.6 — we
+    take "no" for an answer, and an unreadable `robots.txt` is not a "yes".
+  - Report a persistent failure as **`unreachable`**, never as
+    `robots_denied`. The site did not deny us; we could not ask. Reporting a
+    denial that never happened is exactly the kind of lie §6 M3 forbids when it
+    says a verdict must be a complete, honest answer.
 - `Retry-After` honoured; exponential backoff with jitter on 429/5xx.
 - Honest `User-Agent` naming Quire, its version, and the project URL. **Never
   impersonate a browser** — see §7.6.
