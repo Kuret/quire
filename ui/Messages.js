@@ -24,6 +24,7 @@ var ConfirmAddSource = 15
 var ProbeAnswer = 16
 var SetSourceEnabled = 17
 var RemoveSource = 18
+var RenameSource = 19
 
 var Search = 20
 var SearchResults = 21
@@ -36,6 +37,7 @@ var SeriesDetailResult = 31
 
 var EnqueueDownload = 40
 var DownloadProgress = 41
+var CancelDownload = 42
 
 var OpenInReader = 50
 

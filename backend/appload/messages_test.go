@@ -25,6 +25,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"ProbeAnswer":           16,
 		"SetSourceEnabled":      17,
 		"RemoveSource":          18,
+		"RenameSource":          19,
 		"Search":                20,
 		"SearchResults":         21,
 		"Browse":                22,
@@ -34,6 +35,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"SeriesDetailResult":    31,
 		"EnqueueDownload":       40,
 		"DownloadProgress":      41,
+		"CancelDownload":        42,
 		"OpenInReader":          50,
 		"Error":                 90,
 	}

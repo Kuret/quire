@@ -57,6 +57,14 @@ const (
 	MessageSetSourceEnabled MessageType = 17
 	// MessageRemoveSource is UI→BE, JSON {sourceId}.
 	MessageRemoveSource MessageType = 18
+	// MessageRenameSource is UI→BE, JSON {sourceId, name}. Added after first
+	// real use: probing https://api.mangadex.org named the source "MangaDex
+	// API documentation", because that is what the page's <title> says. A
+	// theme-suggested default fixes the themes we ship; renaming is the
+	// general fix, because title detection will be wrong for *some* site
+	// forever and being permanently stuck with a bad name is out of all
+	// proportion to the cost of allowing an edit.
+	MessageRenameSource MessageType = 19
 
 	// MessageSearch is UI→BE, JSON {sourceId, query}.
 	MessageSearch MessageType = 20
@@ -83,6 +91,13 @@ const (
 	MessageEnqueueDownload MessageType = 40
 	// MessageDownloadProgress is BE→UI, JSON, streamed.
 	MessageDownloadProgress MessageType = 41
+	// MessageCancelDownload is UI→BE, JSON {sourceId, seriesId, volumeId}.
+	//
+	// A volume is 7–10 minutes of CPU and up to 90 MB of traffic on a battery-
+	// powered device. Starting one by mistake and being unable to stop it is
+	// the kind of thing that makes an app feel broken, which is why PLAN §7.1
+	// calls this not optional.
+	MessageCancelDownload MessageType = 42
 
 	// MessageOpenInReader is UI→BE, JSON {documentUuid}.
 	MessageOpenInReader MessageType = 50
@@ -109,6 +124,7 @@ var messageNames = map[MessageType]string{
 	MessageProbeAnswer:           "ProbeAnswer",
 	MessageSetSourceEnabled:      "SetSourceEnabled",
 	MessageRemoveSource:          "RemoveSource",
+	MessageRenameSource:          "RenameSource",
 	MessageSearch:                "Search",
 	MessageSearchResults:         "SearchResults",
 	MessageBrowse:                "Browse",
@@ -118,6 +134,7 @@ var messageNames = map[MessageType]string{
 	MessageSeriesDetailResult:    "SeriesDetailResult",
 	MessageEnqueueDownload:       "EnqueueDownload",
 	MessageDownloadProgress:      "DownloadProgress",
+	MessageCancelDownload:        "CancelDownload",
 	MessageOpenInReader:          "OpenInReader",
 	MessageError:                 "Error",
 }
