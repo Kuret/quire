@@ -91,6 +91,14 @@ func (g *Guard) checkScheme(u *url.URL) error {
 
 // checkDomain enforces the redirect boundary: a request must stay within the
 // source's registrable domain unless allowedHosts says otherwise.
+//
+// **allowedHosts widens this rule and nothing else.** CheckURL runs
+// checkAddress *after* this, unconditionally, so a private, loopback or
+// link-local address is refused however it was named and whoever named it —
+// a source entry, an import, or a theme's own declared host list. An entry
+// here buys a name past the domain boundary; it never buys an address past the
+// address rules. That ordering is the whole of the guarantee, so do not
+// reorder CheckURL without reading the tests that pin it.
 func (g *Guard) checkDomain(u *url.URL, p *Policy) error {
 	if p == nil || p.BaseURL == nil {
 		return nil
@@ -120,6 +128,12 @@ func (g *Guard) checkDomain(u *url.URL, p *Policy) error {
 func hostMatches(host, allowed string) bool {
 	if allowed == "" {
 		return false
+	}
+	// "*.example.invalid" is the narrower form: subdomains only, never the
+	// bare domain. A CDN whose hostnames are all generated labels can say so
+	// exactly, rather than permitting a domain it never actually serves from.
+	if sub, ok := strings.CutPrefix(allowed, "*."); ok {
+		return sub != "" && strings.HasSuffix(host, "."+sub)
 	}
 	return host == allowed || strings.HasSuffix(host, "."+allowed)
 }
