@@ -854,3 +854,32 @@ are nowhere near it.
 Assembly wall time is negligible next to the resize: **1.1 s for 200 pages**.
 Bytes on disk are unchanged by assembly — pdfcpu embeds the page JPEGs as
 DCTDecode streams rather than re-encoding them, so PDF size ≈ sum of pages.
+
+---
+
+## 11. No right-to-left reading direction — checked, not assumed
+
+Manga reads right-to-left. **The stock reader has no concept of it**, and there
+is nothing we can put in a PDF to ask for it. Three places it could have lived,
+all checked on 3.25.1.1:
+
+| Mechanism | Result |
+|---|---|
+| PDF `/ViewerPreferences << /Direction /R2L >>` — the standard hint | `ViewerPreferences`, `Direction`, `R2L` appear **nowhere** in `/usr/bin/xochitl`. Not parsed |
+| A `.content` field | No direction key exists across a 44-document real library. Nearest are `orientation`, `textAlignment`, `verticalScroll`, `zoomMode` — none is page direction |
+| xochitl's own QML | All 17 `Qt.RightToLeft` uses are UI layout (toolbar side, tag chips, handedness). None touches document reading |
+
+**Why this is a small loss.** In a single-page reader, reading direction does not
+change page *order* — page 1 is page 1. It changes which way you swipe, and how
+two-page spreads pair. Portrait reading on the Paper Pro is single-page, so only
+the gesture differs. Panel order within a page lives in the artwork.
+
+> ⚠️ **Do not compensate by reversing page order.** It would make the reader's
+> "next" walk backwards through the story, and it would desynchronise the
+> chapter→page-offset map that M6's Read and xochitl's saved position both
+> depend on. A backwards gesture is cosmetic; a reversed book is broken.
+
+**Adjacent and actually fixable:** wide double-page spreads currently fit-and-pad
+into a 3:4 page, shrinking to a small centred strip — the mirror of the
+webtoon-strip limitation in §6 M4. Splitting a spread into two panel-shaped
+pages is within our control and would affect most manga volumes.
