@@ -9,6 +9,7 @@
 
 import QtQuick 2.5
 import "Style.js" as Style
+import "Paging.js" as Paging
 
 Item {
     id: screen
@@ -19,6 +20,10 @@ Item {
     // The log, most recent last, as the backend sent it. Empty until asked for.
     property var logLines: []
     property bool logShown: false
+
+    // Which page of the log is shown. It opens at the newest (PLAN §12.1: the
+    // log is paged like every other list, and nothing in Quire scrolls).
+    property int logPage: 1
 
     signal pingRequested()
     signal logRequested()
@@ -163,7 +168,12 @@ Item {
             }
         }
 
+        // The log, paged rather than scrolled (PLAN §12.1). Each entry is a
+        // fixed two lines so that a page holds a whole number of them; a log
+        // line longer than that is elided, which is a real loss and a smaller
+        // one than a page whose last row is cut in half.
         Rectangle {
+            id: logPanel
             width: parent.width
             height: screen.logShown ? 520 : 0
             visible: screen.logShown
@@ -171,36 +181,79 @@ Item {
             border.width: 1
             border.color: Style.rule
 
-            ListView {
-                id: logView
-                objectName: "logView"
-                anchors { fill: parent; margins: Style.gap }
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                flickDeceleration: 10000
-                maximumFlickVelocity: 1600
-                model: screen.logLines
+            readonly property int rowHeight: Math.max(1, Math.round(logLineProbe.height * 2))
+            readonly property int pageSize: Paging.rowsPerPage(logViewport.height, logPanel.rowHeight)
+            readonly property int totalPages: Paging.pageCount(logView.count, logPanel.pageSize)
 
-                // The newest lines are the ones anyone diagnosing a problem
-                // wants, so start at the bottom.
-                onCountChanged: positionViewAtEnd()
+            Text {
+                id: logLineProbe
+                visible: false
+                text: "Ag"
+                font.pointSize: Style.smallSize
+                font.family: "monospace"
+            }
 
-                delegate: Text {
-                    width: logView.width
-                    wrapMode: Text.WrapAnywhere
-                    text: modelData
+            Item {
+                id: logViewport
+                anchors {
+                    top: parent.top; topMargin: Style.gap
+                    left: parent.left; leftMargin: Style.gap
+                    right: parent.right; rightMargin: Style.gap
+                    bottom: logPager.top
+                }
+
+                ListView {
+                    id: logView
+                    objectName: "logView"
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
+                    height: Paging.rowsPerPage(logViewport.height, logPanel.rowHeight) * logPanel.rowHeight
+                    clip: true
+
+                    interactive: false
+                    cacheBuffer: 0
+                    contentY: Paging.firstIndex(screen.logPage, logPanel.pageSize) * logPanel.rowHeight
+
+                    model: screen.logLines
+
+                    // The newest lines are the ones anyone diagnosing a problem
+                    // wants, so open at the last page rather than the first.
+                    onCountChanged: screen.logPage = logPanel.totalPages
+
+                    delegate: Item {
+                        width: logView.width
+                        height: logPanel.rowHeight
+
+                        Text {
+                            anchors.fill: parent
+                            wrapMode: Text.WrapAnywhere
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            text: modelData
+                            font.pointSize: Style.smallSize
+                            font.family: "monospace"
+                            color: Style.muted
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Nothing logged yet."
                     font.pointSize: Style.smallSize
-                    font.family: "monospace"
                     color: Style.muted
+                    visible: logView.count === 0
                 }
             }
 
-            Text {
-                anchors.centerIn: parent
-                text: "Nothing logged yet."
-                font.pointSize: Style.smallSize
-                color: Style.muted
-                visible: logView.count === 0
+            PagerBar {
+                id: logPager
+                objectName: "logPager"
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                page: screen.logPage
+                totalPages: logPanel.totalPages
+                hasMore: screen.logPage < logPanel.totalPages
+                onPreviousRequested: screen.logPage = Paging.clampPage(screen.logPage - 1, logPanel.totalPages)
+                onNextRequested: screen.logPage = Paging.clampPage(screen.logPage + 1, logPanel.totalPages)
             }
         }
 
