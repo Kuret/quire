@@ -2,6 +2,8 @@ package fetch
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -18,18 +20,41 @@ const robotsTTL = 12 * time.Hour
 // beyond that is not a robots file.
 const robotsMaxBytes = 512 << 10
 
+// robotsTransportRetries is how many extra attempts a transport error earns
+// before the answer is declared unknown. Status-code retries are handled by
+// Client.do, which already backs off on 5xx; this covers the case where there
+// was no response at all.
+const robotsTransportRetries = 2
+
 // RobotsCache fetches, caches and applies robots.txt per host (PLAN §7.4).
 //
-// The failure policy is deliberate and stated here because it is a judgement
-// call, not an obvious one:
+// The outcome policy is deliberate, and it is three cases rather than two,
+// because "we were refused" and "we could not ask" are different facts and
+// only one of them is a denial:
 //
-//   - 2xx: parse and apply.
-//   - 404 or any other 4xx: no robots file, everything allowed. This is the
-//     conventional reading and what every major crawler does.
-//   - 5xx, or a transport error: allow. A site that is briefly broken has not
-//     asked us to stay out, and failing closed here would turn a blip into a
-//     "robots_denied" verdict that lies to the user.
-//   - a body we cannot parse: allow the parts we understood, ignore the rest.
+//   - **2xx: parse and apply.** A body we cannot fully parse yields the rules
+//     we did understand; the rest is ignored.
+//
+//   - **404, or any other 4xx: allowed.** No robots file means no
+//     restrictions. This is the conventional reading and what every major
+//     crawler does.
+//
+//   - **5xx, or a transport error: unknown.** Retried with backoff; if it
+//     still fails, the request does not proceed. An unreadable robots.txt is
+//     not a "yes" — it is an absence of information, and PLAN §7.6's posture
+//     of taking "no" for an answer means we do not help ourselves to the
+//     benefit of the doubt. Earlier revisions of this file allowed the
+//     request in this case; that was wrong.
+//
+// The third case is reported as ErrRobotsUnavailable, which callers map to the
+// `unreachable` verdict — never to `robots_denied`. The site did not deny us;
+// we could not ask. PLAN §6 M3 requires a verdict to be a complete and honest
+// answer, and asserting a refusal that never happened would fail that twice
+// over: it would be untrue, and it would send the user off to argue with a
+// robots policy that does not exist.
+//
+// An unknown outcome is deliberately *not* cached. A transient 503 must not
+// lock a host out for the whole TTL; the next request asks again.
 type RobotsCache struct {
 	client *Client
 
@@ -40,9 +65,11 @@ type RobotsCache struct {
 
 type robotsEntry struct {
 	rules   *robotsRules
+	err     error
 	fetched time.Time
 	// ready is closed when the fetch finishes, so N concurrent requests to a
-	// cold host result in exactly one robots.txt fetch.
+	// cold host result in exactly one robots.txt fetch. Waiters share the
+	// outcome, including a failure — they do not each retry it.
 	ready chan struct{}
 }
 
@@ -76,9 +103,32 @@ func (rc *RobotsCache) CrawlDelay(ctx context.Context, p *Policy, u *url.URL) (t
 func (rc *RobotsCache) rulesFor(ctx context.Context, p *Policy, u *url.URL) (*robotsRules, error) {
 	key := strings.ToLower(u.Scheme + "://" + u.Host)
 
-	rc.mu.Lock()
-	e, ok := rc.entries[key]
-	if ok {
+	// The loop exists for exactly one transition: a cached entry that has gone
+	// stale is dropped and refetched. Every other path returns.
+	for {
+		rc.mu.Lock()
+		e, ok := rc.entries[key]
+		if !ok {
+			e = &robotsEntry{ready: make(chan struct{})}
+			rc.entries[key] = e
+			rc.mu.Unlock()
+
+			rules, err := rc.fetch(ctx, p, u.Scheme+"://"+u.Host+"/robots.txt")
+
+			rc.mu.Lock()
+			e.rules, e.err, e.fetched = rules, err, rc.now()
+			if err != nil {
+				// Do not cache an unknown: a transient failure must not lock
+				// the host out for the whole TTL.
+				if rc.entries[key] == e {
+					delete(rc.entries, key)
+				}
+			}
+			rc.mu.Unlock()
+			close(e.ready)
+			return rules, err
+		}
+
 		ready := e.ready
 		rc.mu.Unlock()
 		select {
@@ -86,49 +136,89 @@ func (rc *RobotsCache) rulesFor(ctx context.Context, p *Policy, u *url.URL) (*ro
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+
 		rc.mu.Lock()
-		fresh := rc.now().Sub(e.fetched) < robotsTTL
-		rules := e.rules
+		rules, err, fetched := e.rules, e.err, e.fetched
 		rc.mu.Unlock()
-		if fresh {
+
+		if err != nil {
+			// Share the failure rather than re-fetching. Without this, N
+			// waiters on a failed fetch would each start their own, turning
+			// one broken host into a retry storm.
+			return nil, err
+		}
+		if rc.now().Sub(fetched) < robotsTTL {
 			return rules, nil
 		}
+
 		rc.mu.Lock()
 		// Another goroutine may already have started the refresh.
 		if rc.entries[key] == e {
 			delete(rc.entries, key)
 		}
 		rc.mu.Unlock()
-		return rc.rulesFor(ctx, p, u)
 	}
-	e = &robotsEntry{ready: make(chan struct{})}
-	rc.entries[key] = e
-	rc.mu.Unlock()
-
-	rules := rc.fetch(ctx, p, u.Scheme+"://"+u.Host+"/robots.txt")
-
-	rc.mu.Lock()
-	e.rules = rules
-	e.fetched = rc.now()
-	rc.mu.Unlock()
-	close(e.ready)
-	return rules, nil
 }
 
-// fetch retrieves and parses robots.txt, returning nil for "no rules apply".
-func (rc *RobotsCache) fetch(ctx context.Context, p *Policy, rawurl string) *robotsRules {
-	resp, err := rc.client.do(ctx, p, "GET", rawurl, nil, nil)
-	if err != nil || resp == nil {
-		return nil // fail open; see the type comment
+// fetch retrieves and parses robots.txt.
+//
+// The three returns map to the three cases in the RobotsCache comment:
+// (rules, nil) for a parsed file, (nil, nil) for "no file, everything
+// allowed", and (nil, ErrRobotsUnavailable) for "we could not ask".
+func (rc *RobotsCache) fetch(ctx context.Context, p *Policy, rawurl string) (*robotsRules, error) {
+	var lastErr error
+	var lastStatus int
+
+	// Client.do already retries 5xx with backoff, so a status-code failure
+	// arrives here having been tried properly. A transport error never reached
+	// a server at all, so it gets its own bounded retry.
+	for attempt := 0; ; attempt++ {
+		resp, err := rc.client.do(ctx, p, "GET", rawurl, nil, nil)
+		switch {
+		case err != nil:
+			// A guarded or malformed URL is not a transient fault; retrying it
+			// would waste the device's time to reach the same answer.
+			var ge *GuardError
+			if errors.As(err, &ge) || errors.Is(err, ErrInvalidURL) || errors.Is(err, ErrBudgetExhausted) {
+				return nil, robotsUnavailable(rawurl, err)
+			}
+			lastErr = err
+		case resp.StatusCode == 200:
+			body := resp.Body
+			if len(body) > robotsMaxBytes {
+				body = body[:robotsMaxBytes]
+			}
+			return parseRobots(string(body), rc.client.ua), nil
+		case resp.StatusCode >= 400 && resp.StatusCode <= 499:
+			// No robots file. Everything is allowed.
+			return nil, nil
+		case resp.StatusCode >= 200 && resp.StatusCode <= 399:
+			// A 2xx that is not 200 (204, say) or a redirect we did not
+			// follow to a body: nothing to parse, and nothing that says no.
+			return nil, nil
+		default:
+			// 5xx, already retried by Client.do. The answer is unknown.
+			lastStatus = resp.StatusCode
+			return nil, robotsUnavailable(rawurl, fmt.Errorf("HTTP %d", lastStatus))
+		}
+
+		if attempt >= robotsTransportRetries || ctx.Err() != nil {
+			return nil, robotsUnavailable(rawurl, lastErr)
+		}
+		if err := rc.client.sleep(ctx, rc.client.backoff(attempt+1, "")); err != nil {
+			return nil, robotsUnavailable(rawurl, lastErr)
+		}
 	}
-	if resp.StatusCode != 200 {
-		return nil
+}
+
+// robotsUnavailable wraps a cause as the "we could not ask" outcome. The
+// message says so in the words the user will see, because PLAN §6 M3 wants a
+// verdict to read as a complete answer rather than as an error code.
+func robotsUnavailable(rawurl string, cause error) error {
+	if cause == nil {
+		cause = errors.New("no response")
 	}
-	body := resp.Body
-	if len(body) > robotsMaxBytes {
-		body = body[:robotsMaxBytes]
-	}
-	return parseRobots(string(body), rc.client.ua)
+	return fmt.Errorf("fetch: %s: %w: %w", rawurl, ErrRobotsUnavailable, cause)
 }
 
 // robotsRules is the merged group that applies to us.

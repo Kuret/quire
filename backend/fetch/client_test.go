@@ -339,32 +339,190 @@ func TestRobotsIsFetchedOnlyOncePerHost(t *testing.T) {
 	}
 }
 
-func TestRobotsFailsOpenOnServerError(t *testing.T) {
+// TestRobotsOutcomeIsThreeCases pins the distinction the whole robots policy
+// turns on: being refused, being told there are no rules, and being unable to
+// ask are three different facts, and only the first is a denial.
+//
+// An earlier revision allowed the request on 5xx. That was wrong: an
+// unreadable robots.txt is an absence of information, not a "yes", and PLAN
+// §7.6's posture is to take "no" for an answer rather than to help ourselves
+// to the benefit of the doubt.
+func TestRobotsOutcomeIsThreeCases(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
-		name   string
-		status int
+		name    string
+		status  int
+		body    string
+		wantErr error // nil means the request is allowed to proceed
 	}{
-		{"404 means no robots file", 404},
-		{"500 is a blip, not a refusal", 500},
-		{"503 is a blip, not a refusal", 503},
+		{name: "200 with no rules for us", status: 200, body: "User-agent: somebot\nDisallow: /\n"},
+		{name: "200 with an empty Disallow", status: 200, body: "User-agent: *\nDisallow:\n"},
+		{name: "404 means no robots file", status: 404},
+		{name: "403 on robots.txt is still no robots file", status: 403},
+		{name: "410 is no robots file", status: 410},
+		{name: "204 has nothing to say", status: 204},
+
+		// The changed cases. These must not proceed, and must not claim a
+		// denial that never happened.
+		{name: "500 is unknown, not permission", status: 500, wantErr: fetch.ErrRobotsUnavailable},
+		{name: "502 is unknown, not permission", status: 502, wantErr: fetch.ErrRobotsUnavailable},
+		{name: "503 is unknown, not permission", status: 503, wantErr: fetch.ErrRobotsUnavailable},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/robots.txt" {
 					w.WriteHeader(tc.status)
+					fmt.Fprint(w, tc.body)
 					return
 				}
 				fmt.Fprint(w, "ok")
 			}))
 			defer srv.Close()
-			c, p := testClient(t, srv, fetch.Options{MaxAttempts: 1})
-			if _, err := c.Get(context.Background(), p, srv.URL+"/manga/x"); err != nil {
-				t.Fatalf("robots %d should fail open, got %v", tc.status, err)
+
+			c, p := testClient(t, srv, fetch.Options{MaxAttempts: 2})
+			_, err := c.Get(context.Background(), p, srv.URL+"/manga/x")
+
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("robots %d should allow the request, got %v", tc.status, err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("robots %d: err = %v, want it to wrap %v", tc.status, err, tc.wantErr)
+			}
+			// The load-bearing half: we must not have invented a refusal.
+			if errors.Is(err, fetch.ErrRobotsDenied) {
+				t.Fatalf("robots %d was reported as a denial; the site never denied us: %v", tc.status, err)
 			}
 		})
+	}
+}
+
+// TestRobotsTransportFailureIsUnknown covers the other half of the third case:
+// no response at all, rather than a 5xx.
+func TestRobotsTransportFailureIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			// Hang up mid-response so the client sees a transport error rather
+			// than a status code.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("no hijacker")
+				return
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			conn.Close()
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer srv.Close()
+
+	c, p := testClient(t, srv, fetch.Options{MaxAttempts: 1})
+	_, err := c.Get(context.Background(), p, srv.URL+"/manga/x")
+
+	if !errors.Is(err, fetch.ErrRobotsUnavailable) {
+		t.Fatalf("err = %v, want it to wrap ErrRobotsUnavailable", err)
+	}
+	if errors.Is(err, fetch.ErrRobotsDenied) {
+		t.Fatalf("a transport failure was reported as a denial: %v", err)
+	}
+}
+
+// TestRobotsUnknownIsRetriedThenGivesUp checks the "retry with backoff" half of
+// the unknown case, and that it is bounded.
+func TestRobotsUnknownIsRetriedThenGivesUp(t *testing.T) {
+	t.Parallel()
+
+	var robotsHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			robotsHits.Add(1)
+			w.WriteHeader(503)
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer srv.Close()
+
+	c, p := testClient(t, srv, fetch.Options{MaxAttempts: 3})
+	if _, err := c.Get(context.Background(), p, srv.URL+"/manga/x"); !errors.Is(err, fetch.ErrRobotsUnavailable) {
+		t.Fatalf("err = %v, want ErrRobotsUnavailable", err)
+	}
+	if got := robotsHits.Load(); got < 2 {
+		t.Errorf("robots.txt was fetched %d time(s); a 5xx must be retried before we call it unknown", got)
+	}
+	if got := robotsHits.Load(); got > 6 {
+		t.Errorf("robots.txt was fetched %d times; the retry must be bounded", got)
+	}
+}
+
+// TestRobotsUnknownIsNotCached makes sure a transient outage does not lock a
+// host out for the whole TTL. A site that recovers must be usable at once.
+func TestRobotsUnknownIsNotCached(t *testing.T) {
+	t.Parallel()
+
+	var broken atomic.Bool
+	broken.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			if broken.Load() {
+				w.WriteHeader(503)
+				return
+			}
+			fmt.Fprint(w, "User-agent: *\nDisallow:\n")
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer srv.Close()
+
+	c, p := testClient(t, srv, fetch.Options{MaxAttempts: 1})
+	ctx := context.Background()
+
+	if _, err := c.Get(ctx, p, srv.URL+"/manga/x"); !errors.Is(err, fetch.ErrRobotsUnavailable) {
+		t.Fatalf("while broken: err = %v, want ErrRobotsUnavailable", err)
+	}
+
+	broken.Store(false)
+	if _, err := c.Get(ctx, p, srv.URL+"/manga/x"); err != nil {
+		t.Fatalf("after recovery: %v — the unknown outcome was cached", err)
+	}
+}
+
+// TestRobotsDeniedIsStillADenial guards the line from the other side: a real
+// Disallow must keep reporting robots_denied and must never be softened into
+// "unavailable".
+func TestRobotsDeniedIsStillADenial(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: *\nDisallow: /manga/\n")
+			return
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer srv.Close()
+
+	c, p := testClient(t, srv, fetch.Options{})
+	_, err := c.Get(context.Background(), p, srv.URL+"/manga/x")
+	if !errors.Is(err, fetch.ErrRobotsDenied) {
+		t.Fatalf("err = %v, want ErrRobotsDenied", err)
+	}
+	if errors.Is(err, fetch.ErrRobotsUnavailable) {
+		t.Fatalf("a real denial was reported as unavailable: %v", err)
 	}
 }
 

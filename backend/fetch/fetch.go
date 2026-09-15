@@ -59,7 +59,21 @@ var (
 
 	// ErrRobotsDenied is returned when robots.txt disallows the path. PLAN §7.5
 	// turns this into the robots_denied verdict: the source is not added.
+	//
+	// It means the site said no. It never means we failed to ask — that is
+	// ErrRobotsUnavailable, and conflating the two would have Quire report a
+	// refusal that never happened.
 	ErrRobotsDenied = errors.New("disallowed by robots.txt")
+
+	// ErrRobotsUnavailable is returned when robots.txt could not be read: a
+	// 5xx that survived its retries, or a transport error. The outcome is
+	// *unknown*, not permission — an unreadable robots.txt is an absence of
+	// information, and PLAN §7.6's posture is to take "no" for an answer
+	// rather than to help ourselves to the benefit of the doubt.
+	//
+	// Callers map this to the `unreachable` verdict (PLAN §7.5 stage 2), never
+	// to robots_denied. See the RobotsCache comment for the full policy.
+	ErrRobotsUnavailable = errors.New("robots.txt could not be read")
 
 	// ErrBudgetExhausted is returned when the client's total-bytes budget is
 	// spent. PLAN §6 M4 wants a warning threshold rather than a filled disk;
