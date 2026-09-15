@@ -657,3 +657,33 @@ The Dockerfile in `build/` is only needed for anything linking Qt/C++.
   `rm -rf /home/root/.cache/remarkable/xochitl/qmlcache`
 - `xovi-boot.service` has a crash-loop safety net: 3 fast boots in a row and it
   skips xovi and boots stock. Kill switch: `touch /home/root/.xovi-boot/disable`.
+
+---
+
+## 9. M1 acceptance — PASSED on hardware 2026-09-15
+
+User launched Quire from the AppLoad menu and tapped "Ping backend": the label
+rendered the device's real uptime and **the app stayed open**. That closes the
+full round trip end to end:
+
+`tap → QML sendMessage(Ping) → SOCK_SEQPACKET → Go backend → /proc/uptime →
+Pong → onMessageReceived → label`
+
+Proven by this, beyond the Go tests: `resources.rcc` at format-version 3
+deserialises under Qt 6.8.2; AppLoad's random per-launch qrc prefix is handled;
+the manifest `entry` path resolves; and the packet framing survives the real
+launch path (which the on-device harness could not fully reproduce — AppLoad
+`chdir`s into the app directory and unlinks the socket right after accept).
+
+**It took three attempts, and every failure was invisible on the host.**
+
+| # | Bug | Why the host missed it |
+|---|---|---|
+| 1 | Dialled `unix` (SOCK_STREAM) against AppLoad's `SOCK_SEQPACKET` | macOS has no `AF_UNIX SOCK_SEQPACKET`; tests used `net.Pipe()` |
+| 2 | Header+payload written as one packet; stream-style reassembly | `net.Pipe()` is stream-like, so boundaries never mattered |
+| 3 | Zero-length payload packet read as `io.EOF` → backend exits mid-session | Needs a real SEQPACKET socket *and* an empty-payload message |
+
+**Lesson for later milestones:** for the AppLoad transport specifically, the
+device is not where you *confirm* the work — it is the only place the code is
+real. Cross-compile the test binary and run it on the device
+(`GOOS=linux GOARCH=arm64 go test -c`, scp, run) rather than trusting host runs.
