@@ -1,0 +1,117 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a Madara series page generates in its *current* form:
+  a .summary_image cover, a .post-title heading, a .post-content block of
+  .post-content_item heading/content pairs, and — crucially — a
+  #manga-chapters-holder whose chapter list is NOT in this HTML. PLAN §7.3:
+  "Chapter list often behind an admin-ajax.php POST rather than in the initial
+  HTML." That absence is the point of this fixture.
+
+  The WordPress post ID is present in both places the plugin leaves it
+  (input.rating-post-id and #manga-chapters-holder[data-id]) so the legacy
+  path's lookup can be tested against the same page.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper &#8211; Example Reader</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+</head>
+<body class="wp-manga-template-default single single-wp-manga postid-4271">
+<div class="wrap">
+  <div class="profile-manga">
+    <div class="summary_image">
+      <a href="https://example.invalid/manga/the-lantern-keeper/">
+        <img width="193" height="278"
+             src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+             data-src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg"
+             class="img-responsive lazyload" alt="The Lantern Keeper">
+      </a>
+    </div>
+    <div class="post-title">
+      <h1>The Lantern Keeper</h1>
+      <div class="manga-title-badges">HOT</div>
+    </div>
+  </div>
+
+  <div class="site-content">
+    <div class="summary_content_wrap">
+      <div class="summary_content">
+
+        <div class="post-content">
+          <div class="post-content_item">
+            <div class="summary-heading"><h5>Alternative</h5></div>
+            <div class="summary-content">Rōtō no Bannin, The Keeper of Lanterns</div>
+          </div>
+          <div class="post-content_item">
+            <div class="summary-heading"><h5>Author(s)</h5></div>
+            <div class="summary-content">
+              <div class="author-content">
+                <a href="https://example.invalid/manga-author/e-marchetti/">E. Marchetti</a>
+              </div>
+            </div>
+          </div>
+          <div class="post-content_item">
+            <div class="summary-heading"><h5>Artist(s)</h5></div>
+            <div class="summary-content">
+              <div class="artist-content">
+                <a href="https://example.invalid/manga-artist/e-marchetti/">E. Marchetti</a>,
+                <a href="https://example.invalid/manga-artist/studio-quay/">Studio Quay</a>
+              </div>
+            </div>
+          </div>
+          <div class="post-content_item">
+            <div class="summary-heading"><h5>Genre(s)</h5></div>
+            <div class="summary-content">
+              <div class="genres-content">
+                <a href="https://example.invalid/manga-genre/fantasy/" rel="tag">Fantasy</a>
+                <a href="https://example.invalid/manga-genre/slice-of-life/" rel="tag">Slice of Life</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="post-status">
+          <div class="post-content_item">
+            <div class="summary-heading"><h5>Status</h5></div>
+            <div class="summary-content">OnGoing</div>
+          </div>
+        </div>
+
+        <input class="rating-post-id" name="rating_post_id" type="hidden" value="4271">
+      </div>
+    </div>
+
+    <div class="description-summary">
+      <div class="summary__content show-more">
+        <p>Every dusk, Mira walks the harbour road lighting forty-one lamps.
+           On the night the forty-second lights itself, she stops counting and
+           starts asking.</p>
+      </div>
+    </div>
+
+    <div class="c-page-content">
+      <div class="c-blog__heading style-2"><h4 class="h5">Chapters</h4></div>
+      <div class="page-content-listing single-page">
+        <!-- Empty on purpose: the list arrives over POST. -->
+        <div id="manga-chapters-holder" data-id="4271">
+          <div class="listing-chapters_wrap">
+            <span class="loading"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="madara-js-extra">
+var manga = {"manga_id":"4271","action":"manga_get_chapters"};
+</script>
+<script src="https://example.invalid/wp-content/plugins/madara/js/single.js"></script>
+</body>
+</html>

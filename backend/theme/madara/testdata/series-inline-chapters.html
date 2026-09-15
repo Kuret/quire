@@ -1,0 +1,79 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the *other* Madara series shape: the same page as series.html, but
+  with the chapter list already rendered into #manga-chapters-holder rather
+  than lazy-loaded. Both shapes are in the wild, which is why Chapters() falls
+  back to the series HTML when the AJAX POST yields nothing — a site of this
+  shape then needs no override at all.
+
+  This page also uses a renamed path segment (/series/ instead of /manga/) so
+  the mangaSubPath override has something real to absorb.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Salt and Cedar &#8211; Second Example Reader</title>
+  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+</head>
+<body class="single single-wp-manga postid-88">
+<div class="wrap">
+  <div class="profile-manga">
+    <div class="summary_image">
+      <a href="/series/salt-and-cedar/">
+        <img data-src="https://example.invalid/wp-content/uploads/2026/02/salt-cedar-193x278.jpg" alt="Salt and Cedar">
+      </a>
+    </div>
+    <div class="post-title"><h1>Salt and Cedar</h1></div>
+  </div>
+
+  <div class="site-content">
+    <div class="summary_content">
+      <div class="post-content">
+        <div class="post-content_item">
+          <div class="summary-heading"><h5>Author(s)</h5></div>
+          <div class="summary-content">R. Okonkwo</div>
+        </div>
+        <div class="post-content_item">
+          <div class="summary-heading"><h5>Genre(s)</h5></div>
+          <div class="summary-content">
+            <div class="genres-content">
+              <a href="/manga-genre/drama/" rel="tag">Drama</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="post-status">
+        <div class="post-content_item">
+          <div class="summary-heading"><h5>Status</h5></div>
+          <div class="summary-content">Completed</div>
+        </div>
+      </div>
+      <input class="rating-post-id" name="rating_post_id" type="hidden" value="88">
+    </div>
+
+    <div class="description-summary">
+      <div class="summary__content"><p>A boatwright and a cartographer argue about the shape of a coast.</p></div>
+    </div>
+
+    <div class="page-content-listing single-page">
+      <div id="manga-chapters-holder" data-id="88">
+        <ul class="main version-chap">
+          <li class="wp-manga-chapter">
+            <a href="/series/salt-and-cedar/chapter-2/">Chapter 2</a>
+            <span class="chapter-release-date"><i>3 days ago</i></span>
+          </li>
+          <li class="wp-manga-chapter">
+            <a href="/series/salt-and-cedar/chapter-1/">Chapter 1</a>
+            <span class="chapter-release-date"><i>January 6, 2026</i></span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

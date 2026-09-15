@@ -1,0 +1,24 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the fragment a *legacy*-shape Madara site returns from
+  POST /wp-admin/admin-ajax.php with action=manga_get_chapters&manga={postID}.
+
+  The markup is the same li.wp-manga-chapter shape as the current endpoint —
+  that identity is the whole reason docs/THEME-NOTES.md argues for one theme
+  with an `ajaxStyle` override rather than two themes. Only the endpoint and
+  the need for a WordPress post ID differ, and the content here is shorter so a
+  test can tell which endpoint answered.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<ul class="main version-chap">
+  <li class="wp-manga-chapter">
+    <a href="/comics/the-lantern-keeper/chapter-2/">Chapter 2 - Salt Light</a>
+    <span class="chapter-release-date"><i>February 10, 2026</i></span>
+  </li>
+  <li class="wp-manga-chapter">
+    <a href="/comics/the-lantern-keeper/chapter-1/">Chapter 1 - Forty-One</a>
+    <span class="chapter-release-date"><i>February 3, 2026</i></span>
+  </li>
+</ul>

@@ -1,0 +1,68 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a Madara reader page generates: a .reading-content
+  containing one .page-break per image, with the image URLs lazy-loaded out of
+  src into data-src and a base64 placeholder left behind. Reading src first
+  would yield a chapter of grey squares, which is the single most likely way to
+  get this theme subtly wrong.
+
+  Deliberate variations exercised by the test:
+    - page 1 uses data-src with a base64 placeholder in src
+    - page 2 uses a plain src (some sites disable lazy loading)
+    - page 3 uses data-lazy-src (a different lazy-loading plugin)
+    - page 4 uses a protocol-relative URL, which must resolve against https
+    - page 5 uses a site-relative path, which must resolve against baseUrl
+    - the URLs carry leading whitespace, which the plugin's templating leaves
+      behind and which must be trimmed or the request 404s
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper - Chapter 4 &#8211; Example Reader</title>
+  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+</head>
+<body class="reading-manga">
+<div class="wrap">
+  <div class="c-blog__heading">
+    <h1 class="entry-title">The Lantern Keeper <span>Chapter 4</span></h1>
+  </div>
+
+  <div class="reading-content">
+    <div class="page-break no-gaps">
+      <img id="image-0" width="800" height="1200"
+           src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+           data-src=" https://cdn.example.invalid/pages/lantern-keeper/4/001.jpg "
+           class="wp-manga-chapter-img img-responsive lazyload" alt="">
+    </div>
+    <div class="page-break no-gaps">
+      <img id="image-1" src="https://cdn.example.invalid/pages/lantern-keeper/4/002.jpg"
+           class="wp-manga-chapter-img img-responsive" alt="">
+    </div>
+    <div class="page-break no-gaps">
+      <img id="image-2"
+           src="https://example.invalid/wp-content/plugins/madara/images/loading.gif"
+           data-lazy-src="https://cdn.example.invalid/pages/lantern-keeper/4/003.jpg"
+           class="wp-manga-chapter-img img-responsive" alt="">
+    </div>
+    <div class="page-break no-gaps">
+      <img id="image-3" data-src="//cdn.example.invalid/pages/lantern-keeper/4/004.jpg"
+           class="wp-manga-chapter-img img-responsive" alt="">
+    </div>
+    <div class="page-break no-gaps">
+      <img id="image-4" data-src="/wp-content/uploads/pages/lantern-keeper/4/005.jpg"
+           class="wp-manga-chapter-img img-responsive" alt="">
+    </div>
+  </div>
+
+  <div class="select-pagination">
+    <div class="nav-links">
+      <a href="/manga/the-lantern-keeper/chapter-3/" class="btn prev_page">Prev</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>
