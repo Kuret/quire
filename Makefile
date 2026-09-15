@@ -11,11 +11,17 @@ all: check rmpp
 ## check: everything CI would run
 check: fmt vet test
 
+# The `quiretest` tag compiles the fixture server's integration tests, which
+# need fetch's test-only loopback exemption (backend/fetch/loopback_quiretest.go).
+# No production target passes it, so the exemption is not in a shipped binary.
+# The untagged run below is what proves that: it builds the production shape.
 test:
-	$(GO) test ./...
+	$(GO) test -tags quiretest ./...
+	$(GO) build ./...
 
 vet:
 	$(GO) vet ./...
+	$(GO) vet -tags quiretest ./...
 
 ## fmt: fail if anything is unformatted, rather than silently rewriting
 fmt:
