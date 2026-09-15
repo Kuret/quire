@@ -4,12 +4,20 @@
 # installs are not on PATH for non-interactive shells).
 GO := $(shell build/go-path.sh)
 
-.PHONY: all check test vet fmt rmpp pc install icon clean
+.PHONY: all check test vet fmt prebuilt prebuilt-update rmpp pc install icon clean
 
 all: check rmpp
 
 ## check: everything CI would run
-check: fmt vet test
+check: fmt vet test prebuilt
+
+## prebuilt: fail if the committed resources.rcc has drifted from ui/
+prebuilt:
+	build/prebuilt.sh check
+
+## prebuilt-update: regenerate the committed resources.rcc (needs Qt rcc)
+prebuilt-update:
+	build/prebuilt.sh update
 
 # The `quiretest` tag compiles the fixture server's integration tests, which
 # need fetch's test-only loopback exemption (backend/fetch/loopback_quiretest.go).

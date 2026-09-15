@@ -24,10 +24,12 @@ find_go() {
     printf '%s' "$candidate"
 }
 
-# find_rcc echoes a usable Qt rcc binary.
-find_rcc() {
-    if [[ -n "${RCC:-}" ]]; then printf '%s' "$RCC"; return; fi
-    if command -v rcc >/dev/null 2>&1; then command -v rcc; return; fi
+# rcc_path echoes a usable Qt rcc binary, or nothing (exit 1) if there is none.
+# It never dies: an installing user is not required to have a gigabyte of Qt on
+# their machine, so "no rcc" is an ordinary state handled by make_resources.
+rcc_path() {
+    if [[ -n "${RCC:-}" ]]; then printf '%s' "$RCC"; return 0; fi
+    if command -v rcc >/dev/null 2>&1; then command -v rcc; return 0; fi
     local candidate
     for candidate in \
         /opt/homebrew/share/qt/libexec/rcc \
@@ -35,9 +37,71 @@ find_rcc() {
         /usr/lib/qt6/libexec/rcc \
         /usr/lib/x86_64-linux-gnu/qt6/libexec/rcc
     do
-        [[ -x "$candidate" ]] && { printf '%s' "$candidate"; return; }
+        [[ -x "$candidate" ]] && { printf '%s' "$candidate"; return 0; }
     done
-    die "no Qt rcc found; set \$RCC"
+    return 1
+}
+
+# find_rcc echoes a usable Qt rcc binary or dies. For callers that genuinely
+# cannot proceed without one — regenerating the prebuilt, mainly.
+find_rcc() {
+    rcc_path || die "no Qt rcc found; set \$RCC (brew install qt, or apt install qt6-base-dev)"
+}
+
+PREBUILT_RCC="$REPO_ROOT/prebuilt/resources.rcc"
+PREBUILT_FINGERPRINT="$REPO_ROOT/prebuilt/resources.rcc.sources"
+
+# sha256_of <file> echoes the hex digest. macOS ships shasum, Linux sha256sum.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else die "no sha256sum or shasum on PATH"
+    fi
+}
+
+# qrc_inputs echoes every file resources.rcc is built from, application.qrc
+# included, relative to the repo root.
+qrc_inputs() {
+    printf 'application.qrc\n'
+    sed -n 's|.*<file>\(.*\)</file>.*|\1|p' "$REPO_ROOT/application.qrc"
+}
+
+# prebuilt_fingerprint echoes "<sha256>  <path>" for each input, sorted by path.
+# This is what lets a machine with no Qt at all still notice that the committed
+# resources.rcc no longer matches ui/.
+prebuilt_fingerprint() {
+    cd "$REPO_ROOT"
+    local f
+    qrc_inputs | sort | while read -r f; do
+        printf '%s  %s\n' "$(sha256_of "$f")" "$f"
+    done
+}
+
+# prebuilt_check returns 0 if prebuilt/resources.rcc is in step with ui/.
+prebuilt_check() {
+    [[ -f "$PREBUILT_RCC" && -f "$PREBUILT_FINGERPRINT" ]] || return 1
+    [[ "$(prebuilt_fingerprint)" == "$(cat "$PREBUILT_FINGERPRINT")" ]]
+}
+
+# make_resources <outfile> produces resources.rcc, preferring a real rcc and
+# falling back to the committed prebuilt.
+#
+# The prebuilt exists so that installing Quire needs only a Go toolchain. It is
+# a build artefact in git, which is a cost; the drift it could cause is paid for
+# by prebuilt_check, which `make check` runs and which needs no Qt.
+make_resources() {
+    local out="$1" rcc
+    if rcc="$(rcc_path)"; then
+        say "rcc     $rcc (format-version $RCC_FORMAT_VERSION)"
+        "$rcc" --binary --format-version "$RCC_FORMAT_VERSION" -o "$out" application.qrc
+        return
+    fi
+    [[ -f "$PREBUILT_RCC" ]] \
+        || die "no Qt rcc found and no prebuilt/resources.rcc; set \$RCC"
+    prebuilt_check \
+        || die "no Qt rcc found, and prebuilt/resources.rcc is stale relative to ui/ — install Qt and run build/prebuilt.sh update"
+    say "rcc     none found; using prebuilt/resources.rcc"
+    cp "$PREBUILT_RCC" "$out"
 }
 
 # build_bundle <outdir> <goos> <goarch>
@@ -48,17 +112,14 @@ find_rcc() {
 #   <outdir>/backend/entry     <- executable, argv[1] = AppLoad socket path
 build_bundle() {
     local outdir="$1" goos="$2" goarch="$3"
-    local go rcc
+    local go
     go="$(find_go)"
-    rcc="$(find_rcc)"
 
     cd "$REPO_ROOT"
     rm -rf "$outdir"
     mkdir -p "$outdir/backend"
 
-    say "rcc     $rcc (format-version $RCC_FORMAT_VERSION)"
-    "$rcc" --binary --format-version "$RCC_FORMAT_VERSION" \
-        -o "$outdir/resources.rcc" application.qrc
+    make_resources "$outdir/resources.rcc"
 
     say "go      $go ($goos/$goarch)"
     # CGO off keeps the binary static: the device has no toolchain and its
