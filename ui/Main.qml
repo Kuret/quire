@@ -165,6 +165,9 @@ Rectangle {
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
             seriesGridScreen.busy = false
+            // The turn did not happen. The pager goes back to naming the page
+            // still on screen rather than one that never arrived.
+            seriesGridScreen.pendingPage = 0
             chapterListScreen.busy = false
             return
         }
@@ -201,8 +204,19 @@ Rectangle {
                 "coverPath": ""
             })
         }
+        // Where the backend says we are. It clamps a page that ran past the
+        // end, so this is the page actually served rather than the one asked
+        // for, and totalPages is 0 until the source has genuinely run out
+        // (PLAN §12.1 — do not invent a total).
+        seriesGridScreen.page = msg && msg.page > 0 ? msg.page : 1
+        seriesGridScreen.totalPages = msg && msg.totalPages > 0 ? msg.totalPages : 0
+        seriesGridScreen.hasMore = msg ? !!msg.hasMore : false
+        seriesGridScreen.pendingPage = 0
         seriesGridScreen.emptyMessage = list.length === 0
             ? "Nothing came back for that." : ""
+        // One batch for the page that just landed. The backend drops whatever
+        // the previous page left in flight.
+        seriesGridScreen.requestVisibleCovers()
     }
 
     // Covers never travel over the socket (PLAN §7.1): the backend writes a
@@ -269,13 +283,32 @@ Rectangle {
 
     // ---- navigation --------------------------------------------------------
 
+    // requestSeriesPage asks for one display page of the listing the grid is
+    // showing. The page size is the grid's, worked out from its own viewport —
+    // the backend pages a cache of source pages against it, so this is usually
+    // not an HTTP request at all (PLAN §12.1).
+    function requestSeriesPage(page) {
+        var req = {
+            "sourceId": root.currentSourceId,
+            "page": page,
+            "pageSize": seriesGridScreen.pageSize
+        }
+        if (seriesGridScreen.query.length > 0) {
+            req.query = seriesGridScreen.query
+            root.send(Msg.Search, req)
+        } else {
+            root.send(Msg.Browse, req)
+        }
+    }
+
     function openSource(sourceId, name) {
         root.currentSourceId = sourceId
         root.currentSourceName = name
         root.screen = "browse"
         seriesGridScreen.reset()
         seriesGridScreen.busy = true
-        root.send(Msg.Browse, {"sourceId": sourceId, "page": 1})
+        seriesGridScreen.pendingPage = 1
+        root.requestSeriesPage(1)
     }
 
     function openSeries(seriesId, title) {
@@ -429,15 +462,22 @@ Rectangle {
             visible: root.screen === "browse"
             model: seriesModel
             onSearchRequested: {
+                seriesGridScreen.query = query
                 seriesGridScreen.busy = true
-                root.send(Msg.Search, {"sourceId": root.currentSourceId, "query": query, "page": 1})
+                seriesGridScreen.pendingPage = 1
+                root.requestSeriesPage(1)
             }
             onBrowseRequested: {
                 seriesGridScreen.busy = true
-                root.send(Msg.Browse, {"sourceId": root.currentSourceId, "page": 1})
+                seriesGridScreen.pendingPage = 1
+                root.requestSeriesPage(1)
             }
-            onCoverRequested: root.send(Msg.RequestCover,
-                {"sourceId": root.currentSourceId, "seriesId": seriesId, "url": url})
+            // The grid asks for a page; the screen already knows whether it is
+            // showing a search or the site's own listing, and the page size is
+            // its geometry's answer, not a constant (PLAN §12.1).
+            onPageRequested: root.requestSeriesPage(page)
+            onCoversRequested: root.send(Msg.RequestCover,
+                {"sourceId": root.currentSourceId, "covers": covers})
             onOpenRequested: root.openSeries(seriesId, title)
         }
 
