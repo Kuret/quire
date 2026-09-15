@@ -687,3 +687,99 @@ launch path (which the on-device harness could not fully reproduce — AppLoad
 device is not where you *confirm* the work — it is the only place the code is
 real. Cross-compile the test binary and run it on the device
 (`GOOS=linux GOARCH=arm64 go test -c`, scp, run) rather than trusting host runs.
+
+---
+
+## 10. M4 on device — resize cost, queue throughput, assembly memory
+
+Everything below was measured **on the tablet**, with xochitl running, over
+USB (`ssh root@10.11.99.1`). Host figures for this work are misleading: the
+i.MX8MM has four Cortex-A53 cores and the resize is CPU-bound, so a
+ten-core development machine understates the cost by roughly 3×.
+
+How to reproduce (the harnesses live in the repo, gated so CI never runs them):
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o imageproc.test ./backend/imageproc
+scp imageproc.test root@10.11.99.1:/home/root/quire-m4/
+ssh root@10.11.99.1 'cd /home/root/quire-m4 && ./imageproc.test \
+    -test.bench=BenchmarkNormalise -test.benchtime=5x -test.cpu=1 -test.run=XXX'
+```
+
+Write only under `/home` (§3.3: `/` has 47 MB free). Use
+`COPYFILE_DISABLE=1 tar …` when copying page fixtures from macOS, or the `._`
+AppleDouble files arrive too and the assembler rejects them as
+`image: unknown format`.
+
+### 10.1 Resize + encode cost per page — single core
+
+`BenchmarkNormalise`, decode → resize onto the panel grid → JPEG q85:
+
+| source | CatmullRom | BiLinear | ApproxBiLinear |
+|---|---|---|---|
+| 2480 × 3508 (A4 scan — the common case) | **4.15 s** | 3.17 s | 1.67 s |
+| 1620 × 2160 (already panel-native) | 1.72 s | 1.71 s | 0.74 s |
+| 5000 × 7000 (rare, huge) | 12.34 s | 9.18 s | 4.09 s |
+
+Splitting the A4 case: **decode 0.52 s, encode 0.39 s**, so ~0.9 s is fixed and
+the kernel is the whole of the difference.
+
+**CatmullRom stays the default.** ApproxBiLinear is 2.5× faster but samples
+only four source pixels per destination pixel regardless of the ratio, so it
+aliases screentone — worse on a 227 DPI panel than the softness it saves.
+`imageproc.ScalerBiLinear` is the documented middle option at −24%.
+
+**The box pre-pass trick does not apply here.** A cheap pre-pass must leave 2×
+for the quality kernel, so it needs a ≥4× total downscale. Comic sources are
+1.5–3× the panel, so it never engaged — measured identical timings with and
+without, even at 5000 × 7000 (12.34 s vs 12.39 s). The option was removed
+rather than left as a knob that does nothing.
+
+**Allocation matters more than it looks.** `Kernel.Scale` rebuilds its weight
+tables *and* its `dstW × srcH × 32` byte intermediate — ~170 MB for an A4 page —
+on every call. Caching a `NewScaler` per geometry (pages in a volume share one)
+took allocation from **235 MB/op to 63 MB/op** with wall clock unchanged.
+
+### 10.2 Queue throughput vs encode workers
+
+`TestDeviceEncodeWorkers`, 12 pages of 2480 × 3508, fetch fan-out 6, stub
+fetcher (so this is pure local cost), xochitl running:
+
+| encode workers | wall clock | per page | speedup |
+|---|---|---|---|
+| 1 | 63.6 s | 5.30 s | 1.00× |
+| **2 (default)** | **34.6 s** | **2.89 s** | **1.84×** |
+| 3 | 25.6 s | 2.14 s | 2.48× |
+| 4 | 35.5 s | 2.96 s | 1.79× |
+
+Four workers is **slower than three**: with all four cores saturated the run
+contends with xochitl and the system. Load average reached 6.05.
+
+`DefaultEncodeWorkers = 2` takes 62% of the best throughput and leaves half the
+CPU to the reader. Three is the throughput optimum for anyone who wants it.
+
+**Extrapolated, a 200-page volume costs 7–10 minutes of background CPU** at the
+default (2.08–2.89 s/page ÷ nothing, two cores busy), on top of download time.
+That is tolerable for a background download but it is not free; it is the
+number to revisit if a user complains about heat or battery.
+
+### 10.3 Assembly memory and time
+
+`TestDeviceAssembleFromDir`, real page JPEGs, xochitl running:
+
+| volume | assembled in | PDF | peak Go heap | **VmHWM** |
+|---|---|---|---|---|
+| 200 pages, 10 chapters | 1.10 s | 60.0 MiB (307 KiB/page) | 141 MiB | **164 MiB** |
+| 400 pages, 20 chapters | 2.18 s | 120.0 MiB (307 KiB/page) | 279 MiB | **302 MiB** |
+
+**Assembly is not the problem the host run suggested.** pdfcpu holds the
+document in memory, but peak RSS lands at ≈2.5× the PDF size and scales
+linearly: 164 MB for a typical volume, 302 MB for a large one, against ~1.6 GB
+available with xochitl up. No OOM, no swap (2.5 GB of swap exists and was never
+touched). A 1000-page volume would be ~750 MB, which is the point at which
+smaller volumes or a streaming writer would need discussing — ordinary volumes
+are nowhere near it.
+
+Assembly wall time is negligible next to the resize: **1.1 s for 200 pages**.
+Bytes on disk are unchanged by assembly — pdfcpu embeds the page JPEGs as
+DCTDecode streams rather than re-encoding them, so PDF size ≈ sum of pages.
