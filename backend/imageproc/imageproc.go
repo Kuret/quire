@@ -103,6 +103,11 @@ type Options struct {
 	// is fatal. See Result.Requantised.
 	RetryQuality int
 
+	// MaxResampleBytes caps the intermediate buffer a single resize may
+	// allocate. Zero means DefaultMaxResampleBytes; negative disables the
+	// guard. See guardFactor.
+	MaxResampleBytes int64
+
 	// Scaler selects the resampling kernel. The zero value is the default,
 	// measured on the device — see the Scaler docs.
 	Scaler Scaler
@@ -196,18 +201,47 @@ const DefaultMaxPageBytes = 1 << 20
 // busts the budget at DefaultOptions().Quality.
 const DefaultRetryQuality = 65
 
+// DefaultMaxResampleBytes caps the intermediate buffer one resize may
+// allocate, before the guard in guardFactor steps in.
+//
+// Chosen from the arithmetic, not from taste. The intermediate is
+// destinationWidth × sourceHeight × 32 bytes, so ordinary pages land at:
+//
+//	2480 × 3508 A4 scan       1527 × 3508 × 32 = 171 MB
+//	2550 × 3300 letter scan   1620 × 3300 × 32 = 171 MB
+//	2000 × 2828 web scan      1527 × 2828 × 32 = 138 MB
+//	1620 × 2160 panel-native  1620 × 2160 × 32 = 112 MB
+//
+// 256 MiB sits ~50% above the worst ordinary page, so the guard never fires on
+// normal manga — a guard that quietly engaged on everything would be a silent
+// quality regression — while bounding two concurrent encodes (the default) to
+// 512 MiB of intermediate, which is the soft heap limit the queue sets.
+const DefaultMaxResampleBytes = 256 << 20
+
 // DefaultOptions returns the panel-native settings: 1620 × 2160, JPEG q85
 // (q65 on a retry), white padding, 1% aspect tolerance, CatmullRom resampling.
 func DefaultOptions() Options {
 	return Options{
-		MaxWidth:        PanelWidth,
-		MaxHeight:       PanelHeight,
-		Quality:         85,
-		RetryQuality:    DefaultRetryQuality,
-		Background:      color.White,
-		AspectTolerance: 0.01,
-		MaxBytes:        DefaultMaxPageBytes,
-		Scaler:          ScalerCatmullRom,
+		MaxWidth:         PanelWidth,
+		MaxHeight:        PanelHeight,
+		Quality:          85,
+		RetryQuality:     DefaultRetryQuality,
+		Background:       color.White,
+		AspectTolerance:  0.01,
+		MaxBytes:         DefaultMaxPageBytes,
+		MaxResampleBytes: DefaultMaxResampleBytes,
+		Scaler:           ScalerCatmullRom,
+	}
+}
+
+func (o Options) maxResampleBytes() int64 {
+	switch {
+	case o.MaxResampleBytes == 0:
+		return DefaultMaxResampleBytes
+	case o.MaxResampleBytes < 0:
+		return 0
+	default:
+		return o.MaxResampleBytes
 	}
 }
 
@@ -229,6 +263,17 @@ type Result struct {
 	FirstBytes int64
 	// Quality is the JPEG quality the written bytes were encoded at.
 	Quality int
+
+	// GuardFactor is the integer box pre-downscale the memory guard applied
+	// before resampling, or 1 when it did not fire. See guardFactor.
+	GuardFactor int
+
+	// ImageWidth and ImageHeight are the content box inside the output: the
+	// same as Width/Height unless padding was added, in which case they are
+	// the fitted image and the rest is background. This is also the rectangle
+	// the resampler actually wrote, so it — not Width — is what the
+	// intermediate's size is computed from.
+	ImageWidth, ImageHeight int
 }
 
 // Normalise decodes src, fits it to the panel grid and writes a JPEG to dst.
@@ -252,18 +297,21 @@ func Normalise(dst io.Writer, src io.Reader, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("imageproc: decode: %w", err)
 	}
 
-	out, padded := fit(img, opts)
+	out, padded, guard, imgRect := fit(img, opts)
 
 	sb := img.Bounds()
 	ob := out.Bounds()
 	res := Result{
-		Width:     ob.Dx(),
-		Height:    ob.Dy(),
-		SrcWidth:  sb.Dx(),
-		SrcHeight: sb.Dy(),
-		SrcFormat: format,
-		Padded:    padded,
-		Quality:   opts.Quality,
+		Width:       ob.Dx(),
+		Height:      ob.Dy(),
+		SrcWidth:    sb.Dx(),
+		SrcHeight:   sb.Dy(),
+		SrcFormat:   format,
+		Padded:      padded,
+		Quality:     opts.Quality,
+		GuardFactor: guard,
+		ImageWidth:  imgRect.Dx(),
+		ImageHeight: imgRect.Dy(),
 	}
 
 	// Encode into memory rather than straight to dst: the budget is only
@@ -304,7 +352,7 @@ func Normalise(dst io.Writer, src io.Reader, opts Options) (Result, error) {
 // fit produces the output image: the source scaled to fit inside the target
 // grid (never upscaled), centred on the smallest canvas of the target aspect
 // that contains it.
-func fit(src image.Image, opts Options) (image.Image, bool) {
+func fit(src image.Image, opts Options) (image.Image, bool, int, image.Rectangle) {
 	sb := src.Bounds()
 	sw, sh := sb.Dx(), sb.Dy()
 
@@ -319,7 +367,9 @@ func fit(src image.Image, opts Options) (image.Image, bool) {
 			s := min(float64(sw)/float64(w), float64(sh)/float64(h))
 			w, h = scaleDim(w, h, s)
 		}
-		return render(src, image.Rect(0, 0, w, h), image.Rect(0, 0, w, h), opts), false
+		r := image.Rect(0, 0, w, h)
+		out, guard := render(src, r, r, opts)
+		return out, false, guard, r
 	}
 
 	// Scale to contain, never above 1.
@@ -347,12 +397,20 @@ func fit(src image.Image, opts Options) (image.Image, bool) {
 
 	dstRect := image.Rect(0, 0, cw, ch)
 	imgRect := image.Rect((cw-iw)/2, (ch-ih)/2, (cw-iw)/2+iw, (ch-ih)/2+ih)
-	return render(src, dstRect, imgRect, opts), true
+	out, guard := render(src, dstRect, imgRect, opts)
+	return out, true, guard, imgRect
 }
 
 // render draws src scaled into imgRect on a canvas of dstRect, filling the
 // remainder with the background colour.
-func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) image.Image {
+func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) (image.Image, int) {
+	// Bound the resampler's intermediate *before* converting or scaling: the
+	// box pass reads the source once and everything downstream then works on a
+	// smaller image.
+	guard := guardFactor(imgRect, src.Bounds(), opts.maxResampleBytes())
+	if guard > 1 {
+		src = boxDownsample(src, guard)
+	}
 	src = fastSource(src)
 	var dst stddraw.Image
 	if opts.Grayscale {
@@ -364,7 +422,95 @@ func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) ima
 		xdraw.Draw(dst, dstRect, image.NewUniform(opts.Background), image.Point{}, xdraw.Src)
 	}
 	scalerFor(opts.Scaler, imgRect, src.Bounds()).Scale(dst, imgRect, src, src.Bounds(), xdraw.Src, nil)
-	return dst
+	return dst, guard
+}
+
+// resampleBytes is the intermediate x/image's kernel scalers allocate for one
+// Scale call: one [4]float64 per (destination column × source row).
+func resampleBytes(dstW, srcH int) int64 {
+	return int64(dstW) * int64(srcH) * 32
+}
+
+// guardFactor returns the integer box pre-downscale needed to keep a single
+// resize's intermediate under budget, or 1 when none is needed.
+//
+// # This is a memory guard, not the speed trick that was removed
+//
+// An earlier box pre-pass tried to make ordinary 1.5–3× downscales faster,
+// measured as doing nothing, and was deleted. This is a different thing with a
+// different job: it only engages on pathological sources, and it exists to
+// bound memory, not time. Do not delete it for the old reason.
+//
+// The reason it is needed at all is that the intermediate is
+// destinationWidth × **sourceHeight** × 32 — it scales with the *input*, so no
+// soft heap limit can prevent the allocation; the limit only decides how hard
+// the GC works around it. A 5000 × 7000 scan needs 346 MB, an 8000 × 10000 one
+// 518 MB, and with two encode workers that is a gigabyte of transient the
+// device does not have.
+//
+// Integer factors only: an exact N×N box average is seam-free and trivially
+// correct, which is why it is preferred here to banding the resample. The
+// smallest factor that fits the budget is used, so a guarded page degrades as
+// little as it must. The factor is also capped so the box result never falls
+// below the destination size — shrinking past that would mean upscaling
+// afterwards, trading a memory problem for a quality one.
+func guardFactor(dst, src image.Rectangle, budget int64) int {
+	if budget <= 0 {
+		return 1
+	}
+	dw, dh := dst.Dx(), dst.Dy()
+	sw, sh := src.Dx(), src.Dy()
+	if dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 {
+		return 1
+	}
+	need := resampleBytes(dw, sh)
+	if need <= budget {
+		return 1
+	}
+
+	f := int((need + budget - 1) / budget)
+	// Never shrink below the destination.
+	if maxF := min(sw/dw, sh/dh); f > maxF {
+		f = maxF
+	}
+	if f < 2 {
+		return 1
+	}
+	return f
+}
+
+// boxDownsample averages src down by an exact integer factor.
+//
+// Every source pixel is read exactly once and contributes to exactly one
+// output pixel, so there is no seam, no phase error and no kernel support to
+// reason about — the property that makes this safe as a guard.
+func boxDownsample(src image.Image, factor int) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx()/factor, b.Dy()/factor
+	if w < 1 || h < 1 || factor < 2 {
+		return src
+	}
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	n := uint32(factor * factor)
+	for y := range h {
+		for x := range w {
+			var r, g, bl uint32
+			for dy := range factor {
+				for dx := range factor {
+					pr, pg, pb, _ := src.At(b.Min.X+x*factor+dx, b.Min.Y+y*factor+dy).RGBA()
+					r += pr >> 8
+					g += pg >> 8
+					bl += pb >> 8
+				}
+			}
+			i := out.PixOffset(x, y)
+			out.Pix[i+0] = uint8(r / n)
+			out.Pix[i+1] = uint8(g / n)
+			out.Pix[i+2] = uint8(bl / n)
+			out.Pix[i+3] = 0xff
+		}
+	}
+	return out
 }
 
 // The scaler cache is bounded by **retained bytes, not entry count**, and that

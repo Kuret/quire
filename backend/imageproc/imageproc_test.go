@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math"
+	"runtime"
 	"testing"
 
 	"github.com/rickl/quire/backend/imageproc"
@@ -451,4 +452,254 @@ func TestScalerCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	if first == 0 {
 		t.Fatal("nothing was cached; the test proves nothing")
 	}
+}
+
+// The resample intermediate is destinationWidth × sourceHeight × 32 bytes. The
+// guard exists because that scales with the *input*, so no heap limit can
+// prevent the allocation.
+func resampleBytes(dstW, srcH int) int64 { return int64(dstW) * int64(srcH) * 32 }
+
+// Deliberately hostile geometry. Two OOMs so far both came from fixtures that
+// were convenient rather than nasty, so this table is the nasty one.
+func TestResampleGuardOnHostileInput(t *testing.T) {
+	const budget = imageproc.DefaultMaxResampleBytes
+
+	cases := []struct {
+		name      string
+		w, h      int
+		wantGuard bool
+	}{
+		// Ordinary pages: the guard must stay out of the way. A guard that
+		// engages on normal manga is a silent quality regression.
+		{name: "a4 scan", w: 2480, h: 3508, wantGuard: false},
+		{name: "letter scan", w: 2550, h: 3300, wantGuard: false},
+		{name: "panel native", w: 1620, h: 2160, wantGuard: false},
+		{name: "web page", w: 1200, h: 1700, wantGuard: false},
+		// Pathological: these are the ones that would have killed us.
+		{name: "very large scan", w: 5000, h: 7000, wantGuard: true},
+		{name: "huge scan", w: 6000, h: 8000, wantGuard: true},
+		// A wide spread fits width-first, so its destination is short and the
+		// intermediate (1620 × 4000 × 32 = 207 MB) stays under budget.
+		{name: "wide spread", w: 6000, h: 4000, wantGuard: false},
+		// A long strip is bounded by a different mechanism: fitting 3:4 makes
+		// the destination a narrow sliver, so the intermediate stays small.
+		// Asserted here so the arithmetic is on the record rather than assumed.
+		{name: "webtoon strip", w: 800, h: 20000, wantGuard: false},
+		{name: "wide webtoon strip", w: 1600, h: 20000, wantGuard: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := encodeJPEG(t, synthPage(tc.w, tc.h, 200))
+
+			opts := imageproc.DefaultOptions()
+			opts.MaxBytes = 0 // measuring the guard, not the page budget
+
+			var out bytes.Buffer
+			res, err := imageproc.Normalise(&out, bytes.NewReader(raw), opts)
+			if err != nil {
+				t.Fatalf("Normalise: %v", err)
+			}
+			if guarded := res.GuardFactor > 1; guarded != tc.wantGuard {
+				t.Errorf("GuardFactor = %d (guarded=%v), want guarded=%v", res.GuardFactor, guarded, tc.wantGuard)
+			}
+
+			// Whatever happened, the resize the scaler was asked for must fit
+			// the budget. The destination width is the output width when no
+			// padding was added, and the fitted image width when it was.
+			srcH := tc.h
+			if res.GuardFactor > 1 {
+				srcH = tc.h / res.GuardFactor
+			}
+			if got := resampleBytes(res.ImageWidth, srcH); got > budget {
+				t.Errorf("intermediate %d bytes exceeds the %d budget", got, budget)
+			}
+
+			// Geometry is unaffected by the guard.
+			if res.Width > imageproc.PanelWidth || res.Height > imageproc.PanelHeight {
+				t.Errorf("output %dx%d exceeds the panel grid", res.Width, res.Height)
+			}
+			if _, _, err := image.Decode(bytes.NewReader(out.Bytes())); err != nil {
+				t.Errorf("guarded output does not decode: %v", err)
+			}
+			t.Logf("%dx%d -> %dx%d, guard factor %d, %d bytes out",
+				tc.w, tc.h, res.Width, res.Height, res.GuardFactor, res.Bytes)
+		})
+	}
+}
+
+// The smallest factor that fits is used, so a guarded page degrades as little
+// as it must.
+func TestResampleGuardPicksSmallestFactor(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
+
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	res, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.GuardFactor != 2 {
+		t.Errorf("GuardFactor = %d for a 5000x7000 source, want the smallest factor that fits (2)", res.GuardFactor)
+	}
+	// One factor lower must genuinely not fit, or "smallest" means nothing.
+	if got := resampleBytes(res.ImageWidth, 7000/(res.GuardFactor-1)); got <= imageproc.DefaultMaxResampleBytes {
+		t.Errorf("factor %d would also have fit (%d bytes); the guard is over-shrinking", res.GuardFactor-1, got)
+	}
+}
+
+// A tighter budget forces a larger factor; a disabled guard never fires.
+//
+// The source here is 5000x7000, not an A4 page, and that is the point: the
+// guard can only shrink a source that is at least twice the destination, so on
+// a 1.6x A4 scan no integer factor exists and the 171 MB intermediate is
+// irreducible by this mechanism. TestResampleGuardNeverUpscales pins that.
+func TestResampleGuardBudget(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
+
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	opts.MaxResampleBytes = 32 << 20
+	tight, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tight.GuardFactor < 3 {
+		t.Errorf("GuardFactor = %d at a 32 MiB budget, want a larger factor than the default budget needs", tight.GuardFactor)
+	}
+
+	opts.MaxResampleBytes = -1 // disabled
+	off, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.GuardFactor != 1 {
+		t.Errorf("GuardFactor = %d with the guard disabled", off.GuardFactor)
+	}
+}
+
+// The guard must not shrink the source below the destination — that would
+// trade a memory problem for an upscaling one.
+func TestResampleGuardNeverUpscales(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(1620, 2160, 200))
+
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	opts.MaxResampleBytes = 1 << 20 // absurdly tight
+	res, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.GuardFactor != 1 {
+		t.Errorf("GuardFactor = %d for a panel-native page; the source is already the destination size", res.GuardFactor)
+	}
+	if res.Width != imageproc.PanelWidth || res.Height != imageproc.PanelHeight {
+		t.Errorf("output %dx%d, want the panel grid", res.Width, res.Height)
+	}
+}
+
+// Peak allocation, not just arithmetic: a guarded page must actually allocate
+// far less than an unguarded one.
+func TestResampleGuardCutsAllocation(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
+
+	measure := func(opts imageproc.Options) uint64 {
+		t.Helper()
+		imageproc.SetScalerCacheBytes(0) // no retention across the two runs
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); err != nil {
+			t.Fatal(err)
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	t.Cleanup(func() { imageproc.SetScalerCacheBytes(imageproc.DefaultScalerCacheBytes) })
+
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	opts.MaxResampleBytes = -1
+	unguarded := measure(opts)
+
+	opts.MaxResampleBytes = imageproc.DefaultMaxResampleBytes
+	guarded := measure(opts)
+
+	if guarded >= unguarded {
+		t.Errorf("guarded run allocated %d bytes, not less than the unguarded %d", guarded, unguarded)
+	}
+	t.Logf("5000x7000: unguarded %.0f MiB allocated, guarded %.0f MiB (%.0f%% less)",
+		float64(unguarded)/(1<<20), float64(guarded)/(1<<20),
+		100*(1-float64(guarded)/float64(unguarded)))
+}
+
+// What the degradation actually looks like: box-then-kernel against kernel
+// alone, on a source where the guard fires.
+func TestResampleGuardQualityDelta(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(5000, 7000, 200))
+
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	opts.MaxResampleBytes = -1
+	var sharp bytes.Buffer
+	if _, err := imageproc.Normalise(&sharp, bytes.NewReader(raw), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	opts.MaxResampleBytes = imageproc.DefaultMaxResampleBytes
+	var guarded bytes.Buffer
+	res, err := imageproc.Normalise(&guarded, bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.GuardFactor < 2 {
+		t.Fatal("the guard did not fire; this test compares nothing")
+	}
+
+	a := decodeGray(t, sharp.Bytes())
+	b := decodeGray(t, guarded.Bytes())
+	if a.Bounds() != b.Bounds() {
+		t.Fatalf("bounds differ: %v vs %v", a.Bounds(), b.Bounds())
+	}
+
+	var sum, maxDiff int64
+	bounds := a.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			d := int64(a.GrayAt(x, y).Y) - int64(b.GrayAt(x, y).Y)
+			if d < 0 {
+				d = -d
+			}
+			sum += d
+			if d > maxDiff {
+				maxDiff = d
+			}
+		}
+	}
+	px := int64(bounds.Dx() * bounds.Dy())
+	mae := float64(sum) / float64(px)
+
+	// JPEG size is a fair sharpness proxy: a softer image compresses smaller.
+	t.Logf("guard factor %d: mean abs difference %.2f/255, max %d/255; jpeg %d -> %d bytes (%.1f%% smaller)",
+		res.GuardFactor, mae, maxDiff, sharp.Len(), guarded.Len(),
+		100*(1-float64(guarded.Len())/float64(sharp.Len())))
+
+	if mae > 12 {
+		t.Errorf("mean abs difference %.2f/255 is a visible regression, not a rounding one", mae)
+	}
+}
+
+func decodeGray(t *testing.T, b []byte) *image.Gray {
+	t.Helper()
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := image.NewGray(img.Bounds())
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			g.Set(x, y, img.At(x, y))
+		}
+	}
+	return g
 }
