@@ -11,6 +11,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -253,6 +254,23 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		return true, s.openInReader(out, req)
+
+	case appload.MessageRenameSource:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			Name     string `json:"name"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		switch err := s.store.Rename(req.SourceID, req.Name); {
+		case errors.Is(err, state.ErrBadName):
+			return true, s.sendError(out, "bad_name",
+				"A source needs a name, and it has to be shorter than 120 characters.")
+		case err != nil:
+			return true, s.sendError(out, "not_found", plain(err))
+		}
+		return true, s.sendSources(out)
 
 	case appload.MessageEnqueueDownload:
 		var req downloadRequest

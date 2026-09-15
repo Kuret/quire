@@ -368,3 +368,68 @@ func TestUnknownMessageIsNotHandled(t *testing.T) {
 		t.Error("the service claimed Ping")
 	}
 }
+
+// Renaming is the general fix for a bad guessed name (PLAN §7.1 type 19): the
+// user added an API root and got "MangaDex API documentation". It answers with
+// the whole list, like every other mutation, so the UI never has to work out
+// what changed.
+func TestRenameSourceAnswersWithTheList(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "MangaDex API documentation", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id := store.List()[0].ID
+
+	handle(t, svc, rec, appload.MessageRenameSource,
+		`{"sourceId":"`+id+`","name":"MangaDex"}`)
+
+	var list struct {
+		Sources []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSources), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Sources) != 1 || list.Sources[0].Name != "MangaDex" {
+		t.Fatalf("sources = %+v", list.Sources)
+	}
+	// The ID must not move: it keys everything already downloaded.
+	if list.Sources[0].ID != id {
+		t.Errorf("the ID changed from %q to %q", id, list.Sources[0].ID)
+	}
+}
+
+func TestRenameSourceRefusesAnEmptyNameInWords(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, svc, rec, appload.MessageRenameSource,
+		`{"sourceId":"example-reader","name":"   "}`)
+
+	var e struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageError), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "bad_name" {
+		t.Errorf("code %q", e.Code)
+	}
+	if !strings.Contains(e.Message, "name") {
+		t.Errorf("message %q is not a sentence anyone can act on", e.Message)
+	}
+	if got, _ := store.Get("example-reader"); got.Name != "Example Reader" {
+		t.Errorf("the name changed to %q anyway", got.Name)
+	}
+}
