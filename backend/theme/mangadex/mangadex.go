@@ -510,12 +510,37 @@ func (t *Theme) addContentRating(s *theme.Source, v url.Values) {
 	}
 }
 
+// coverThumbSuffix asks MangaDex's uploads host for a pre-scaled cover.
+//
+// Appending it to a cover filename returns that cover resized to 512px on its
+// long edge. Without it the response is the **original artwork**, which is
+// print-resolution: measured live on 2026-09-15, one cover was 10,852,108
+// bytes as the original and 235,535 bytes at .512.jpg — a factor of 46, to
+// render a 300×450 thumbnail.
+//
+// On the device the originals did not merely waste bandwidth, they failed:
+// every cover came back "response exceeds size cap (declared 10852108 >
+// 8388608)". The cap is right and is not the thing to change; asking for a
+// thumbnail when a thumbnail is what we are going to draw is.
+//
+// 512 rather than 256 because the render is 300px wide, so 256 would be
+// upscaled. At 235 KB the larger one is free of any cap we have — fetch's
+// 8 MiB response cap and covers' 4 MiB MaxSourceBytes both clear it by more
+// than an order of magnitude.
+//
+// This lives here rather than in backend/covers because it is a fact about
+// MangaDex's URL scheme, and a generic cover cache has no business knowing
+// one site's naming convention.
+const coverThumbSuffix = ".512.jpg"
+
 // coverURL builds the cover image URL from the cover_art relationship.
 //
 // The filename alone is useless: covers live on a separate uploads host, under
 // the manga's own UUID. The host is derived from the API host by swapping the
 // leading label, which is both what MangaDex does (api. -> uploads.) and what
 // keeps the offline fixtures working on a host that has no such label.
+//
+// The result is a thumbnail, not the original — see coverThumbSuffix.
 func (t *Theme) coverURL(s *theme.Source, e entity) string {
 	rel, ok := e.find("cover_art")
 	if !ok || len(rel.Attributes) == 0 {
@@ -532,7 +557,7 @@ func (t *Theme) coverURL(s *theme.Source, e entity) string {
 	if host, ok := strings.CutPrefix(u.Hostname(), "api."); ok {
 		u.Host = "uploads." + host
 	}
-	u.Path = "/covers/" + e.ID + "/" + a.FileName
+	u.Path = "/covers/" + e.ID + "/" + a.FileName + coverThumbSuffix
 	u.RawQuery = ""
 	return u.String()
 }

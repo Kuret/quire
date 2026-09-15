@@ -67,12 +67,12 @@ func TestSearch(t *testing.T) {
 			// first thing that makes it unlike the HTML themes.
 			ID:       "/manga/" + mangaUUID,
 			Title:    "Record of the Distant Tower",
-			CoverURL: "https://uploads.example.invalid/covers/" + mangaUUID + "/distant-tower-1.jpg",
+			CoverURL: "https://uploads.example.invalid/covers/" + mangaUUID + "/distant-tower-1.jpg.512.jpg",
 		},
 		{
 			ID:       "/manga/22222222-3333-4444-8555-666666666666",
 			Title:    "Salt and Cedar",
-			CoverURL: "https://uploads.example.invalid/covers/22222222-3333-4444-8555-666666666666/salt-and-cedar.png",
+			CoverURL: "https://uploads.example.invalid/covers/22222222-3333-4444-8555-666666666666/salt-and-cedar.png.512.jpg",
 		},
 		{
 			// A cover_art relationship with no attributes is what arrives when
@@ -697,5 +697,42 @@ func TestChaptersAreAscendingEvenWhenTheServerIsNot(t *testing.T) {
 		if strings.HasPrefix(c.Title, "Vol.") {
 			t.Errorf("title %q still carries the volume; it belongs in Volume", c.Title)
 		}
+	}
+}
+
+// Covers are requested as thumbnails, not as originals.
+//
+// MangaDex serves print-resolution artwork by default. On the device every
+// cover failed with "response exceeds size cap (declared 10852108 > 8388608)"
+// — measured live on 2026-09-15, one cover was 10,852,108 bytes as the
+// original and 235,535 bytes at .512.jpg, to render a 300×450 thumbnail.
+//
+// The caps are not the thing to change, so this pins the suffix. 512 and not
+// 256: the render is 300px wide, so 256 would be upscaled, and at 235 KB the
+// larger one clears both fetch's 8 MiB response cap and covers' 4 MiB
+// MaxSourceBytes by more than an order of magnitude.
+func TestCoversAskForAThumbnail(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/" + mangaUUID: {File: "series.json"},
+	})
+	th := mangadex.NewWithClock(f, clock)
+
+	got, err := th.Series(context.Background(), site(), "/manga/"+mangaUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "https://uploads.example.invalid/covers/" + mangaUUID +
+		"/distant-tower-1.jpg.512.jpg"
+	if got.CoverURL != want {
+		t.Errorf("CoverURL = %q\n            want %q", got.CoverURL, want)
+	}
+	if strings.HasSuffix(got.CoverURL, ".256.jpg") {
+		t.Error("256px would be upscaled into a 300px-wide render")
+	}
+	// The filename is kept whole, extension included — the suffix is appended
+	// to it, not substituted for it. MangaDex's scheme is
+	// "<filename>.<size>.jpg", so a cover stored as .png stays .png.512.jpg.
+	if !strings.Contains(got.CoverURL, "distant-tower-1.jpg.") {
+		t.Errorf("the original filename was rewritten rather than suffixed: %q", got.CoverURL)
 	}
 }
