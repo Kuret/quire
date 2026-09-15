@@ -616,6 +616,32 @@ message naming what was tried.
   §3.1's performance finding true.**
 - Assemble with `pdfcpu` — pure Go, no CGO, preserves the static binary.
   MediaBox matching the panel aspect so the stock reader doesn't letterbox.
+  **Measured, M4:** the box is `[0 0 514 685]` (§11 Q3). **pdfcpu trap —
+  `Pos: types.Full` is not what you want**: it sets each MediaBox to the
+  *image pixel* dimensions (1620×2160) and ignores `PageDim`. Use
+  `Pos: types.Center, Scale: 1` to get 514×685 full-bleed.
+- **Aspect mismatch: fit-and-pad. Never crop, never stretch.** Comic pages are
+  frequently not 3:4. Cropping silently deletes artwork and off-centre dialogue
+  and cannot be undone; stretching shows on lettering. Padding applies only
+  beyond a 1% tolerance. Sources smaller than the panel are **not** upscaled.
+  **Known limitation: webtoon strips** (aspect far from 3:4) pad down to a small
+  centred image. Slicing tall strips into panel-height pages is a real feature,
+  deliberately not invented in M4 — revisit if a vertical-scroll source matters.
+- **Measured on the host (M4, 200 synthetic pages, 10 chapters):** 307 KiB/page
+  stored and in the PDF; assembly 899 ms; download at concurrency 6 in 41 s.
+  Read back: 200 pages, zero with a MediaBox other than 514×685.
+  **Two numbers that need re-measuring *on the device* before they are
+  believed** — the backend runs on the tablet, not the host:
+  1. **Resize is CPU-bound, not network-bound.** CatmullRom costs ~1.3 s/page
+     on a 10-core host. Concurrency scaling was linear only to ~8 *because the
+     stub fetcher made the work pure CPU*. On the i.MX8MM this dominates, and
+     200 pages could mean a very long, battery-hungry job. A single
+     `Concurrency` knob currently bounds fetch **and** encode; on the device
+     these want separate limits.
+  2. **Assembly peak heap was ~352 MiB for a 200-page/60 MiB volume** (≈6× the
+     PDF; pdfcpu holds the whole document in memory). The device has ~2 GB
+     *shared with xochitl*. If this bites, the answers are smaller volumes or a
+     streaming writer.
 - **One PDF per volume, not per chapter.** Chapter PDFs clutter the library and
   make reading position meaningless. Quire maps chapters → (volume PDF, page
   offset). Where a source has no volume structure, group by a configurable
@@ -892,6 +918,31 @@ Non-negotiable, and not configurable by a source entry:
     `robots_denied`. The site did not deny us; we could not ask. Reporting a
     denial that never happened is exactly the kind of lie §6 M3 forbids when it
     says a verdict must be a complete, honest answer.
+
+  **DECIDED 2026-09-15 — robots binds *crawling*, not user-directed retrieval.**
+  `robots.txt` is the Robots **Exclusion** Protocol, and RFC 9309 scopes it to
+  "automatic clients known as crawlers". Browsers do not consult it; nor does a
+  feed reader fetching a subscription the user chose. The line is not
+  program-versus-human, it is **discovery versus retrieval**:
+
+  | What Quire is doing | robots applies? |
+  |---|---|
+  | Search, popular/latest listings, following links, the probe's own crawling | **Yes, strictly.** This is discovery |
+  | Fetching one series, chapter or page **the user explicitly asked for** | **No.** This is not crawling |
+
+  Forced by a concrete case rather than invented in the abstract: MangaDex
+  publishes a documented public API with published rate limits for third-party
+  clients, and its `robots.txt` allows `/manga` and the feeds while disallowing
+  `/at-home/` — the page-image endpoint. Under a blanket rule stage 5 refuses
+  it, **and by extension refuses any officially-supported API whose robots.txt
+  is written for search engines.** That is not what the operator is saying.
+
+  **This narrows nothing else.** Rate limits, the honest `User-Agent`, the SSRF
+  guard, and §7.6's absolute no-circumvention rule are untouched. A `Disallow`
+  still blocks every discovery request. And it stays non-bypassable by source
+  config: the *classification* is Quire's own, made per request-kind inside the
+  fetch layer, never a per-source flag a user can flip. Requests must carry
+  their kind explicitly — do not infer it from the URL.
 - `Retry-After` honoured; exponential backoff with jitter on 429/5xx.
 - Honest `User-Agent` naming Quire, its version, and the project URL. **Never
   impersonate a browser** — see §7.6.
