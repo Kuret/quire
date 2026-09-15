@@ -562,6 +562,40 @@ func TestNewAppliesMemoryLimit(t *testing.T) {
 	}
 }
 
+// A pathological page is box-downscaled before resampling, and the queue says
+// so rather than hiding it.
+func TestRunCountsGuardedPages(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 5000, 7000)}
+
+	// The synthetic page's high-frequency ruling busts the per-page byte
+	// budget at any quality; that is not what this test is about.
+	opts := download.Options{Concurrency: 1, EncodeWorkers: 1, MinFreeBytes: -1}
+	opts.Image = imageproc.DefaultOptions()
+	opts.Image.MaxBytes = 0
+
+	q := download.New(f, opts)
+	_, stats, err := q.Run(t.Context(), dir, chapters(1, 2))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats.PagesGuarded != 2 {
+		t.Errorf("PagesGuarded = %d, want 2", stats.PagesGuarded)
+	}
+
+	// And an ordinary page is not guarded, or the counter means nothing.
+	dir2 := t.TempDir()
+	f2 := &stubFetcher{body: synthJPEG(t, 2480, 3508)}
+	q2 := download.New(f2, opts)
+	_, stats2, err := q2.Run(t.Context(), dir2, chapters(1, 2))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats2.PagesGuarded != 0 {
+		t.Errorf("PagesGuarded = %d for ordinary A4 pages, want 0", stats2.PagesGuarded)
+	}
+}
+
 func TestDefaultConcurrency(t *testing.T) {
 	if got := download.New(&stubFetcher{}, download.Options{}).Concurrency(); got != download.DefaultConcurrency {
 		t.Errorf("default concurrency = %d, want %d", got, download.DefaultConcurrency)

@@ -147,6 +147,7 @@ type Progress struct {
 	PagesTotal       int   // pages in this run
 	PagesFetched     int   // pages actually fetched over the network this run
 	PagesRequantised int   // pages re-encoded at the lower quality to fit the budget
+	PagesGuarded     int   // pages box-downscaled first to bound the resize's memory
 	BytesStored      int64 // bytes written to disk this run
 	BytesFetched     int64 // bytes read from the fetcher this run
 }
@@ -370,6 +371,7 @@ type run struct {
 	pagesDone        atomic.Int64
 	pagesFetched     atomic.Int64
 	pagesRequantised atomic.Int64
+	pagesGuarded     atomic.Int64
 	bytesStored      atomic.Int64
 	bytesFetched     atomic.Int64
 
@@ -388,6 +390,7 @@ func (r *run) snapshot() Progress {
 		PagesTotal:       r.total,
 		PagesFetched:     int(r.pagesFetched.Load()),
 		PagesRequantised: int(r.pagesRequantised.Load()),
+		PagesGuarded:     int(r.pagesGuarded.Load()),
 		BytesStored:      r.bytesStored.Load(),
 		BytesFetched:     r.bytesFetched.Load(),
 	}
@@ -530,6 +533,9 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 	res, err := r.normalise(ctx, tmp, counted)
 	if err != nil {
 		return 0, counted.n, err
+	}
+	if res.GuardFactor > 1 {
+		r.pagesGuarded.Add(1)
 	}
 	if res.Requantised {
 		r.pagesRequantised.Add(1)

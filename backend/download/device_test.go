@@ -173,12 +173,21 @@ func TestDeviceVariedGeometryRun(t *testing.T) {
 	if err := os.RemoveAll(work); err != nil {
 		t.Fatal(err)
 	}
-	q := download.New(&fileFetcher{paths: paths}, download.Options{
+	opts := download.Options{
 		Concurrency:   6,
 		EncodeWorkers: workers,
 		MinFreeBytes:  -1,
 		NoMemoryLimit: noLimit,
-	})
+	}
+	opts.Image = imageproc.DefaultOptions()
+	opts.Image.MaxBytes = 0 // measuring memory, not enforcing the page budget
+	if os.Getenv("QUIRE_NO_GUARD") == "1" {
+		opts.Image.MaxResampleBytes = -1
+		t.Log("resample guard: disabled (reproducing the unbounded intermediate)")
+	} else {
+		t.Logf("resample guard: %d MiB per resize", opts.Image.MaxResampleBytes>>20)
+	}
+	q := download.New(&fileFetcher{paths: paths}, opts)
 	if !noLimit {
 		t.Logf("memory limit: %d MiB (applied by download.New)", debug.SetMemoryLimit(-1)>>20)
 	}
@@ -201,9 +210,10 @@ func TestDeviceVariedGeometryRun(t *testing.T) {
 	hwm, rss := procMem()
 
 	t.Logf("cores %d, encode workers %d, %d pages of varied geometry", runtime.NumCPU(), workers, stats.PagesDone)
-	t.Logf("download+resize  %s (%s/page), %.1f MiB stored, %.0f KiB/page, %d requantised",
+	t.Logf("download+resize  %s (%s/page), %.1f MiB stored, %.0f KiB/page, %d requantised, %d guarded",
 		dlElapsed.Round(time.Millisecond), (dlElapsed / time.Duration(stats.PagesDone)).Round(time.Millisecond),
-		float64(stats.BytesStored)/(1<<20), float64(stats.BytesStored)/float64(stats.PagesDone)/1024, stats.PagesRequantised)
+		float64(stats.BytesStored)/(1<<20), float64(stats.BytesStored)/float64(stats.PagesDone)/1024,
+		stats.PagesRequantised, stats.PagesGuarded)
 	t.Logf("assemble         %s, %.1f MiB PDF (%.0f KiB/page)",
 		asmElapsed.Round(time.Millisecond), float64(m.Bytes)/(1<<20), float64(m.Bytes)/float64(m.PageCount)/1024)
 	t.Logf("scaler cache     %.0f MiB retained at the end", float64(imageproc.ScalerCacheBytes())/(1<<20))
