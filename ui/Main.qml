@@ -108,6 +108,10 @@ Rectangle {
             root.fillChapters(msg)
             return
 
+        case Msg.DownloadProgress:
+            root.applyDownloadProgress(msg)
+            return
+
         case Msg.Error:
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
@@ -176,12 +180,31 @@ Rectangle {
                 "title": list[i].title,
                 "number": list[i].number,
                 "published": list[i].published ? list[i].published : "",
-                "scanlator": list[i].scanlator ? list[i].scanlator : ""
+                "scanlator": list[i].scanlator ? list[i].scanlator : "",
+                "downloadState": "",
+                "downloadMessage": "",
+                "documentUuid": ""
             })
         }
         chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
         chapterListScreen.synopsis = msg && msg.series && msg.series.description
             ? msg.series.description : ""
+    }
+
+    // The backend decides what a download looks like; this only finds the row.
+    // Every sentence shown here was composed in backend/service (PLAN §2).
+    function applyDownloadProgress(msg) {
+        if (!msg || !msg.volumeId)
+            return
+        for (var i = 0; i < chaptersModel.count; ++i) {
+            if (chaptersModel.get(i).chapterId !== msg.volumeId)
+                continue
+            chaptersModel.setProperty(i, "downloadState", msg.phase ? msg.phase : "")
+            chaptersModel.setProperty(i, "downloadMessage", msg.message ? msg.message : "")
+            if (msg.documentUuid)
+                chaptersModel.setProperty(i, "documentUuid", msg.documentUuid)
+            return
+        }
     }
 
     // ---- navigation --------------------------------------------------------

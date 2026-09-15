@@ -1,10 +1,10 @@
 // Series detail — PLAN §6 M3: "synopsis, chapter list, per-chapter download
 // state."
 //
-// The download *state* is M4's to fill in: this screen sends EnqueueDownload
-// and shows what the backend says about each chapter. Until DownloadProgress
-// arrives (M4), a chapter shows its date and nothing else, which is honest
-// rather than a progress bar that never moves.
+// This screen sends EnqueueDownload and shows what the backend says about each
+// chapter. Since M5 that is a real DownloadProgress stream, so a chapter being
+// fetched shows the backend's own sentence in place of its date, and the button
+// says where the download has got to instead of offering to start it again.
 
 import QtQuick 2.5
 import "Style.js" as Style
@@ -18,6 +18,21 @@ Item {
     property bool busy: false
 
     signal downloadRequested(string chapterId)
+
+    // The phases are backend/service's; the two words each maps to are the
+    // view's, and they are the only wording this file invents.
+    function buttonLabel(state) {
+        switch (state) {
+        case "done":   return "In library"
+        case "failed": return "Retry"
+        case "":       return "Download"
+        default:       return "Working…"
+        }
+    }
+
+    function canDownload(state) {
+        return state === "" || state === "failed"
+    }
 
     ListView {
         id: list
@@ -72,11 +87,17 @@ Item {
                     color: Style.ink
                 }
 
+                // A download in progress replaces the date line rather than
+                // adding a row: the backend already sends a finished sentence,
+                // and the state the user is waiting on should be the line they
+                // read first.
                 Text {
                     width: parent.width
                     elide: Text.ElideRight
-                    text: (model.published.length > 0 ? model.published : "Date unknown") +
-                          (model.scanlator.length > 0 ? " · " + model.scanlator : "")
+                    text: model.downloadMessage.length > 0
+                          ? model.downloadMessage
+                          : (model.published.length > 0 ? model.published : "Date unknown") +
+                            (model.scanlator.length > 0 ? " · " + model.scanlator : "")
                     font.pointSize: Style.smallSize
                     color: Style.muted
                 }
@@ -94,7 +115,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Download"
+                    text: screen.buttonLabel(model.downloadState)
                     font.pointSize: Style.smallSize
                     color: Style.ink
                 }
@@ -102,6 +123,7 @@ Item {
                 MouseArea {
                     id: downloadArea
                     anchors.fill: parent
+                    enabled: screen.canDownload(model.downloadState)
                     onClicked: screen.downloadRequested(model.chapterId)
                 }
             }
