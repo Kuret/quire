@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,9 +27,11 @@ import (
 // FileName is the store's file inside the data directory.
 const FileName = "sources.json"
 
-// fileVersion is bumped only when the *envelope* changes. A source entry itself
-// is versioned by schema/source.schema.json.
-const fileVersion = 1
+// fileVersion is what a new file is written with. The envelope version is
+// bumped when the *envelope* changes or when stored data needs converting; a
+// source entry itself is versioned by schema/source.schema.json. See
+// migrate.go for the forward-migration chain.
+const fileVersion = CurrentVersion
 
 // ErrNotFound is returned for an ID no source has.
 var ErrNotFound = errors.New("no such source")
@@ -54,6 +57,16 @@ type Store struct {
 // store with no file yet is an empty store, not an error: PLAN §1.3 ships with
 // an empty index and that is the normal first run.
 func Open(dir string, reg *theme.Registry) (*Store, error) {
+	return OpenWithLog(dir, reg, slog.Default())
+}
+
+// OpenWithLog is Open with somewhere to record what a migration did. A
+// migration that quietly rewrites the user's configuration and says nothing is
+// how a surprising change becomes an unexplainable one.
+func OpenWithLog(dir string, reg *theme.Registry, log *slog.Logger) (*Store, error) {
+	if log == nil {
+		log = slog.Default()
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
@@ -71,6 +84,15 @@ func Open(dir string, reg *theme.Registry) (*Store, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("state: %s is not readable JSON: %w", s.path, err)
 	}
+
+	// Migrate before validating. A migration's whole job is to make an old
+	// file valid for today's code, so validating first would reject exactly the
+	// files the migration exists to rescue.
+	migrated, err := migrate(&f, reg, log)
+	if err != nil {
+		return nil, err
+	}
+
 	// Every source is validated on the way in, even though it was validated on
 	// the way out: a store can be hand-edited or imported from another device,
 	// and a bad entry should surface here rather than three screens later.
@@ -81,6 +103,15 @@ func Open(dir string, reg *theme.Registry) (*Store, error) {
 	}
 	s.sources = f.Sources
 	s.sort()
+
+	if migrated {
+		// Written back immediately so the migration runs once, not on every
+		// launch until something else happens to save.
+		if err := s.save(); err != nil {
+			return nil, err
+		}
+		log.Info("source store migrated and saved", "path", s.path, "version", CurrentVersion)
+	}
 	return s, nil
 }
 
