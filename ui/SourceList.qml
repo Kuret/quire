@@ -21,6 +21,10 @@ Item {
     signal toggleRequested(string sourceId, bool enabled)
     signal removeRequested(string sourceId)
     signal renameRequested(string sourceId, string name)
+    signal noticeDismissed()
+
+    // A quiet line from the backend, above the list. Composed there, not here.
+    property string notice: ""
 
     // Which row has its confirm-remove strip open. Removing a source is one tap
     // away from a full library of downloads still being there but nothing to
@@ -49,9 +53,64 @@ Item {
         screen.renameText = ""
     }
 
+    // The notice strip. One line, on the first screen, with a way to dismiss
+    // it — the thing it reports (Quire closed unexpectedly) is worth knowing
+    // once and worth never seeing again after that.
+    Item {
+        id: noticeStrip
+        objectName: "noticeStrip"
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: screen.notice.length > 0 ? noticeText.height + Style.gap * 2 : 0
+        visible: screen.notice.length > 0
+
+        Text {
+            id: noticeText
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                right: dismissButton.left; rightMargin: Style.gap
+                top: parent.top; topMargin: Style.gap
+            }
+            wrapMode: Text.WordWrap
+            text: screen.notice
+            font.pointSize: Style.smallSize
+            color: Style.muted
+        }
+
+        Rectangle {
+            id: dismissButton
+            objectName: "dismissNoticeButton"
+            anchors { right: parent.right; rightMargin: Style.margin; top: parent.top; topMargin: Style.gap }
+            width: 120
+            height: Style.buttonHeight - Style.gap
+            color: dismissArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "OK"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: dismissArea
+                anchors.fill: parent
+                onClicked: screen.noticeDismissed()
+            }
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     ListView {
         id: list
-        anchors { top: parent.top; left: parent.left; right: parent.right; bottom: addBar.top }
+        anchors { top: noticeStrip.bottom; left: parent.left; right: parent.right; bottom: addBar.top }
         clip: true
         // No flick animation: a kinetic scroll on e-ink is a column of ghosts.
         boundsBehavior: Flickable.StopAtBounds

@@ -47,6 +47,12 @@ Rectangle {
     // The one error worth showing: whatever the backend last complained about.
     property string lastError: ""
 
+    // A quiet, dismissible line from the backend — currently only "Quire closed
+    // unexpectedly last time". Not an error and not a dialogue: there is
+    // nothing for the user to do, and a modal on launch would be worse than the
+    // silence it replaces.
+    property string notice: ""
+
     // The native reader handoff lives behind a Loader so that its imports of
     // xochitl's own QML singletons cannot take the app down with them: if they
     // ever stop resolving, status goes to Loader.Error and "Read" degrades to
@@ -119,6 +125,10 @@ Rectangle {
         switch (type) {
         case Msg.Pong:
             root.backendStatus = msg ? ("Backend " + msg.version + " on " + msg.os + "/" + msg.arch) : "Backend answered."
+            // The backend composes the sentence (PLAN §2); this only decides
+            // that it is worth one quiet line rather than a dialogue.
+            if (msg && msg.notice)
+                root.notice = msg.notice
             return
 
         case Msg.Sources:
@@ -389,6 +399,8 @@ Rectangle {
             model: sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.screen = "add" }
             onOpenRequested: root.openSource(sourceId, name)
+            notice: root.notice
+            onNoticeDismissed: root.notice = ""
             onToggleRequested: root.send(Msg.SetSourceEnabled, {"sourceId": sourceId, "enabled": enabled})
             onRemoveRequested: root.send(Msg.RemoveSource, {"sourceId": sourceId})
             onRenameRequested: root.send(Msg.RenameSource, {"sourceId": sourceId, "name": name})
