@@ -919,6 +919,27 @@ Both header fields are **signed `int32`**, native-endian — see the correction 
 | 23 | UI→BE | RequestCover | JSON `{sourceId, seriesId}` |
 | 24 | BE→UI | CoverReady | JSON `{seriesId, path}` — a **path**, never bytes (§7.1 above) |
 
+**Added 2026-09-15 after first real use:**
+
+| ID | Direction | Name | Payload |
+|---|---|---|---|
+| 19 | UI→BE | RenameSource | JSON `{sourceId, name}` — see the stage-6 correction in §7.5 |
+| 42 | UI→BE | CancelDownload | JSON `{sourceId, seriesId, volumeId}` |
+
+**Cancelling a download is not optional.** A volume is 7–10 minutes of CPU and
+up to 90 MB of traffic on a battery-powered device; starting one by mistake and
+being unable to stop it is the kind of thing that makes an app feel broken.
+Requirements:
+- Cancel must be **prompt** — it cannot wait for the current page to finish if
+  that page is a slow fetch. Plumb `context.Context` through the queue properly
+  rather than polling a flag between pages.
+- It must leave **no partial PDF** anywhere the library can see (§6 M4 already
+  requires assemble-to-temp-and-rename; cancellation must honour the same rule).
+- Already-fetched pages **stay on disk**. §6 M4's resume works by skipping pages
+  that exist, so a cancelled download that is restarted later should not re-fetch
+  what it already has. Cancel means "stop", not "discard".
+- The UI must return the row to its pre-download state, not leave it mid-progress.
+
 All payloads JSON. Images are **never** sent over the socket — write to disk,
 send a path. The 10 MiB cap and the per-hook mutex make large transfers a bad
 idea — and the *real* ceiling is lower still: the socket is `SOCK_SEQPACKET`,
@@ -969,6 +990,11 @@ A configured source, stored on device, validated against
 `overrides` is a per-theme, schema-declared map. Themes declare which keys they
 accept and sensible defaults; unknown keys are a validation error, not silently
 ignored.
+
+**SUGGESTED NAME (added 2026-09-15) — a theme may supply the display name it
+would like a source of that shape to carry**, used in preference to the page
+`<title>`. See the stage-6 correction in §7.5 for why: an API root's title is
+accurate and useless. Optional; `""` falls back to the title, then the host.
 
 **ORDERING CONTRACT (decided 2026-09-15, forced by a real bug in M5) —
 `Chapters` returns ascending reading order, earliest first.** M5 assembled a
@@ -1197,7 +1223,28 @@ degraded state only if search and chapters work; if page extraction fails the
 source is useless, so refuse.
 
 **Stage 6 — Accept.** Persist the source entry with the detected theme, a
-default name derived from the site title, and the verdict with a timestamp.
+default name, and the verdict with a timestamp. Also seed `allowedHosts` from
+the theme's declaration (§7.2).
+
+**CORRECTION 2026-09-15 — "a default name derived from the site title" is not
+good enough, found in first real use.** Adding `https://api.mangadex.org`
+produced a source called **"MangaDex API documentation"**, because that is the
+`<title>` of the page an API root serves. Accurate, and useless to anyone who
+did not type the URL. Two changes, and **both are needed** — neither alone is
+sufficient:
+
+1. **A theme may supply a suggested display name** (§7.2), used in preference to
+   the page title. `mangadex` returns "MangaDex". This fixes the default for
+   every source of a theme we support, rather than fixing one site.
+   Resist "clean up the title" heuristics — stripping " — Home", " | Official
+   Site", " API documentation" is an unwinnable game that will mangle a
+   legitimate name eventually.
+2. **The user can rename a source at any time**, which §7.2's schema already
+   promised ("then user-editable") and nothing implemented. This is the general
+   answer: title detection will *always* be wrong for some site, and the cost of
+   being stuck with a bad name is out of all proportion to the fix.
+
+A theme with no suggestion falls back to the page title, then to the host.
 
 Verdict enum: `ok | partial | unrecognised | blocked_challenge | robots_denied |
 unreachable | invalid_url | blocked_address`.
