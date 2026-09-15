@@ -646,6 +646,20 @@ message naming what was tried.
   make reading position meaningless. Quire maps chapters → (volume PDF, page
   offset). Where a source has no volume structure, group by a configurable
   chapter count (default 10).
+  **Grouping precedence (settled after §7.2's ordering contract):**
+  1. **`Chapter.Volume`**, the source's own label, whenever it has one. This is
+     what the plan meant by "volume"; runs-of-N is the *fallback* it was always
+     described as, not the primary mechanism.
+  2. Runs of N (default 10) only when the source publishes no volume labels.
+  **When `OrderIsKnown` is false, do not build a multi-chapter volume at all —
+  fall back to one PDF per chapter**, and tell the user why in plain language.
+  A volume is a *run* of chapters, so assembling one from a list whose order we
+  admit we could not determine produces a silently scrambled book — the failure
+  mode §7.2's contract exists to prevent, reintroduced at the next layer up.
+  One-PDF-per-chapter is ugly and clutters the library, but page order *within*
+  a chapter comes from `Pages()` and is authoritative, so every file is at least
+  correct. Refusing outright would be worse still: the user gets nothing when we
+  could have given them something true.
 - A partial download must never produce a PDF. Assemble to temp, atomic move.
 - Track total bytes; warn at a configurable threshold; never fill the
   partition.
@@ -1155,6 +1169,11 @@ and diffing against one that doesn't; record both the method and the result.
 **Stage 5 — Capability check.** With the candidate theme, exercise the full path
 against the live site: a search (or the popular/latest listing if search needs a
 query), one series detail, one chapter list, and one page-image extraction.
+**Extract pages from the *newest* chapter, not the oldest.** A site that has
+changed its reader markup leaves its back catalogue exactly as it was, so
+probing the earliest chapter can report a capability the user will not actually
+have on anything they read. The newest chapter is the one that reflects the
+site as it is now.
 Require all four to produce plausible non-empty results. This is what separates
 "looks like Madara" from "works as Madara".
 
