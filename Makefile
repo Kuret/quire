@@ -4,12 +4,16 @@
 # installs are not on PATH for non-interactive shells).
 GO := $(shell build/go-path.sh)
 
-.PHONY: all check test vet fmt prebuilt prebuilt-update rmpp pc install icon clean
+.PHONY: all check test vet fmt qml prebuilt prebuilt-update rmpp pc install icon clean
 
 all: check rmpp
 
 ## check: everything CI would run
-check: fmt vet test prebuilt
+check: fmt vet test qml prebuilt
+
+## qml: lint ui/ and instantiate every screen offscreen (skips without Qt 6)
+qml:
+	build/qml-check.sh
 
 ## prebuilt: fail if the committed resources.rcc has drifted from ui/
 prebuilt:
