@@ -296,7 +296,8 @@ logic as possible.
 - **Mihon/Tachiyomi ecosystem structure** (relevant to §7.2): a large fraction
   of extensions inherit from shared base classes in `lib-multisrc/` that
   implement common site patterns — 61 such themes covering roughly 1,700
-  extension clusters. A theme is defined once; individual sites are
+  extension clusters *(re-counted 2026-09-15: **68** themes. See
+  `docs/THEME-NOTES.md`)*. A theme is defined once; individual sites are
   instantiated from it with little more than a name and a base URL. Komikku has
   the same arrangement under `komikku/servers/multi/`. **This is the structure
   Quire adopts — the idea, not the code.**
@@ -329,7 +330,7 @@ See §1.4. These are reference material, not a parts bin.
 | `asivery/rm-hacks-qmd` | — | **Not a reference.** Its QMD files are hashed, the author states they cannot reveal information about their contents, PRs containing unhashed code are auto-closed, and support for the previous version is dropped on each release. Runnable, not readable. Do not budget time trying to learn from it. |
 | `asivery/qmldiff` | check repo | **The host-side workflow.** CLI that builds a hashtab from a QML tree, rewrites diffs into hashed form in place, and applies diffs to a tree writing results elsewhere. Read its language documentation before writing any `.qmd`. |
 | `keiyoushi/extensions-source` | Apache-2.0 | **The theme taxonomy.** Enumerate `lib-multisrc/` for the authoritative current theme list. Read a theme to understand the *site's* URL and DOM shape, then implement against a live site yourself. Their `CONTRIBUTING.md` / `AGENTS.md` are the current source of truth for that repo — conventions change, don't rely on stale knowledge. |
-| Komikku (GNOME) | GPL-3.0 | Cross-reference `komikku/servers/multi/` against keiyoushi's `lib-multisrc/`: the intersection is the set of themes both ecosystems thought worth implementing, i.e. the high-value set. Taxonomy only. |
+| Komikku (GNOME) — **`codeberg.org/valos/Komikku`** | GPL-3.0 | Cross-reference `komikku/servers/multi/` against keiyoushi's `lib-multisrc/`: the intersection is the set of themes both ecosystems thought worth implementing, i.e. the high-value set. Taxonomy only. **Mind the identity traps:** `github.com/komikku-app/komikku` is a *different, Android* project (a Mihon fork), and the old `gitlab.com/valos/Komikku` now redirects — the GNOME project is on Codeberg. Its themes are directories, not `.py` files. Done: see `docs/THEME-NOTES.md`. |
 | `vellum-dev/vellum-cli`, `rmitchellscott/reManager` | check repo | Packaging/distribution target for M8. |
 | `MaximeRivest/remagic` | MIT | One-command bootstrap (xovi + AppLoad + `xovi-tripletap`). Recommend it as the user-facing prerequisite so our installer needn't own that. |
 
@@ -1036,8 +1037,19 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    storage quota or for a Connect subscription? *(Affects M5 UX.)*
 5. Does AppLoad provide an on-screen keyboard, or must we build one?
    *(Affects M3 scope.)*
-6. What is the current authoritative `lib-multisrc/` theme list, and how do
-   per-theme site counts rank? *(Refines §7.3 ordering — answer before M2.)*
+6. ~~What is the current authoritative `lib-multisrc/` theme list?~~
+   **ANSWERED 2026-09-15 — full taxonomy in `docs/THEME-NOTES.md`.**
+   keiyoushi `lib-multisrc/` has **68** themes (not 61); Komikku has 18; the
+   true intersection is **14** once the two ecosystems' different names for the
+   same theme are folded together (`mangathemesia`≡`manga_stream`,
+   `mmrcms`≡`my_manga_reader_cms`). **§7.3's tier 1 and tier 2 are confirmed
+   correct — build `madara` then `mangathemesia`.** Tier-4 `genkan`, `nepnep`,
+   `readerfront` and `etoshore` are gone from keiyoushi entirely: drop them.
+   New since this plan was written: **`madaralegacy`** — Madara has forked into
+   current/legacy variants, so expect a variant switch inside our `madara`
+   theme. Per-theme *site counts* were not obtainable from the directory
+   listing alone and remain unmeasured; the ordering above does not depend on
+   them.
 
 *Resolved: stock-reader performance on long image PDFs (§3.1) — a 593-page manga
 PDF is fast on device. The no-custom-reader design stands.*

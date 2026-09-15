@@ -1,0 +1,19 @@
+{
+  "id": "example-standard-ebooks",
+  "name": "Standard Ebooks",
+  "lang": "en",
+  "theme": "generic",
+  "baseUrl": "https://standardebooks.org",
+  "selectors": {
+    "note": "Illustrative only. Standard Ebooks is a public-domain library, not a comic aggregator; this entry exists to exercise the schema's generic-theme branch, not to be used."
+  },
+  "rateLimit": { "requestsPerMinute": 10, "concurrency": 1 },
+  "enabled": false,
+  "addedAt": "2026-09-15T00:00:00Z",
+  "lastProbe": {
+    "verdict": "unrecognised",
+    "at": "2026-09-15T00:00:00Z",
+    "detail": "Reachable, but matches no known theme -- which is correct: this is a public-domain ebook library, not a site of any comic-source family. Kept as the worked example of an honest 'unrecognised' verdict.",
+    "themeScores": { "madara": 0, "mangathemesia": 0 }
+  }
+}

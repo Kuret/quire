@@ -1,0 +1,21 @@
+{
+  "id": "example-madara",
+  "name": "Example",
+  "lang": "en",
+  "theme": "madara",
+  "baseUrl": "https://example.invalid",
+  "overrides": {
+    "dateFormat": "MMMM d, yyyy",
+    "mangaSubPath": "manga",
+    "useAjaxChapters": true
+  },
+  "rateLimit": { "requestsPerMinute": 30, "concurrency": 2 },
+  "enabled": true,
+  "addedAt": "2026-09-15T00:00:00Z",
+  "lastProbe": {
+    "verdict": "ok",
+    "at": "2026-09-15T00:00:00Z",
+    "detail": "Shape-only example of a theme-backed source, taken from PLAN §7.2. example.invalid is RFC 2606 reserved and can never resolve, so this can never become a live request.",
+    "themeScores": { "madara": 92, "mangathemesia": 11 }
+  }
+}
