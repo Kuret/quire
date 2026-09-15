@@ -1,0 +1,1011 @@
+# Quire — PLAN.md
+
+A Komikku-style comic/manga downloader for the reMarkable Paper Pro that files
+downloads into the **stock library** and hands off reading to the **stock
+xochitl reader**, so reading position, pen annotations and cloud sync stay in
+one place.
+
+Name: `quire` (a quire is a gathering of folded sheets in a codex — fits the
+Codex / Vellum naming tradition on this platform).
+
+**Revision 2.** Changes from r1: the source engine is now theme-based rather
+than per-site recipes (§7.2, §7.3); added the source-probe / theme-detection
+pipeline (§7.5); the stock-reader performance question is resolved (§3.1);
+the licence position no longer depends on reusing any other project (§1.4);
+browser-challenge sites are explicitly out of scope (§7.6).
+
+**Revision 3.** The target device is pinned to **reMarkable OS 3.25.1.1** with
+automatic updates disabled. All QML/QMLDiff work targets that version and only
+that version (§7.8).
+
+**Revision 4.** Staying on 3.25.1.1 is now an affirmative decision, not just an
+inherited constraint (§7.8). Two corrections to r3: `rm-hacks-qmd` is **not**
+usable as a reference corpus — its QMD files are hashed and its author does not
+document them — and the back-porting concern was overstated, because the hashtab
+is locally rebuildable and `qmldiff` supports a full host-side edit/apply loop.
+M6 moves from on-device trial-and-error to ordinary host development (§7.8).
+Added a hard AppLoad-compatibility gate to M0: **AppLoad's own hooks into
+xochitl are the real version dependency**, not our patch (§3.1, §8).
+
+---
+
+## 0. How to use this document
+
+You are a coding agent implementing this project. Read this file fully before
+writing code.
+
+**The single most important rule: this platform is undocumented and
+version-fragile. Do not trust any path, JSON field name, QML type name, or
+endpoint in this document without verifying it on the actual device first.**
+Everything here was assembled from community sources and reMarkable's partial
+developer portal. §3.1 lists what is confirmed; §3.2 lists what is assumed.
+§11 lists open questions that must be answered by experiment before the
+dependent milestone starts.
+
+When a stated fact turns out to be wrong, **fix this document in the same
+commit as the code change.** This file is the project's memory.
+
+Work milestone by milestone (§6). Each milestone has an explicit acceptance
+test. Do not start a milestone before its predecessor's acceptance test passes
+on real hardware.
+
+---
+
+## 1. Goals, non-goals, and position
+
+### 1.1 Goals
+
+1. Browse and search comic sources from the tablet, with no computer involved.
+2. Sources are **data, not code** — the user adds a site by URL; the app works
+   out how to read it.
+3. Download a volume and have it appear in the normal reMarkable library, in a
+   normal folder, with a normal thumbnail.
+4. Tap "Read" in the app and land in the **stock reader** on that document.
+5. Reading progress, highlights and pen annotations are owned entirely by
+   xochitl. Quire never stores a reading position.
+6. Survive a reMarkable OS update with, at worst, a re-run of the installer and
+   a regenerated QML patch.
+
+### 1.2 Non-goals
+
+- Writing our own e-ink reader or touching the framebuffer/waveform layer. §3.1
+  now confirms the stock reader is fast enough. Settled; do not revisit.
+- Supporting rM1 / rM2. Target is aarch64 Paper Pro family only. Keep the
+  backend arch-agnostic so this stays possible later, but do not test for it.
+- Cloud sync of Quire's own state. Device-local only.
+- Any account system, telemetry, or analytics.
+- Defeating, solving, or working around browser challenges, bot detection, or
+  anti-scraping measures. See §7.6 — sites that gate content this way are
+  detected and refused, not circumvented.
+
+### 1.3 Quire ships with no sources
+
+**The repository contains no source URLs, no bundled index, and no default
+catalogue.** The shipped configuration has an empty index. The user adds each
+site themselves, by pasting a URL.
+
+This is deliberate and not merely cosmetic:
+
+- Much of the material on comic aggregator sites is copyrighted, and whether
+  accessing a given site is permissible varies by jurisdiction and by site.
+  That determination belongs to the person operating the tool, who knows their
+  own situation. Quire does not make it for them, and does not nudge it by
+  shipping a list.
+- It is also the better architecture. A site list in the repo is a maintenance
+  burden that rots; a theme engine that reads any site of a known shape is not.
+
+The README must state plainly that the user is responsible for the legality of
+the sources they configure. `schema/example-index/` may contain **only** entries
+pointing at public-domain repositories (Standard Ebooks, Project Gutenberg) or
+at a server the developer controls. Never a real aggregator.
+
+### 1.4 Licence — decided, and independent of any other project
+
+**Quire is Apache-2.0.** No GPL-licensed code is copied into this repository.
+
+Prior art (§4) is read for *facts*: protocol shapes, file paths, SDK locations,
+which QML type does what, how a site family structures its URLs. Facts, APIs
+and techniques are not copyrightable; expression is. Implementations are
+written from scratch, working from observed HTTP traffic and observed HTML
+rather than from someone else's source.
+
+**Provenance discipline**, without exception:
+
+- Never paste code from another project into this one, not even "temporarily".
+- When a file is informed by reading prior art, note the *fact* learned in a
+  comment — not an attribution, because nothing was copied.
+- Scanly is GPL-3.0. Do not vendor its Dockerfile, its scraping layer, or its
+  QML keyboard. Write your own; the Dockerfile is ~20 lines, and the fact that
+  reMarkable publishes the Codex SDK at a public bucket URL is just a fact.
+- If reusing GPL code ever seems genuinely necessary, **stop and ask the
+  human.** Relicensing the project is their call, not yours.
+
+Add `LICENSE` (Apache-2.0) in the first commit, before any other file.
+
+---
+
+## 2. Architecture
+
+```
+  ┌─────────────────┐     ┌──────────────────┐     ┌────────────────────┐
+  │  User adds a    │────▶│  Quire backend   │────▶│   PDF assembler    │
+  │  site by URL    │     │  Go, aarch64     │     │  images → 1 file   │
+  │  probe → theme  │     │  fetch/cache/    │     │  pdfcpu            │
+  └─────────────────┘     │  queue           │     └─────────┬──────────┘
+                          └────────┬─────────┘               │
+                                   │ AppLoad socket          │ POST /upload
+                                   ▼                         ▼
+                          ┌──────────────────┐     ┌────────────────────┐
+                          │  Quire QML UI    │     │  xochitl library   │
+                          │  inside xochitl  │     │  stock, indexed    │
+                          └────────┬─────────┘     └─────────┬──────────┘
+                                   │ "Read" tap              │
+                                   │  (qmd hook)             │
+                                   ▼                         ▼
+                          ┌─────────────────────────────────────────────┐
+                          │  Stock xochitl reader                       │
+                          │  owns position, annotations, cloud sync     │
+                          └─────────────────────────────────────────────┘
+```
+
+| Component | Language | Lives at |
+|---|---|---|
+| QML frontend | QML / Qt Quick 6 | `/home/root/xovi/exthome/appload/quire/` |
+| Backend daemon | Go (static, CGO off) | same directory, launched by AppLoad |
+| QML patch | QMLDiff `.qmd` | `/home/root/xovi/exthome/qt-resource-rebuilder/` |
+| Theme engine | Go, in backend | — |
+| Installer | Go CLI (host side) | developer machine |
+
+The backend is the only thing that touches the network or the filesystem. The
+QML frontend is a dumb view that speaks the AppLoad protocol. Keep it that way
+— QML is the layer that breaks on OS updates, so it should contain as little
+logic as possible.
+
+---
+
+## 3. Platform facts
+
+### 3.1 Confirmed
+
+- OS is **Codex**, a Yocto-based Linux. Main UI app is **xochitl**, proprietary,
+  closed source, no compatibility guarantee between versions. Started by
+  systemd: `systemctl {start,stop,restart} xochitl`.
+- **Target OS version is 3.25.1.1, pinned, with automatic updates disabled.**
+  This is a hard target, not a minimum. Every `.qmd` in this repository is
+  written against 3.25.1.1 and the installer refuses to run on anything else
+  (§7.8). Do not write version-agnostic QML patches "just in case" — they don't
+  exist on this platform, and pretending otherwise produces patches that
+  silently half-apply.
+- **AppLoad's own hooks break on new firmware, independently of anything we
+  write.** AppLoad injects into xochitl's main UI, and those injection points
+  move between releases. Observed failures: on a 3.26.0.62 pre-release, AppLoad
+  aborted with an unresolvable hashed identifier required by its main-UI hooks,
+  while qt-resource-rebuilder itself loaded fine (19,913 entries cached); on
+  3.28.0.162, qt-resource-rebuilder again loaded fine (20,235 entries) but
+  `appload.so` v0.5.3 panicked immediately, with 3.28 support still an open
+  upstream pull request. **Consequence: the newest OS is the worst OS to target.
+  Our app cannot run at all until upstream ships AppLoad support for a given
+  release.** This, not our `.qmd`, is the binding version constraint.
+- **The hashtab is generated locally, not downloaded.** `xovi/rebuild_hashtable`
+  builds it on-device, and must be re-run after every software update. There is
+  no dependency on anyone publishing a hashtab for our version.
+- **`qmldiff` is a host-side CLI, not only a runtime library.** It can create a
+  hashtab from a QML tree recursively, rewrite diffs into their hashed form in
+  place, and apply diffs to a QML tree writing the result to a destination
+  directory. This makes host-side patch development possible — see §7.8.
+- **Downgrading is effectively one-way.** Moving down a version involves sourcing
+  signed firmware and carries document-format risk; the community position is
+  that it ranges from difficult to impractical. Treat any upgrade as
+  irreversible.
+- **xochitl is required at startup on encrypted devices** (which the Paper Pro
+  is). Do not disable the service.
+- Developer mode is required for SSH on Paper Pro. Enabling it **performs a
+  factory reset** and disables most of secure boot (but not disk encryption).
+  Path: Settings → General → Paper Tablet → Software → Advanced → Developer Mode.
+- Credentials afterwards: Settings → General → Help → About → Copyrights and
+  Licenses, under "General Information". User is `root`, password randomly
+  generated.
+- Leaving developer mode requires recovery mode: hold power 25–30s, release ~2s,
+  single press ~2s, release. USB IDs in recovery: `1fc9:0134` (Paper Pro),
+  `2edd:0140` (Paper Pro Move).
+- Documents live in `/home/root/.local/share/remarkable/xochitl/`. All files for
+  one document share a randomly generated UUID prefix, or sit in a subdirectory
+  named with that UUID. PDF/EPUB-backed documents additionally store the
+  original as `{UUID}.pdf` / `{UUID}.epub`.
+- **reMarkable's own docs state xochitl should not be running when accessing or
+  changing stored documents.** This is the reason for the upload-endpoint
+  approach in M5.
+- `/home/root/.config/remarkable/xochitl.conf` contains the root password in
+  plaintext (assuming it hasn't been changed on-device).
+- **Stock reader performance is adequate.** A 593-page manga PDF has been
+  verified fast on a Paper Pro in normal use. The no-custom-reader design is
+  validated. *Caveat: the variable is per-page image weight, not page count —
+  M4's sizing step is what keeps this true. Do not emit oversized images.*
+- **xovi**: `LD_PRELOAD`-based hooking framework. Extensions are `.so` files in
+  `/home/root/xovi/extensions.d/`; per-extension state in
+  `/home/root/xovi/exthome/<extension-name>/`. Supports aarch64 and arm32.
+  Prebuilts for Paper Pro exist in GitHub releases. Doubles as a dynamic
+  linker: extensions can import/export symbols from each other, and an import
+  from global scope resolves to the *unhooked* version even if another
+  extension hooks it.
+- xovi strips itself from the inherited `LD_PRELOAD` by default. Set
+  `XOVI_INJECT_CHILDREN=1` to let child processes inherit it. Restarting via
+  systemd is unaffected (fresh `LD_PRELOAD` per host process).
+- **AppLoad**: xovi extension providing windowed and fullscreen apps. Apps are
+  directories in `/home/root/xovi/exthome/appload/`. Frontend must be QML.
+  Backend optional, any language, started with `argv[1]` set to a temporary
+  unix socket path. Close a fullscreen app by dragging from centre-top to
+  centre. Long-press an icon in the AppLoad menu to launch as a window.
+- **AppLoad wire protocol**: 8-byte header = u32 message type (arbitrary,
+  developer-defined) + u32 payload length. Max payload **10485760 bytes
+  (10 MiB)**. Bidirectional, same framing both ways. Receiver loops on headers.
+- **qt-resource-rebuilder**: xovi extension that loads `.qmd` (QMLDiff) and
+  `.rcc` files automatically from `$XOVI_EXTHOME/qt-resource-rebuilder/`.
+  Default `$XOVI_EXTHOME` is `/home/root/xovi`.
+- QML patches are **not version agnostic**. literm's README states moving
+  between OS versions means editing values in the `.qmd`. rm-hacks ships one
+  directory per firmware version. Plan for this.
+- Stale QML cache breaks patch application. Fix:
+  `rm -rf /home/root/.cache/remarkable/xochitl/qmlcache` then restart.
+- **USB web interface** endpoints (toggle on in Settings → Storage):
+  - `GET|POST http://10.11.99.1/documents/` — root folder listing
+  - `GET|POST http://10.11.99.1/documents/<guid>` — folder listing
+  - `GET http://10.11.99.1/download/<guid>/placeholder` — PDF for a document
+  - `POST http://10.11.99.1/upload` — multipart upload into the **last listed
+    folder**. Headers observed in the wild: `Origin: http://10.11.99.1`,
+    `Referer: http://10.11.99.1/`. Field name `file`.
+  - Listing responses use `VissibleName` (sic, double-s). Match the device's
+    spelling; do not "fix" it.
+- Package manager is **Vellum** — a static build of Alpine's `apk` wrapped for
+  this platform. Commands: `vellum add|del|update|upgrade|search|info`, plus
+  `vellum check-os <version>` (pre-flight before an OS upgrade) and
+  `vellum reenable` (restore system files after one). Package format is a
+  `VELBUILD` file in Alpine aports style. Virtual packages `rmpp`, `rm2`, and a
+  dynamically generated `remarkable-os` allow version-pinned dependencies, e.g.
+  `depends="qt-resource-rebuilder remarkable-os>=3.24 remarkable-os<3.25"`.
+- Vellum's contribution policy **forbids agent-authored pull requests** and
+  LLM-written PR descriptions, and forbids `Co-Authored-By` trailers naming an
+  assistant. If we ever publish a Vellum package, a human opens that PR and
+  writes the description. Do not open it from this project's automation.
+- Paper Pro device codenames: `ferrari` (Paper Pro), `chiappa` (Paper Pro
+  Move), `tatsu`. SoC: i.MX8MM, aarch64.
+- reMarkable ships official Yocto SDKs (cross toolchain + headers) at a public
+  bucket. Fetch it in the Dockerfile.
+- **Mihon/Tachiyomi ecosystem structure** (relevant to §7.2): a large fraction
+  of extensions inherit from shared base classes in `lib-multisrc/` that
+  implement common site patterns — 61 such themes covering roughly 1,700
+  extension clusters. A theme is defined once; individual sites are
+  instantiated from it with little more than a name and a base URL. Komikku has
+  the same arrangement under `komikku/servers/multi/`. **This is the structure
+  Quire adopts — the idea, not the code.**
+
+### 3.2 Assumed — verify before depending on it
+
+| Assumption | How to verify | Blocks |
+|---|---|---|
+| `POST /upload` is reachable from on-device localhost, not only the USB interface | M0.5 spike, §11 Q1 | M5 |
+| Panel is 1620×2160 portrait, ~229 DPI | `fbset`, or read a stock-converted PDF's MediaBox | M4 |
+| Document `.content` JSON has a usable `parent`-folder mechanism via `.metadata` | Create a folder in the UI, inspect the resulting files | M5 |
+| xochitl indexes an uploaded document without a restart | M0.5 spike | M5 |
+| A QML hook can trigger "open document by UUID" | M6 spike, §11 Q2 | M6 |
+| Qt version is 6.x on current OS | `ls /usr/lib/libQt*` | M1 |
+
+---
+
+## 4. Prior art — read for facts, copy nothing
+
+See §1.4. These are reference material, not a parts bin.
+
+| Project | Licence | What to learn from it |
+|---|---|---|
+| `Err0r-v2/Scanly` | GPL-3.0 | The closest existing thing — manga reader for Paper Pro, Qt6/QML, AppLoad tile. Learn: that the Codex SDK is fetchable from a public bucket; that parallel page fetch + resize-on-save is the right shape; that it patches `linuxfb` for waveform control (the road we are *not* taking, and why). **Do not vendor its code.** |
+| `jdkruzr/reTaskable` | check repo | The structural template: QML frontend + typed backend + a `xovi/` directory of hooks, with separate PC/aarch64/armv7 builds. Critically, it has *jump-back* hooks that navigate xochitl to a specific page of a specific document. **That is the M6 primitive** — read that hook to learn which QML type is involved. |
+| `asivery/rm-appload` | check repo | AppLoad itself. Its docs specify the protocol precisely — implement from the spec. Ships a **PC emulator**; this is what makes iteration bearable. |
+| `asivery/xovi` | check repo | The framework. Read the trampoline/hooking notes for failure modes, incl. the documented caveat about blocking functions and the per-hook mutex. |
+| `asivery/rm-literm` | check repo | Smallest real example of a `.qmd` merging a Qt Quick app into the system UI; clearest statement of the version-coupling problem. |
+| `rmitchellscott/xovi-qmd-extensions`, `FouzR/xovi-extensions`, `ingatellent/xovi-qmd-extensions` | check repo | Readable per-OS-version `.qmd` corpora. Use to learn QMLDiff syntax and to see how others locate UI elements. Note these track the *latest* firmware, so treat them as a map of where to look, not as drop-in patches. |
+| `asivery/rm-hacks-qmd` | — | **Not a reference.** Its QMD files are hashed, the author states they cannot reveal information about their contents, PRs containing unhashed code are auto-closed, and support for the previous version is dropped on each release. Runnable, not readable. Do not budget time trying to learn from it. |
+| `asivery/qmldiff` | check repo | **The host-side workflow.** CLI that builds a hashtab from a QML tree, rewrites diffs into hashed form in place, and applies diffs to a tree writing results elsewhere. Read its language documentation before writing any `.qmd`. |
+| `keiyoushi/extensions-source` | Apache-2.0 | **The theme taxonomy.** Enumerate `lib-multisrc/` for the authoritative current theme list. Read a theme to understand the *site's* URL and DOM shape, then implement against a live site yourself. Their `CONTRIBUTING.md` / `AGENTS.md` are the current source of truth for that repo — conventions change, don't rely on stale knowledge. |
+| Komikku (GNOME) | GPL-3.0 | Cross-reference `komikku/servers/multi/` against keiyoushi's `lib-multisrc/`: the intersection is the set of themes both ecosystems thought worth implementing, i.e. the high-value set. Taxonomy only. |
+| `vellum-dev/vellum-cli`, `rmitchellscott/reManager` | check repo | Packaging/distribution target for M8. |
+| `MaximeRivest/remagic` | MIT | One-command bootstrap (xovi + AppLoad + `xovi-tripletap`). Recommend it as the user-facing prerequisite so our installer needn't own that. |
+
+---
+
+## 5. Repository layout
+
+```
+quire/
+├── LICENSE                     Apache-2.0 — first commit
+├── PLAN.md                     this file — keep it current
+├── README.md                   incl. the §1.3 responsibility statement
+├── backend/
+│   ├── cmd/quired/main.go      entrypoint; argv[1] = AppLoad socket
+│   ├── appload/                protocol framing, message types
+│   ├── theme/                  theme engine
+│   │   ├── theme.go            the Theme interface
+│   │   ├── madara/
+│   │   ├── mangathemesia/
+│   │   └── registry.go
+│   ├── probe/                  §7.5 — reachability, challenge, fingerprint
+│   ├── fetch/                  HTTP: rate limit, robots, cache, retry, SSRF
+│   ├── assemble/               images → PDF (pdfcpu)
+│   ├── library/                xochitl integration: upload, folders, UUIDs
+│   ├── state/                  local state store
+│   └── log/
+├── ui/
+│   ├── Main.qml
+│   ├── AddSource.qml           the probe wizard
+│   ├── SourceList.qml
+│   ├── SeriesGrid.qml
+│   ├── ChapterList.qml
+│   └── Settings.qml
+├── xovi/
+│   └── versions/
+│       └── 3.25.1.1/
+│           └── quireOpen.qmd   M6: the open-document hook
+├── schema/
+│   ├── source.schema.json      a configured source entry
+│   └── example-index/          public-domain / self-hosted entries ONLY
+├── build/
+│   ├── Dockerfile              Codex SDK cross-build — written from scratch
+│   ├── build-rmpp.sh
+│   ├── build-pc.sh
+│   └── install-device.sh
+├── packaging/
+│   └── VELBUILD
+└── docs/
+    ├── DEVICE-NOTES.md
+    ├── QMD-NOTES.md            QML type names per firmware version
+    └── THEME-NOTES.md          fingerprints and quirks per theme
+```
+
+---
+
+## 6. Milestones
+
+### M0 — Device and host preparation
+
+1. Back up everything off the tablet **before** enabling developer mode (it
+   factory resets). Sync to cloud or pull via the USB web interface.
+2. Enable developer mode. Record the root password.
+3. Install an SSH key; stop typing the password.
+4. **Confirm automatic OS updates are off and the device is on 3.25.1.1.**
+   Already done on the target device, but verify rather than assume — an update
+   slipping through silently breaks M6. reManager exposes the toggle.
+5. Record `cat /etc/version` (and whatever else identifies the build) in
+   `docs/DEVICE-NOTES.md`, verbatim. The installer compares against this.
+6. **Hard gate — AppLoad compatibility.** Install xovi + qt-resource-rebuilder
+   + AppLoad (`remagic setup`, or reManager/Vellum) and confirm the AppLoad
+   launcher actually appears. Run `xovi/rebuild_hashtable`, then `xovi/debug`
+   and read the output: qt-resource-rebuilder loading and caching entries is
+   *not* sufficient — AppLoad resolving its own main-UI hooks without panicking
+   is the thing being tested (§3.1).
+   *If AppLoad does not work on 3.25.1.1*, stop. Do not proceed and do not
+   improvise. Check which OS versions AppLoad's most recent **release** (not an
+   open PR) supports, and move the target to that version, updating §3.1, §7.8
+   and the `VELBUILD` pin together. Upgrading is close to irreversible, so make
+   this decision once, deliberately, with the human.
+7. Set up `xovi-tripletap` (triple-press power toggles xovi off) — your escape
+   hatch when a bad `.qmd` crash-loops the UI. **Do not skip this.**
+8. Full backup of `/home/root/.local/share/remarkable/xochitl/` and
+   `/home/root/.config/remarkable/xochitl.conf`.
+9. Host side: Docker, Go 1.22+, your own Codex SDK Dockerfile building, AppLoad
+   PC emulator running.
+10. `LICENSE` committed.
+
+**Acceptance:** `ssh root@10.11.99.1 'uname -m'` returns `aarch64` without a
+password prompt; `xovi/debug` shows AppLoad starting cleanly with its hooks
+resolved and the launcher visible on the tablet; a trivial `GOARCH=arm64` Go
+binary cross-compiles, deploys, and runs on the device; a QML resource tree has
+been dumped to the host and `qmldiff` runs against it (§7.8).
+
+---
+
+### M0.5 — De-risking spike (before anything else)
+
+Two unverified assumptions carry the design. Answer both now.
+
+**Q1 — Can we add a document to the library while xochitl runs?**
+
+On the device, with xochitl running:
+
+```sh
+curl -v http://127.0.0.1/upload \
+  -H 'Origin: http://10.11.99.1' -H 'Referer: http://10.11.99.1/' \
+  -F 'file=@/tmp/test.pdf;filename=test.pdf;type=application/pdf'
+```
+
+Try `127.0.0.1`, `localhost`, the wlan0 address, the usb0 address. Record which
+binds work, and the port, in `docs/DEVICE-NOTES.md`. Determine whether the
+"last listed folder" behaviour means we must `GET /documents/<guid>`
+immediately before uploading — it almost certainly does, and that is global
+mutable state, so note that it must be serialised.
+
+*If no local bind works:* fall back to writing document files directly and
+`systemctl restart xochitl`, batched once per session. Update Goal 3.
+
+**Q2 — Can we navigate xochitl to a document from an extension?**
+
+Read reTaskable's jump-back hook. Identify the QML type and method it calls to
+open a document at a page. Confirm those names exist in the current firmware
+(dump Qt resources via qt-resource-rebuilder's tooling). Write the smallest
+`.qmd` that opens a known-UUID document on some trigger. Prove it works.
+
+*If unreachable:* fall back to "download and notify" — the app says the file is
+in `Comics/<series>` and the user opens it. Goals 4 and 5 still hold; only
+convenience is lost. Acceptable for v1.
+
+**Acceptance:** `docs/DEVICE-NOTES.md` contains a tested answer to both, with
+the exact commands used.
+
+---
+
+### M1 — Hello world AppLoad app
+
+- QML page with a button and a label.
+- Go backend: connect to `argv[1]` socket, answer a ping with device uptime.
+- Implement framing properly now in `backend/appload/`: u32 type + u32 length,
+  length checked against the 10 MiB cap, partial-read loop, clean shutdown on
+  EOF. Table tests. This is the one piece that must never be flaky.
+- `build/install-device.sh` deploys to `/home/root/xovi/exthome/appload/quire/`.
+- `build/build-pc.sh` runs the same QML against the emulator.
+
+**Acceptance:** tapping the button shows real uptime from the Go process; the
+same QML runs in the PC emulator against a host-built backend.
+
+---
+
+### M2 — Theme engine
+
+The core of the project. See §7.2 for the interface and §7.3 for the theme set.
+
+- Define the `Theme` interface. Implement **one** theme end to end (`madara`)
+  before generalising. Resist building a framework first.
+- A configured source is `{id, name, lang, theme, baseUrl, overrides}` — §7.2.
+  No raw selectors in user config for theme-backed sources.
+- Keep a `generic` theme carrying raw selectors plus an optional `goja` script
+  hook, for one-off sites matching no theme. Escape hatch, not the main path.
+- Fixtures: record real HTTP responses once, commit them, test offline forever.
+  Never hit the live network in unit tests.
+- Every theme documents its fingerprint and quirks in `docs/THEME-NOTES.md`.
+
+**Acceptance:** two structurally different themes implemented; search → series
+→ chapters → page URLs works against recorded fixtures for both; adding a third
+site to an existing theme requires only a config entry and no code.
+
+---
+
+### M3 — Add-a-source probe + browse UI
+
+**The probe (§7.5)** is the headline feature. Implement it before the browse UI
+— it is what makes "sources are data" actually usable.
+
+- `AddSource.qml`: paste URL → progress through probe stages → verdict.
+- Verdicts surface as plain language, not error codes. "This site requires a
+  browser challenge that Quire can't pass" is a complete, final answer, not a
+  retry prompt.
+- Source list with per-source enable toggle and last-probe status.
+- Search box (you will need an on-screen keyboard; check whether AppLoad
+  provides one before building your own).
+- Series grid with covers. Cache on disk, downscale hard, never hold more than
+  a screenful in memory.
+- Series detail: synopsis, chapter list, per-chapter download state.
+- **No animations.** E-ink ghosting.
+- Match the stock UI palette. Do not invent a brand.
+
+**Acceptance:** paste a URL for a site of a supported theme → added and
+browsable, no manual configuration. Paste a challenge-protected URL → clear
+refusal, nothing added. Paste an unsupported shape → clear "unrecognised"
+message naming what was tried.
+
+---
+
+### M4 — Download and PDF assembly
+
+- Queue with bounded concurrency; start around 6 concurrent page fetches and
+  measure.
+- Resize each page to the panel's native resolution (verify: assumed
+  1620×2160). JPEG ~q85. On save, not at read time. **This step is what keeps
+  §3.1's performance finding true.**
+- Assemble with `pdfcpu` — pure Go, no CGO, preserves the static binary.
+  MediaBox matching the panel aspect so the stock reader doesn't letterbox.
+- **One PDF per volume, not per chapter.** Chapter PDFs clutter the library and
+  make reading position meaningless. Quire maps chapters → (volume PDF, page
+  offset). Where a source has no volume structure, group by a configurable
+  chapter count (default 10).
+- A partial download must never produce a PDF. Assemble to temp, atomic move.
+- Track total bytes; warn at a configurable threshold; never fill the
+  partition.
+
+**Acceptance:** a full volume downloads, assembles, and opens in a desktop PDF
+viewer with correct page count, order and dimensions; total file size is sane
+for the page count.
+
+---
+
+### M5 — Library integration
+
+Implement whichever path M0.5/Q1 proved.
+
+**Preferred (upload endpoint):** ensure/create `Comics` and a per-series
+subfolder. Folders are documents with a collection type; children reference the
+parent's UUID. **Verify exact field names by creating a folder in the UI and
+diffing the directory** — do not guess. `GET /documents/<folder-guid>`
+immediately before `POST /upload`; serialise this.
+
+**Fallback (direct write):** UUIDv4; write `{uuid}.pdf`, `.metadata`,
+`.content`, `.pagedata` skeletons; `systemctl restart xochitl`, batched once
+per session.
+
+Either way, record the resulting document UUID in state keyed by
+(source, series, volume). That UUID is M6's handle.
+
+**Acceptance:** a downloaded volume appears in `My Files → Comics → <series>`
+with correct name and a real thumbnail; opens in the stock reader; UUID
+persisted.
+
+---
+
+### M6 — Native reader handoff
+
+Keep the `.qmd` **as small as physically possible**. Every line breaks on the
+next OS update.
+
+- One hook exposing one callable: open document by UUID (page offset too, if
+  it's free; ship without it rather than adding a second hook).
+- "Read" in the chapter list → message to backend → hook fires with the stored
+  UUID.
+- Written against **3.25.1.1 only**, living at
+  `xovi/versions/3.25.1.1/quireOpen.qmd`. The installer reads the device's
+  version and **refuses to install** on anything else — hard failure with a
+  clear message, never a best-effort attempt. A mismatched patch is the fastest
+  route to a crash loop.
+- **Expect to back-port, not copy.** The reference `.qmd` corpus is maintained
+  against newer firmware — see §7.8 for why the QML surface we need is
+  specifically one that changed between 3.25 and 3.27.
+- Document every QML type and property in `docs/QMD-NOTES.md` with the firmware
+  version, so the next port is a diff, not an excavation.
+
+**Recovery procedure — put this in the README:** triple-press power to disable
+xovi, then
+`ssh root@10.11.99.1 'rm -f /home/root/xovi/exthome/qt-resource-rebuilder/quireOpen.qmd && systemctl restart xochitl'`.
+If patches silently fail to apply, clear
+`/home/root/.cache/remarkable/xochitl/qmlcache` first.
+
+**Acceptance:** tap "Read" → stock reader opens that volume. Read a few pages,
+back out, reopen from the stock library → resumes at the right page. Annotate
+with the pen → persists and syncs. Quire stores no page number anywhere.
+
+---
+
+### M7 — Resilience and state
+
+- State store: single-file, crash-safe (BoltDB, or JSON with atomic rename).
+  Schema-versioned with forward migrations from day one.
+- Handle: user deletes the document in xochitl (dangling UUID — detect, offer
+  re-download); theme implementation changes; site layout changes mid-series;
+  wifi drops mid-download; device sleeps mid-download.
+- **Re-probe on failure.** When a source starts returning empty results, run the
+  probe again — a site that switched themes or added a challenge should be
+  reported as such, not as "no results found".
+- Rate limiting and backoff enforced in `fetch/`, non-bypassable by config.
+  Honour `robots.txt` and `Retry-After`. Truthful `User-Agent` naming Quire and
+  its version with a project URL.
+- Never hold wifi awake for background work. (One community extension,
+  `webserver-remote`, is known for crash-looping on xochitl restart and
+  draining battery by keeping wifi up — don't repeat that.) Downloads only
+  while foregrounded.
+- Structured logging to a rotating file, with an in-app log viewer. SSH-free
+  debugging is worth the hour.
+
+**Acceptance:** kill wifi mid-volume, sleep, wake, resume — no corrupt PDF, no
+orphaned temp files, no duplicate library entry. Point a source at a URL that
+starts challenging → next sync reports it accurately.
+
+---
+
+### M8 — Packaging and distribution
+
+- `install-device.sh` for developers.
+- A `VELBUILD` with
+  `depends="xovi rm-appload qt-resource-rebuilder remarkable-os>=3.25 remarkable-os<3.26"`,
+  matching the `.qmd` target exactly. This is how `vellum check-os` warns a user
+  before an OS upgrade that Quire will break. Tighten to an exact-version
+  dependency if Vellum's constraint syntax allows it.
+- Post-OS-update guidance in the README: `vellum reenable`, then reinstall.
+- **A human opens the Vellum package PR and writes its description** (§3.1).
+
+**Acceptance:** a clean Paper Pro with xovi+AppLoad present goes from zero to
+working Quire via one documented command.
+
+---
+
+## 7. Specifications
+
+### 7.1 AppLoad message types
+
+Go constants mirrored in QML. Reserve 0.
+
+| ID | Direction | Name | Payload |
+|---|---|---|---|
+| 1 | UI→BE | Ping | — |
+| 2 | BE→UI | Pong | JSON status |
+| 10 | UI→BE | ListSources | — |
+| 11 | BE→UI | Sources | JSON array |
+| 12 | UI→BE | ProbeSource | JSON `{url}` |
+| 13 | BE→UI | ProbeProgress | JSON, streamed, one per stage |
+| 14 | BE→UI | ProbeVerdict | JSON `{verdict, theme, detail}` |
+| 15 | UI→BE | ConfirmAddSource | JSON `{url, theme, name, lang}` |
+| 20 | UI→BE | Search | JSON `{sourceId, query}` |
+| 21 | BE→UI | SearchResults | JSON array |
+| 30 | UI→BE | SeriesDetail | JSON `{sourceId, seriesId}` |
+| 31 | BE→UI | SeriesDetailResult | JSON |
+| 40 | UI→BE | EnqueueDownload | JSON `{sourceId, seriesId, volumeId}` |
+| 41 | BE→UI | DownloadProgress | JSON, streamed |
+| 50 | UI→BE | OpenInReader | JSON `{documentUuid}` |
+| 90 | BE→UI | Error | JSON `{code, message}` |
+
+All payloads JSON. Images are **never** sent over the socket — write to disk,
+send a path. The 10 MiB cap and the per-hook mutex make large transfers a bad
+idea.
+
+### 7.2 Theme engine
+
+A **theme** is a Go implementation of one site *family's* shape. A **source** is
+a user-supplied instantiation of a theme.
+
+```go
+type Theme interface {
+    ID() string
+    // Fingerprint scores a probed page 0..100 for "is this my shape?"
+    Fingerprint(p *probe.Page) int
+    Search(ctx context.Context, s *Source, q string, page int) ([]SeriesStub, error)
+    Series(ctx context.Context, s *Source, id string) (*Series, error)
+    Chapters(ctx context.Context, s *Source, id string) ([]Chapter, error)
+    Pages(ctx context.Context, s *Source, chapterID string) ([]string, error)
+}
+```
+
+A configured source, stored on device, validated against
+`schema/source.schema.json`:
+
+```json
+{
+  "id": "user-added-01",
+  "name": "Example",
+  "lang": "en",
+  "theme": "madara",
+  "baseUrl": "https://example.invalid",
+  "overrides": {
+    "dateFormat": "MMMM d, yyyy",
+    "mangaSubPath": "manga",
+    "useAjaxChapters": true
+  },
+  "rateLimit": { "requestsPerMinute": 30, "concurrency": 2 },
+  "addedAt": "2026-09-15T00:00:00Z",
+  "lastProbe": { "verdict": "ok", "at": "2026-09-15T00:00:00Z" }
+}
+```
+
+`overrides` is a per-theme, schema-declared map. Themes declare which keys they
+accept and sensible defaults; unknown keys are a validation error, not silently
+ignored.
+
+Sources may be exported/imported as JSON so a user can move their setup between
+devices. Quire provides no discovery mechanism, no directory, and no bundled
+index (§1.3).
+
+### 7.3 Theme priority list
+
+Build in this order. Stop and reassess after tier 1 — two themes may cover most
+of what you personally need.
+
+**Before implementing, enumerate `lib-multisrc/` in `keiyoushi/extensions-source`
+for the authoritative current list and rough per-theme site counts.** The list
+below reflects the general landscape and may be stale; the directory listing is
+ground truth. Cross-check against Komikku's `servers/multi/` — themes present in
+both are the safest bets.
+
+**Tier 1 — build these first; they carry the most sites**
+
+| Theme | Shape | Notes |
+|---|---|---|
+| `madara` | WordPress plugin, `wp-manga` post type | Largest family by a wide margin. Chapter list often behind an `admin-ajax.php` POST rather than in the initial HTML. Per-site variation in path segments (`manga` / `series` / `comics`) — hence `overrides`. |
+| `mangathemesia` | WordPress theme, formerly WPMangaStream | Second largest. Page list typically embedded in an inline `ts_reader.run({...})` JSON blob rather than in the DOM. |
+
+**Tier 2 — modern JSON-API families; mechanically the easiest once identified**
+
+| Theme | Shape | Notes |
+|---|---|---|
+| `heancms` | Headless JSON API + Next.js frontend | Clean REST-ish endpoints, no HTML parsing. Has gone through incompatible API revisions — version-detect. |
+| `iken` | Next.js + JSON API | Related lineage to the above. |
+| `keyoapp` | Hosted platform | Predictable structure. |
+
+**Tier 3 — older PHP/CMS families, still widely deployed**
+
+| Theme | Shape |
+|---|---|
+| `mmrcms` | "My Manga Reader CMS", PHP |
+| `fmreader` | PHP, older generation |
+| `wpcomics` | WordPress, distinct from the two tier-1 families |
+| `zeistmanga` | Blogger/Blogspot-hosted |
+| `madtheme` | — |
+
+**Tier 4 — smaller or largely historical; implement only on demand**
+
+`genkan` (largely defunct), `guya`, `readerfront`, `paprika`, `peachscan`,
+`liliana`, `nepnep` (MangaSee/4Life lineage, largely defunct), `greenshit`,
+`etoshore`.
+
+For each theme implemented, `docs/THEME-NOTES.md` records: the fingerprint
+signals used, the endpoint shapes, which `overrides` keys exist and why, and any
+site-specific quirk encountered. That file is what makes theme #6 take an
+afternoon instead of a weekend.
+
+### 7.4 Fetch layer invariants
+
+Non-negotiable, and not configurable by a source entry:
+
+- Global and per-host concurrency caps; minimum inter-request delay per host.
+- `robots.txt` fetched, cached, honoured. If robots disallows the paths a theme
+  needs, the probe reports it and the source is not added.
+- `Retry-After` honoured; exponential backoff with jitter on 429/5xx.
+- Honest `User-Agent` naming Quire, its version, and the project URL. **Never
+  impersonate a browser** — see §7.6.
+- SSRF guard on every resolved URL: reject private/loopback/link-local ranges,
+  non-http(s) schemes, and redirects leaving the source's registrable domain
+  unless an explicit `allowedHosts` entry permits it.
+- Response size cap; total-bytes accounting.
+
+### 7.5 The source probe
+
+Runs when a user adds a URL, and again when a source starts failing (M7). Stages
+run in order; any stage may terminate with a final verdict. Stream progress to
+the UI so a slow site doesn't look hung.
+
+**Stage 1 — Normalise and guard.** Parse the URL, require http(s), resolve DNS,
+apply the SSRF guard. Failure verdicts: `invalid_url`, `blocked_address`.
+
+**Stage 2 — Reachability.** `GET` the homepage with the honest UA, following
+redirects and recording the final registrable domain — if it differs from what
+the user typed, say so and ask before continuing. Record status, headers,
+timing, final URL, body. Failure verdict: `unreachable`, with the transport
+error.
+
+**Stage 3 — Challenge and gate detection.** A hard gate. If any signal fires,
+the verdict is `blocked_challenge` and **the source is refused**. Do not add it
+in a degraded state, do not offer a retry, do not suggest workarounds.
+
+Signals to check — verify each against a live example and record what you
+actually find in `docs/THEME-NOTES.md`; do not trust this list blindly:
+
+- HTTP 403 or 503 from a CDN-managed edge, combined with challenge markers in
+  the body or response headers.
+- Body containing challenge-platform script paths, interstitial `<title>`
+  strings, or a meta-refresh to a challenge endpoint.
+- Cookies whose presence implies a solved challenge is required for content.
+- DDoS-Guard, Sucuri, or similar vendor markers.
+- A generic JS gate: 200 OK, tiny body, no theme fingerprint matches, and a
+  `<noscript>` block or client-side-render placeholder.
+
+Also flag, as a **warning** rather than a hard block: a login wall, paywall, or
+age gate the theme cannot satisfy. Surface it; let the user decide.
+
+**Stage 4 — Theme fingerprint.** Ask every registered theme to score the probed
+page. Take the highest score above a threshold. Ties or near-ties go to the user
+as a choice. Zero matches → verdict `unrecognised`, listing which themes were
+tried so the user can report it usefully.
+
+Fingerprint signals should be *cheap and structural* — asset paths, generator
+meta tags, characteristic DOM class names, known endpoint shapes, distinctive
+inline script markers. Prefer several weak signals over one brittle strong one.
+**Derive fingerprints empirically** by fetching a site known to use the theme
+and diffing against one that doesn't; record both the method and the result.
+
+**Stage 5 — Capability check.** With the candidate theme, exercise the full path
+against the live site: a search (or the popular/latest listing if search needs a
+query), one series detail, one chapter list, and one page-image extraction.
+Require all four to produce plausible non-empty results. This is what separates
+"looks like Madara" from "works as Madara".
+
+Partial success → verdict `partial`, naming the failing step. Offer to add in a
+degraded state only if search and chapters work; if page extraction fails the
+source is useless, so refuse.
+
+**Stage 6 — Accept.** Persist the source entry with the detected theme, a
+default name derived from the site title, and the verdict with a timestamp.
+
+Verdict enum: `ok | partial | unrecognised | blocked_challenge | robots_denied |
+unreachable | invalid_url | blocked_address`.
+
+**Testing:** every verdict needs a fixture-driven test. Record one real response
+per verdict once, commit it, and never hit the live network in CI.
+
+### 7.6 On challenge-protected sites
+
+Quire detects browser challenges in order to **fail clearly**, not to get past
+them. There is no bypass path in this codebase and none should be added.
+
+The practical reason: Mihon solves these by executing the challenge in Android's
+WebView. The Paper Pro has no browser engine available to us, so there is no
+honest implementation even if we wanted one. The design reason: a challenge is a
+site operator saying no, and we take the answer.
+
+Concretely, **do not**: rotate or spoof `User-Agent` strings, impersonate
+browser TLS fingerprints, integrate a CAPTCHA-solving service, proxy through a
+third-party scraping API, or replay clearance cookies harvested elsewhere. If a
+future contributor proposes any of these, the answer is no, and this section is
+why.
+
+### 7.7 Document metadata
+
+**To be filled in during M5 from direct observation.** Create a folder and a PDF
+document through the stock UI, `scp` the resulting files off, and paste the real
+JSON here with field-by-field notes. Do not populate this from memory or from a
+blog post — the format has changed across versions and the Paper Pro differs
+from rM2.
+
+### 7.8 Targeting OS 3.25.1.1
+
+The device is pinned to 3.25.1.1 with updates off. This is good news for M6's
+stability and bad news for its research cost, and the plan should be honest
+about both.
+
+**What gets easier.** The `.qmd` is written once against a frozen target. No
+per-release matrix, no compatibility shims, no defensive coding for QML types
+that might or might not exist. Write exactly what 3.25.1.1 has.
+
+**Why staying here is the right call, not just the inherited one.** The binding
+constraint on this platform is AppLoad, not our patch (§3.1). AppLoad's own
+hooks into xochitl's main UI break on new releases, and until upstream ships
+support, nothing built on AppLoad runs at all. Targeting the newest OS means
+accepting that your app can be dead for weeks waiting on someone else's pull
+request. A settled version where AppLoad demonstrably works is worth more than
+any feature in a newer release. Upgrading is also close to irreversible (§3.1),
+so the asymmetry strongly favours staying.
+
+**What gets harder — less than it first appears.** The readable `.qmd` corpora
+track the latest firmware, so they won't contain a drop-in patch for 3.25.1.1.
+But you were never going to copy one: you extract the QML tree from your own
+device and work against that. The hashtab is generated locally
+(`xovi/rebuild_hashtable`), so nothing waits on a published artefact, and
+`qmldiff` runs on the host, so iteration doesn't require the tablet. The real
+cost of an older version is a few hours of reading your own resource dump.
+
+**Why this matters more than usual for our specific hook.** The QML we need to
+touch is the document-opening path — `DocumentView` / `MainView` and whatever
+sits between them. That is precisely the area known to have changed in this
+version range: a community port of a split-document hack to 3.27.x documents
+having to fix stale anchors, convert an `onOpened` handler to a `REDEFINE`, and
+remove replica properties that no longer existed. Those are exactly the kinds
+of differences that will bite a blind copy. Read any newer patch as a *map of
+where to look*, then confirm every type, property and signal against a dump of
+3.25.1.1's own Qt resources.
+
+**Host-side development loop.** Set this up before writing a single line of
+QMLDiff. It converts M6 from on-device roulette into ordinary development:
+
+1. Dump the QML resource tree from the device once. Keep it on the host, in a
+   scratch branch or an ignored directory, so you can grep it repeatedly.
+2. Build a hashtab from that tree with `qmldiff`, host-side.
+3. Write the patch in unhashed form — readable, reviewable, diffable. This is
+   what lives in git.
+4. Apply it to a copy of the tree with `qmldiff` and inspect the output. A patch
+   that doesn't apply cleanly here will never apply on-device; catch it now.
+5. Only once it applies cleanly, hash the diff and deploy. On-device, run
+   `xovi/rebuild_hashtable` after any OS change, and read `xovi/debug` output
+   rather than guessing from UI behaviour.
+
+Commit the unhashed source patch, and generate the hashed artefact at build
+time. Never let the hashed form be the only copy — that's the mistake that makes
+a project unmaintainable by anyone, including its author six months later.
+
+**Finding the right hook, in order:**
+
+1. Locate the document-open path in *your own dump*, not in a newer repo. Record
+   exact type names, property names, signal names and file paths.
+2. Only then read reTaskable's jump hook and the readable community corpora, as
+   orientation for which call to make — never as code to copy, and never
+   assuming their types exist here.
+3. Write the smallest possible QMLDiff. Prefer a single `REDEFINE` or injection
+   point over several.
+4. Record every difference between 3.25.1.1 and whatever a reference patch
+   targeted, in `docs/QMD-NOTES.md`, as a table. That table makes a future
+   forward-port a diff instead of a re-excavation.
+
+**Pre-flight, every single time you install a `.qmd`:** have an SSH session
+already open and confirmed working, and know that triple-pressing power disables
+xovi. Clear `/home/root/.cache/remarkable/xochitl/qmlcache` when a patch appears
+to do nothing — a stale cache looks identical to a broken patch.
+
+**`docs/QMD-NOTES.md` structure:**
+
+```
+## OS 3.25.1.1
+### Document open path
+| Thing | Type / property | File in resource dump | Notes |
+### Differences from <newer version> reference patches
+| What | 3.25.1.1 | Newer | Consequence |
+```
+
+---
+
+## 8. Risk register
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| OS update breaks the `.qmd` | Low — updates are off and version is pinned | M6 only | Version-pinned `VELBUILD`; installer refuses non-3.25.1.1; `QMD-NOTES.md`; graceful degradation to "open it yourself" |
+| AppLoad upstream breaks on a new OS | Certain, on every release | Total — app won't start | Never chase the newest OS (§3.1). M0's hard gate proves AppLoad works before anything is built on it. Only move to a version AppLoad has a *released* build for, never an open PR |
+| Readable `.qmd` corpora target newer firmware than ours | High | A few hours of M6 reading | Work from your own resource dump; hashtab is locally generated; `qmldiff` iterates on the host (§7.8) |
+| Staying on 3.25.1.1 indefinitely | Certain | Missed fixes, eventual cloud/API drift | Accepted trade-off. When an upgrade becomes necessary, M6 is the only milestone needing rework — §7.8 exists to make that a diff |
+| `/upload` not reachable on localhost | Medium | M5 redesign | M0.5/Q1 answers it before code depends on it |
+| Open-by-UUID not reachable from QML | Medium | Goal 4 lost | M0.5/Q2; fallback is an acceptable v1 |
+| Theme drift — a site family changes layout | High, ongoing | One theme at a time | Fixtures pin behaviour; re-probe on failure (M7) reports it honestly; `overrides` absorb small variations |
+| Fingerprint false positive | Medium | Bad UX | Stage 5 capability check is the real gate, not the fingerprint |
+| Many interesting sites are challenge-protected | Medium | Scope | Detected and refused (§7.6). A known limit of the platform, not a bug to fix |
+| Bad `.qmd` crash-loops the UI | High during M6 | Dev time | `xovi-tripletap` from M0; recovery command in README; never test a `.qmd` without SSH already connected |
+| Device storage fills | Medium | Data loss risk | Byte accounting in M4; hard cap |
+| Oversized images erode reader performance | Medium | Core UX | M4 resize step; assert a max per-page byte size in the assembler |
+| Accidental GPL contamination | Low | Relicensing | §1.4 provenance discipline; if in doubt, ask the human |
+
+---
+
+## 9. Testing strategy
+
+- **Unit**: framer, each theme against recorded fixtures, probe verdicts against
+  recorded fixtures, PDF dimensions, state migrations. No network.
+- **Host integration**: full flow against a local fixture HTTP server via the
+  AppLoad PC emulator. Should catch ~80% of bugs.
+- **Device**: manual checklist in `docs/DEVICE-CHECKLIST.md`, run before each
+  release — clean install, each milestone's acceptance test, reboot, verify
+  persistence.
+- **Update drill**: before shipping, install an OS update on a spare device (or
+  restore a backup) and confirm the failure mode is a disabled patch with a
+  clear message, not a crash loop.
+
+---
+
+## 10. Sequencing
+
+```
+M0   device + host prep              ──┐
+M0.5 spikes: /upload, open-by-UUID   ──┤ can invalidate M5/M6 — do not skip
+M1   hello-world AppLoad app         ──┤
+M2   theme engine           ─┐         │ M2–M4 are ordinary Go work,
+M3   probe + browse UI       ├─────────┤ testable entirely on the host
+M4   download + PDF         ─┘         │
+M5   library integration             ──┤ device-coupled
+M6   reader handoff                  ──┤ device-coupled, fragile
+M7   resilience                      ──┤
+M8   packaging                       ──┘
+```
+
+M2–M4 can proceed in parallel with M0.5 given hardware time; they don't depend
+on the spike outcomes.
+
+---
+
+## 11. Open questions
+
+Answer by experiment, then move the answer into §3.1 and delete it here.
+
+1. **Q1** — Is `POST /upload` reachable from on-device localhost? Which bind
+   addresses and port? Does the "last listed folder" state persist across
+   connections? *(Blocks M5.)*
+2. **Q2** — Which QML type/method does reTaskable's jump-back hook call, and
+   does it exist **in 3.25.1.1 specifically**? Can it take a page offset? If the
+   hook was written against a newer firmware, what is the 3.25.1.1 equivalent?
+   *(Blocks M6. See §7.8.)*
+3. Exact panel resolution, and the MediaBox the stock reader expects for a
+   full-bleed page. *(Blocks M4 sizing.)*
+4. Do uploaded documents sync to reMarkable cloud, and does that matter for
+   storage quota or for a Connect subscription? *(Affects M5 UX.)*
+5. Does AppLoad provide an on-screen keyboard, or must we build one?
+   *(Affects M3 scope.)*
+6. What is the current authoritative `lib-multisrc/` theme list, and how do
+   per-theme site counts rank? *(Refines §7.3 ordering — answer before M2.)*
+
+*Resolved: stock-reader performance on long image PDFs (§3.1) — a 593-page manga
+PDF is fast on device. The no-custom-reader design stands.*
