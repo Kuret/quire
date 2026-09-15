@@ -62,6 +62,10 @@ type Options struct {
 	// is the real device limit with margin. Tests set it small.
 	UploadBudgetBytes int64
 
+	// PreviousSessionCrashed says the last session did not end properly, so
+	// the frontend can be told quietly on attach. See AbnormalExitNotice.
+	PreviousSessionCrashed bool
+
 	// Now is injectable for tests.
 	Now func() time.Time
 
@@ -84,6 +88,8 @@ type Service struct {
 	downloadDir       string
 	downloadOptions   download.Options
 	uploadBudgetBytes int64
+
+	previousSessionCrashed bool
 
 	// dlQueue serialises downloads; see enqueueDownload for why there is
 	// exactly one worker behind it.
@@ -123,6 +129,8 @@ func New(opts Options) *Service {
 		downloadOptions: opts.DownloadOptions,
 
 		uploadBudgetBytes: opts.UploadBudgetBytes,
+
+		previousSessionCrashed: opts.PreviousSessionCrashed,
 	}
 	if s.log == nil {
 		s.log = slog.Default()
