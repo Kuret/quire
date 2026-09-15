@@ -9,6 +9,7 @@ package probe
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -32,6 +33,9 @@ type Page struct {
 	once sync.Once
 	doc  *goquery.Document
 	err  error
+
+	strippedOnce sync.Once
+	body         string
 }
 
 // NewPage builds a Page. FinalURL defaults to URL when no redirect happened.
@@ -55,15 +59,32 @@ func (p *Page) Document() (*goquery.Document, error) {
 }
 
 // HTML is the raw body as a string. Fingerprints use it for the signals that
-// live in inline script or in a comment rather than in the DOM — which, for
-// both tier-1 theme families, is where the most distinctive signals are.
+// live in inline script rather than in the DOM — which, for both tier-1 theme
+// families, is where the most distinctive signals are.
 func (p *Page) HTML() string { return string(p.Body) }
 
-// Contains is a case-insensitive substring test over the raw body. It is the
-// workhorse of the fingerprints, so it is spelled once here rather than in
-// every theme.
+// commentRE matches an HTML comment, including an unterminated one at EOF.
+var commentRE = regexp.MustCompile(`(?s)<!--.*?(-->|$)`)
+
+// Contains is a case-insensitive substring test over the body with HTML
+// comments removed.
+//
+// Removing comments is not tidiness. A fingerprint signal found in a comment
+// is not evidence: sites carry commented-out markup from the theme they used
+// to run, build tools leave whole blocks of dead HTML behind, and a page that
+// merely *mentions* another theme would otherwise be assigned to it. The probe
+// must be able to say "unrecognised" (PLAN §7.5), and it cannot do that if
+// dead text can score.
 func (p *Page) Contains(needle string) bool {
-	return strings.Contains(strings.ToLower(p.HTML()), strings.ToLower(needle))
+	return strings.Contains(strings.ToLower(p.stripped()), strings.ToLower(needle))
+}
+
+// stripped is the body with comments removed, computed once.
+func (p *Page) stripped() string {
+	p.strippedOnce.Do(func() {
+		p.body = commentRE.ReplaceAllString(string(p.Body), "")
+	})
+	return p.body
 }
 
 // Has reports whether the parsed document matches a CSS selector. A parse
