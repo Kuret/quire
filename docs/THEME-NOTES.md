@@ -645,6 +645,25 @@ site has nowhere to vary.
   can download. Verified live on 2026-09-15 against one real page image —
   refused without the declaration, `HTTP 200, image/png` with it. See the
   `allowedHosts` section below for the numbers and the limits.
+- **Covers must be requested as thumbnails.** `uploads.mangadex.org` serves
+  the **original artwork** by default, which is print-resolution. On the device
+  every cover failed with `response exceeds size cap (declared 10852108 >
+  8388608)`. Appending `.512.jpg` to the filename asks for a 512px-long-edge
+  version of the same cover. Measured live on 2026-09-15:
+
+  | URL | bytes |
+  |---|---|
+  | `<file>.jpg` | 10,852,108 |
+  | `<file>.jpg.512.jpg` | **235,535** |
+  | `<file>.jpg.256.jpg` | 72,427 |
+
+  512 and not 256, because the cover render is 300px wide and 256 would be
+  upscaled; at 235 KB the larger one clears fetch's 8 MiB response cap and
+  `backend/covers`' 4 MiB `MaxSourceBytes` by more than an order of magnitude.
+  Neither cap is the thing to change — asking for a thumbnail when a thumbnail
+  is what will be drawn is. The suffix lives in this theme rather than in
+  `backend/covers` because it is a fact about MangaDex's URL scheme, and a
+  generic cover cache has no business knowing one site's naming convention.
 - **Data-saver exists and we do not use it.** `/at-home/` returns both a
   full-quality `data` list and a recompressed `dataSaver` list (JPEG, smaller).
   Quire takes full quality: M4 resizes and re-encodes for the device anyway, so
