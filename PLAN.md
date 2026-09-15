@@ -695,6 +695,54 @@ persisted.
 
 ### M6 — Native reader handoff
 
+> ## ✅ PROVEN ON HARDWARE 2026-09-15 — **M6 needs no `.qmd` at all.**
+>
+> This milestone was written around a QMLDiff patch, and §8 rated that the
+> project's biggest standing risk. It is not needed. An AppLoad application's
+> QML runs **inside xochitl's own QML engine**, so it can import xochitl's
+> singletons directly. A throwaway probe app confirmed every step on the device:
+>
+> ```
+> import device.global        OK -> object     Global.documentViewLoader  OK -> object
+> loader.item                 OK -> object     import com.remarkable      OK -> object
+> Library.entryForId          OK -> object     LibraryController          OK -> object
+> openDocument fn             OK -> function
+> OPEN: openDocument called, no exception
+> ```
+>
+> It genuinely opened the target document — that document's `lastOpened`
+> advanced and no new document was created. The whole handoff is:
+>
+> ```qml
+> import device.global
+> import com.remarkable
+>
+> LibraryController.setLastOpenedPage(uuid, page)   // see the page-offset trap below
+> Global.documentViewLoader.item.openDocument(Library.entryForId(uuid))
+> ```
+>
+> **Consequences, which reach well beyond M6:**
+> - Delete from §8: *"bad `.qmd` crash-loops the UI"* (High during M6) and
+>   *"OS update breaks the `.qmd`"*. Neither can happen if there is no `.qmd`.
+> - `xovi/versions/3.25.1.1/quireOpen.qmd` (§5) is not built. The installer
+>   needs **no hard version gate** and no refusal-to-install.
+> - Most of §7.8's host-side qmldiff loop is no longer on the critical path. Keep
+>   the tooling (`tools/rccdump`, `docs/QMD-NOTES.md`) — it is what *found* this
+>   answer, and it is how a future port starts if the door ever closes.
+> - **It changes what the OS pin is for.** §7.8 partly justified 3.25.1.1 as a
+>   frozen target for the patch. With no patch, the only remaining reason is
+>   **AppLoad compatibility** — which §3.1 always said was the real binding
+>   constraint. An OS upgrade becomes "confirm AppLoad has a *released* build,
+>   re-test two calls", not a re-excavation.
+>
+> **Still true, and still a trap:** `MainView.qml:88` honours a `page` argument
+> only when a search-highlight object is also present, so page offset is
+> silently dropped. Call `LibraryController.setLastOpenedPage(id, page)` first —
+> which is what xochitl itself does at `Navigator.qml:857-860`.
+>
+> **The `.qmd` route stays documented, not deleted**, in case a future OS closes
+> this door. Everything below is that fallback, no longer the plan of record.
+
 Keep the `.qmd` **as small as physically possible**. Every line breaks on the
 next OS update.
 
@@ -1214,7 +1262,9 @@ to do nothing — a stale cache looks identical to a broken patch.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| OS update breaks the `.qmd` | Low — updates are off and version is pinned | M6 only | Version-pinned `VELBUILD`; installer refuses non-3.25.1.1; `QMD-NOTES.md`; graceful degradation to "open it yourself" |
+| ~~OS update breaks the `.qmd`~~ | **Eliminated 2026-09-15** | — | **There is no `.qmd`.** M6 opens documents through xochitl's own QML singletons, proven on hardware. See the box at §6 M6 |
+| ~~Bad `.qmd` crash-loops the UI~~ | **Eliminated 2026-09-15** | — | Same reason. This was rated *High likelihood during M6*; it is now impossible |
+| A future OS removes `Global.documentViewLoader` or `Library.entryForId` | Low, but no longer guarded by a version pin | Goal 4 | These are internal APIs with no compatibility promise. Mitigation is the documented `.qmd` fallback plus graceful degradation to "the file is in Comics/<series>, open it yourself" |
 | AppLoad upstream breaks on a new OS | Certain, on every release | Total — app won't start | Never chase the newest OS (§3.1). M0's hard gate proves AppLoad works before anything is built on it. Only move to a version AppLoad has a *released* build for, never an open PR |
 | Readable `.qmd` corpora target newer firmware than ours | High | A few hours of M6 reading | Work from your own resource dump; hashtab is locally generated; `qmldiff` iterates on the host (§7.8) |
 | Staying on 3.25.1.1 indefinitely | Certain | Missed fixes, eventual cloud/API drift | Accepted trade-off. When an upgrade becomes necessary, M6 is the only milestone needing rework — §7.8 exists to make that a diff |
