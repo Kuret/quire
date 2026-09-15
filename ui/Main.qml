@@ -272,11 +272,16 @@ Rectangle {
                 chaptersModel.setProperty(i, "documentUuid", msg.documentUuid)
 
             // The confirm phase is a question, and the strip is where it is
-            // asked. Any other phase is an answer, so the strip closes.
-            if (msg.phase === "confirm")
+            // asked. Any other phase is an answer, so the strip closes. The
+            // question travels with the id because the strip is drawn over the
+            // foot of the list rather than inside the row (PLAN §12.1).
+            if (msg.phase === "confirm") {
                 chapterListScreen.confirmingId = msg.volumeId
-            else if (chapterListScreen.confirmingId === msg.volumeId)
+                chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
+            } else if (chapterListScreen.confirmingId === msg.volumeId) {
                 chapterListScreen.confirmingId = ""
+                chapterListScreen.confirmingMessage = ""
+            }
             return
         }
     }
@@ -317,6 +322,9 @@ Rectangle {
         chaptersModel.clear()
         chapterListScreen.seriesTitle = title
         chapterListScreen.synopsis = ""
+        chapterListScreen.page = 1
+        chapterListScreen.confirmingId = ""
+        chapterListScreen.confirmingMessage = ""
         chapterListScreen.busy = true
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
     }
