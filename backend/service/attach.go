@@ -1,5 +1,11 @@
 package service
 
+import (
+	"log/slog"
+
+	"github.com/rickl/quire/backend/appload"
+)
+
 // AbnormalExitNotice is what the user is told when the previous session did not
 // end properly.
 //
@@ -42,4 +48,66 @@ func (s *Service) StartupNotice() string {
 		return AbnormalExitNotice
 	}
 	return ""
+}
+
+// FrontendDetached stops work that has no business continuing with nobody
+// watching.
+//
+// PLAN §6 M7: "Never hold wifi awake for background work. Downloads only while
+// foregrounded." Quire never acquires a wakelock, so it cannot hold wifi up
+// directly — but a download running on after the user has closed the app keeps
+// the radio busy and pegs a core for minutes at a time, which has the same
+// effect on their battery and is the specific failure the plan names another
+// extension for. It is also the work most likely to get us OOM-killed while
+// the user is not there to see why.
+//
+// Stopping is safe precisely because cancel means *stop, not discard*: fetched
+// pages stay on disk and resume skips them, so reopening Quire carries on from
+// where it left off. Parts of a split volume that already reached the library
+// stay there, as they do for any other cancel.
+func (s *Service) FrontendDetached(log *slog.Logger) {
+	if log == nil {
+		log = s.log
+	}
+
+	s.dlMu.Lock()
+	active := make([]downloadKey, 0, len(s.dlActive))
+	cancels := make([]func(), 0, len(s.dlActive))
+	for key, cancel := range s.dlActive {
+		active = append(active, key)
+		cancels = append(cancels, cancel)
+	}
+	s.dlMu.Unlock()
+
+	// Drain anything still queued as well: it has not started, and starting it
+	// now would be beginning new background work at exactly the wrong moment.
+	//
+	// Each drained job is told it stopped rather than silently dropped. The
+	// frontend may well be gone, in which case the send goes nowhere and costs
+	// nothing — but if another one has already attached, a queued row that
+	// never resolves is a progress bar that hangs for ever.
+	drained := 0
+	for {
+		select {
+		case job := <-s.dlQueue:
+			drained++
+			_ = send(job.out, appload.MessageDownloadProgress, downloadProgress{
+				SourceID: job.req.SourceID, SeriesID: job.req.SeriesID,
+				VolumeID: job.req.VolumeID,
+				Phase:    phaseCancelled,
+				Message:  "Stopped, because Quire was closed. Start it again to carry on.",
+			})
+			continue
+		default:
+		}
+		break
+	}
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+	if len(cancels) > 0 || drained > 0 {
+		log.Info("paused downloads because the frontend went away",
+			"running", len(active), "queued", drained)
+	}
 }

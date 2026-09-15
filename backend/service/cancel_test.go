@@ -255,3 +255,70 @@ func TestCancelKeepsPartsAlreadyUploaded(t *testing.T) {
 		t.Errorf("%d records for %d uploaded documents", n, uploaded)
 	}
 }
+
+// PLAN §6 M7: downloads only while foregrounded. A volume is 7-10 minutes of
+// pegged CPU and a busy radio; carrying on after the user has closed Quire
+// drains their battery for work nobody is waiting for, and is the work most
+// likely to get the backend OOM-killed with nobody there to see why.
+func TestDetachingPausesADownload(t *testing.T) {
+	svc, stall, dir, fake, _, store, rec := stallingService(t, 3)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	stall.waitForStall(t)
+
+	svc.FrontendDetached(nil)
+	waitForPhase(t, rec, "cancelled")
+
+	fake.mu.Lock()
+	uploads := len(fake.uploaded)
+	fake.mu.Unlock()
+	if uploads != 0 {
+		t.Errorf("%d uploads continued after the frontend went away", uploads)
+	}
+
+	// Pausing is not discarding: the pages already fetched stay, so reopening
+	// Quire resumes rather than starting over.
+	pages := 0
+	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".jpg") {
+			pages++
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if pages == 0 {
+		t.Error("pausing threw the fetched pages away")
+	}
+}
+
+// A queued download must not start once the frontend is gone either: starting
+// new background work at that moment is exactly what the plan forbids.
+func TestDetachingDrainsTheQueue(t *testing.T) {
+	svc, stall, _, fake, _, store, rec := stallingService(t, 3)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	stall.waitForStall(t)
+
+	queued := &recorder{}
+	handle(t, svc, queued, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"queued-one","confirmed":true}`)
+
+	svc.FrontendDetached(nil)
+	waitForPhase(t, rec, "cancelled")
+	waitForPhase(t, queued, "cancelled")
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.uploaded) != 0 {
+		t.Errorf("%d uploads after detach", len(fake.uploaded))
+	}
+}

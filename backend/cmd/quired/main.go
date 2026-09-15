@@ -149,6 +149,12 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 
 	case appload.MessageSystemLostCoordinator:
 		log.Info("frontend detached")
+		// Downloads only while foregrounded (PLAN §6 M7). Stopping here is
+		// safe because cancel keeps the fetched pages, so reopening Quire
+		// resumes rather than starting over.
+		if svc != nil {
+			svc.FrontendDetached(log)
+		}
 		return nil
 
 	default:
