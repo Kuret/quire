@@ -47,6 +47,43 @@ Rectangle {
     // The one error worth showing: whatever the backend last complained about.
     property string lastError: ""
 
+    // The native reader handoff lives behind a Loader so that its imports of
+    // xochitl's own QML singletons cannot take the app down with them: if they
+    // ever stop resolving, status goes to Loader.Error and "Read" degrades to
+    // telling the user where the file is (PLAN §6 M6).
+    Loader {
+        id: readerHandoff
+        source: "ReaderHandoff.qml"
+        asynchronous: false
+    }
+
+    function openInReader(documentUuid) {
+        if (!documentUuid)
+            return
+        var opened = readerHandoff.status === Loader.Ready && readerHandoff.item
+                     ? readerHandoff.item.open(documentUuid, -1)
+                     : false
+        if (!opened) {
+            // Tell the backend, which owns both the record and the wording.
+            root.send(Msg.OpenInReader, {"documentUuid": documentUuid, "missing": true})
+            root.forgetDocument(documentUuid)
+            return
+        }
+        root.send(Msg.OpenInReader, {"documentUuid": documentUuid})
+    }
+
+    // forgetDocument clears a dead UUID off every row that carried it, so the
+    // button goes back to offering a download straight away.
+    function forgetDocument(documentUuid) {
+        for (var i = 0; i < chaptersModel.count; ++i) {
+            if (chaptersModel.get(i).documentUuid === documentUuid) {
+                chaptersModel.setProperty(i, "documentUuid", "")
+                chaptersModel.setProperty(i, "downloadState", "")
+                chaptersModel.setProperty(i, "downloadMessage", "")
+            }
+        }
+    }
+
     ListModel { id: sourcesModel }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
@@ -181,9 +218,9 @@ Rectangle {
                 "number": list[i].number,
                 "published": list[i].published ? list[i].published : "",
                 "scanlator": list[i].scanlator ? list[i].scanlator : "",
-                "downloadState": "",
+                "downloadState": list[i].documentUuid ? "done" : "",
                 "downloadMessage": "",
-                "documentUuid": ""
+                "documentUuid": list[i].documentUuid ? list[i].documentUuid : ""
             })
         }
         chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
@@ -203,6 +240,13 @@ Rectangle {
             chaptersModel.setProperty(i, "downloadMessage", msg.message ? msg.message : "")
             if (msg.documentUuid)
                 chaptersModel.setProperty(i, "documentUuid", msg.documentUuid)
+
+            // The confirm phase is a question, and the strip is where it is
+            // asked. Any other phase is an answer, so the strip closes.
+            if (msg.phase === "confirm")
+                chapterListScreen.confirmingId = msg.volumeId
+            else if (chapterListScreen.confirmingId === msg.volumeId)
+                chapterListScreen.confirmingId = ""
             return
         }
     }
@@ -377,6 +421,10 @@ Rectangle {
             model: chaptersModel
             onDownloadRequested: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "volumeId": chapterId})
+            onDownloadConfirmed: root.send(Msg.EnqueueDownload,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId, "confirmed": true})
+            onReadRequested: root.openInReader(documentUuid)
         }
 
         Settings {
