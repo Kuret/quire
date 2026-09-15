@@ -239,6 +239,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		go s.runCover(ctx, out, req.SourceID, req.SeriesID, req.URL)
 		return true, nil
 
+	case appload.MessageOpenInReader:
+		var req openRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.openInReader(out, req)
+
 	case appload.MessageEnqueueDownload:
 		var req downloadRequest
 		if err := decode(payload, &req); err != nil {
@@ -547,12 +554,24 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		Number    float64 `json:"number"`
 		Published string  `json:"published,omitempty"`
 		Scanlator string  `json:"scanlator,omitempty"`
+
+		// DocumentUUID is set when this chapter's volume is already on the
+		// tablet. It is what turns the row's button from "Download" into
+		// "Read" (PLAN §6 M6) — without it, a volume downloaded last week is
+		// indistinguishable from one never fetched.
+		DocumentUUID string `json:"documentUuid,omitempty"`
+		VolumeLabel  string `json:"volumeLabel,omitempty"`
 	}
+	stored := s.storedVolumes(sourceID, seriesID, series.Title, chapters)
+
 	rows := make([]chapterRow, 0, len(chapters))
 	for _, c := range chapters {
 		r := chapterRow{ID: c.ID, Title: c.Title, Number: c.Number, Scanlator: c.Scanlator}
 		if !c.Published.IsZero() {
 			r.Published = c.Published.UTC().Format("2006-01-02")
+		}
+		if rec, ok := stored[c.ID]; ok {
+			r.DocumentUUID, r.VolumeLabel = rec.DocumentUUID, rec.Volume
 		}
 		rows = append(rows, r)
 	}
