@@ -256,6 +256,11 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 		return
 	}
 	p.Series, p.Title = vol.Series, vol.Title
+	if vol.PerChapter {
+		// Say it before the work starts, not only at the end: the user is
+		// about to watch a download they did not quite ask for.
+		p.Note = UnorderedSeriesNote
+	}
 
 	// Page URLs come one chapter at a time, through the source's own policy —
 	// so its allowedHosts apply, which is what lets a source whose images live
@@ -291,7 +296,7 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 	vol.Chapters = pages
 
 	step(phaseAssembling, fmt.Sprintf("Building the PDF of %s…", vol.Title))
-	manifest, err := assemble.Assemble(ctx, dir, vol, assemble.DefaultOptions())
+	manifest, err := assemble.Assemble(ctx, dir, vol.Volume, assemble.DefaultOptions())
 	if err != nil {
 		fail("Quire could not build the PDF: %s", plain(err))
 		return
@@ -307,7 +312,7 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 	}
 	p.DocumentUUID = res.DocumentUUID
 	p.FolderPath = place.Path
-	p.Note = place.Remedy()
+	p.Note = strings.TrimSpace(strings.Join([]string{p.Note, place.Remedy()}, " "))
 
 	rec := library.Record{
 		Key:          library.Key{Source: src.ID, Series: req.SeriesID, Volume: vol.Label},
@@ -360,7 +365,7 @@ func (s *Service) downloadPages(ctx context.Context, out Sender, src *theme.Sour
 }
 
 // storeVolume uploads the assembled PDF and reports where it landed.
-func (s *Service) storeVolume(ctx context.Context, vol assemble.Volume, dir string,
+func (s *Service) storeVolume(ctx context.Context, vol volumePlan, dir string,
 	manifest *assemble.Manifest) (library.Result, library.Placement, error) {
 
 	if err := s.library.EnsureReachable(ctx); err != nil {
@@ -403,12 +408,16 @@ func (s *Service) storeVolume(ctx context.Context, vol assemble.Volume, dir stri
 // xochitl appends ".pdf" when the uploaded filename does not end in it, so the
 // suffix is here rather than left to chance: a name that already carries it is
 // one the user can predict.
-func documentName(vol assemble.Volume, manifest *assemble.Manifest) string {
+func documentName(vol volumePlan, manifest *assemble.Manifest) string {
 	series := strings.TrimSpace(vol.Series)
 	label := strings.TrimSpace(vol.Label)
 
 	var name string
 	switch {
+	case vol.PerChapter:
+		// Not a volume, and calling it "Vol 12" would say it was. The chapter
+		// names itself.
+		name = strings.TrimSpace(vol.Title)
 	case series != "" && label != "":
 		name = fmt.Sprintf("%s — Vol %s", series, label)
 	case series != "":
@@ -435,7 +444,58 @@ func documentName(vol assemble.Volume, manifest *assemble.Manifest) string {
 // the chapter list in the order the theme gave it — which is the order the
 // user is looking at in the chapter list, so the volume they get is the one
 // the chapter they tapped appears to be in.
-func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID string) (assemble.Volume, bool) {
+func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID string) (volumePlan, bool) {
+	for _, v := range groupVolumes(seriesTitle, chapters) {
+		for _, c := range v.Chapters {
+			if c.ID == chapterID {
+				return v, true
+			}
+		}
+	}
+	return volumePlan{}, false
+}
+
+// volumePlan is a volume plus how Quire arrived at it, which is what decides
+// the wording the user sees.
+type volumePlan struct {
+	assemble.Volume
+
+	// SourceLabelled is true when the volume carries the source's own label
+	// ("3") rather than a number Quire made up by counting chapters. It is the
+	// difference between "Volume 3", which the reader recognises from the
+	// site, and "the second group of ten", which means nothing to anyone.
+	SourceLabelled bool
+
+	// PerChapter is set when the theme could not establish a reading order, so
+	// this "volume" is a single chapter saved on its own.
+	PerChapter bool
+}
+
+// UnorderedSeriesNote explains a one-PDF-per-chapter download.
+//
+// A volume is a *run* of chapters. Building one from a list the theme admits it
+// could not order produces a silently scrambled book — the exact failure PLAN
+// §7.2's ordering contract exists to prevent, reintroduced one layer up. One
+// file per chapter clutters the library, which is why §6 M4 argues against it
+// in the normal case, but page order *within* a chapter comes from Pages() and
+// is authoritative, so every file is at least correct. Refusing outright would
+// be worse: the user would get nothing where we could have given them
+// something true.
+const UnorderedSeriesNote = "Quire couldn’t work out what order this series’ chapters go in, " +
+	"so it saved this one as its own file rather than build a volume that might read back to " +
+	"front. The pages inside it are in the right order."
+
+// groupVolumes is the single place a series' chapter list becomes volumes.
+//
+// There is exactly one because the volume *label* is what a stored document is
+// keyed by: if the chapter list were grouped one way when downloading and
+// another when deciding which rows already have a document, the Read button
+// would appear on the wrong chapters.
+//
+// The chapter list is used in the order the theme returned it, which PLAN §7.2
+// requires to be ascending reading order. This deliberately does not sort: two
+// places normalising order is how order drifts.
+func groupVolumes(seriesTitle string, chapters []theme.Chapter) []volumePlan {
 	if seriesTitle == "" {
 		seriesTitle = "Series"
 	}
@@ -445,16 +505,50 @@ func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID st
 			ID:     c.ID,
 			Title:  c.Title,
 			Number: chapterNumber(c),
+			Volume: c.Volume,
 		})
 	}
-	for _, v := range assemble.GroupIntoVolumes(seriesTitle, flat, 0) {
-		for _, c := range v.Chapters {
-			if c.ID == chapterID {
-				return v, true
-			}
-		}
+
+	if !theme.OrderIsKnown(chapters) {
+		return perChapterVolumes(seriesTitle, flat)
 	}
-	return assemble.Volume{}, false
+
+	// GroupIntoVolumes groups on the source's own Volume label wherever there
+	// is one and falls back to runs of ten only where there is not — which is
+	// what PLAN §6 M4 meant by "one PDF per volume" all along.
+	grouped := assemble.GroupIntoVolumes(seriesTitle, flat, 0)
+	plans := make([]volumePlan, 0, len(grouped))
+	for _, v := range grouped {
+		plans = append(plans, volumePlan{
+			Volume:         v,
+			SourceLabelled: len(v.Chapters) > 0 && v.Chapters[0].Volume != "",
+		})
+	}
+	return plans
+}
+
+// perChapterVolumes is the fallback for a series whose reading order the theme
+// could not establish: one chapter per PDF, each correct on its own.
+func perChapterVolumes(seriesTitle string, chapters []assemble.Chapter) []volumePlan {
+	plans := make([]volumePlan, 0, len(chapters))
+	for _, ch := range chapters {
+		label := strings.TrimSpace(ch.Number)
+		if label == "" {
+			// The label is the store key and the PDF's filename stem, so it
+			// has to be stable and unique per chapter. The chapter ID is both.
+			label = safeSegment(ch.ID)
+		}
+		plans = append(plans, volumePlan{
+			Volume: assemble.Volume{
+				Series:   seriesTitle,
+				Label:    label,
+				Title:    seriesTitle + " — " + chapterLabel(ch),
+				Chapters: []assemble.Chapter{ch},
+			},
+			PerChapter: true,
+		})
+	}
+	return plans
 }
 
 // chapterNumber renders theme.Chapter's float number as the text assemble

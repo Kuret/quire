@@ -127,8 +127,14 @@ func downloadRoutes(t *testing.T) map[string]themetest.Route {
 
 func newDownloadService(t *testing.T) (*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
 	t.Helper()
+	return newDownloadServiceWith(t, downloadRoutes(t))
+}
 
-	f := themetest.New(t, downloadRoutes(t))
+func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route) (
+	*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
+	t.Helper()
+
+	f := themetest.New(t, routes)
 	reg := theme.NewRegistry()
 	reg.MustRegister(madara.NewWithClock(f, func() time.Time { return fixedNow }))
 
@@ -498,5 +504,42 @@ func TestTheDocumentIsNamedSeriesAndVolume(t *testing.T) {
 	name := fake.names[0]
 	if !strings.Contains(name, "Lantern Keeper") || !strings.Contains(name, "Vol ") {
 		t.Errorf("document name %q, want \"<Series> — Vol N.pdf\"", name)
+	}
+}
+
+// A series whose reading order Quire could not establish gets one PDF per
+// chapter — and is told why. Assembling a volume from a list we admit we could
+// not order would produce a silently scrambled book, which is the failure the
+// ordering contract exists to prevent, reintroduced one layer up.
+func TestAnUnorderedSeriesFallsBackToOnePDFPerChapter(t *testing.T) {
+	r := downloadRoutes(t)
+	r["POST /manga/the-lantern-keeper/ajax/chapters/"] = themetest.Route{File: "chapters-unordered.html"}
+	svc, store, libStore, fake, rec := newDownloadServiceWith(t, r)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+
+	// One chapter is not a volume, so there is nothing to confirm: the
+	// download starts on the first tap.
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+
+	done := waitForPhase(t, rec, "done")
+	note, _ := done["note"].(string)
+	if !strings.Contains(note, "order") {
+		t.Errorf("note %q does not explain why this is one chapter on its own", note)
+	}
+
+	fake.mu.Lock()
+	names := append([]string(nil), fake.names...)
+	fake.mu.Unlock()
+	if len(names) != 1 {
+		t.Fatalf("uploaded %v, want exactly the one chapter", names)
+	}
+	if strings.Contains(names[0], "Vol ") {
+		t.Errorf("name %q calls a lone chapter a volume", names[0])
+	}
+	if n := len(libStore.List()); n != 1 {
+		t.Errorf("%d records stored", n)
 	}
 }
