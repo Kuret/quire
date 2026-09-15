@@ -151,6 +151,7 @@ Item {
                 border.color: Style.rule
 
                 Image {
+                    id: cover
                     anchors.fill: parent
                     source: model.coverPath
                     fillMode: Image.PreserveAspectFit
@@ -160,15 +161,19 @@ Item {
                     asynchronous: true
                     // No fade-in: the panel would ghost the intermediate frames.
                     cache: true
-                    visible: model.coverPath.length > 0
+                    visible: model.coverPath.length > 0 && cover.status !== Image.Error
                 }
 
+                // The placeholder covers both "no cover was offered" and "the
+                // file is there but will not decode". A tile that is blank in
+                // the second case is indistinguishable from one still loading,
+                // and the user cannot tell whether to wait.
                 Text {
                     anchors.centerIn: parent
                     text: "No cover"
                     font.pointSize: Style.smallSize
                     color: Style.muted
-                    visible: model.coverPath.length === 0
+                    visible: model.coverPath.length === 0 || cover.status === Image.Error
                 }
             }
 
