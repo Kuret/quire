@@ -121,7 +121,11 @@ Rectangle {
             MouseArea {
                 id: pingArea
                 anchors.fill: parent
-                onClicked: appload.sendMessage(Msg.Ping, "")
+                // "{}" rather than "": PLAN §7.1 says all payloads are JSON,
+                // and a non-empty payload keeps the empty-packet edge case of
+                // AppLoad's framing off the wire entirely. The backend handles
+                // that case correctly regardless — this is belt and braces.
+                onClicked: appload.sendMessage(Msg.Ping, "{}")
             }
         }
 
