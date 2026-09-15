@@ -230,6 +230,68 @@ func TestNormaliseRejectsOversizedPage(t *testing.T) {
 	}
 }
 
+// A page over the budget is re-encoded once at the lower quality rather than
+// failing the whole volume, and the retry is reported.
+func TestNormaliseRequantisesOnce(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(1620, 2160, 200))
+
+	opts := imageproc.DefaultOptions()
+	full, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	opts.RetryQuality = 40
+	low, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), imageproc.Options{
+		MaxWidth: opts.MaxWidth, MaxHeight: opts.MaxHeight, Quality: 40,
+		Background: opts.Background, AspectTolerance: opts.AspectTolerance,
+		Scaler: opts.Scaler, Prescale: opts.Prescale,
+	})
+	if err != nil {
+		t.Fatalf("low-quality baseline: %v", err)
+	}
+	if low.Bytes >= full.Bytes {
+		t.Fatalf("q40 is %d bytes, not smaller than q85's %d; the test cannot separate them", low.Bytes, full.Bytes)
+	}
+
+	// A budget between the two: the first encode busts it, the retry fits.
+	opts.MaxBytes = (full.Bytes + low.Bytes) / 2
+
+	var out bytes.Buffer
+	res, err := imageproc.Normalise(&out, bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatalf("Normalise: %v", err)
+	}
+	if !res.Requantised {
+		t.Error("Requantised = false; the retry is invisible to the caller")
+	}
+	if res.Quality != 40 {
+		t.Errorf("Quality = %d, want the retry quality 40", res.Quality)
+	}
+	if res.FirstBytes <= opts.MaxBytes {
+		t.Errorf("FirstBytes = %d, should record the rejected encode (> %d)", res.FirstBytes, opts.MaxBytes)
+	}
+	if res.Bytes > opts.MaxBytes {
+		t.Errorf("Bytes = %d, still over the %d budget", res.Bytes, opts.MaxBytes)
+	}
+	if int64(out.Len()) != res.Bytes {
+		t.Errorf("wrote %d bytes, Result says %d", out.Len(), res.Bytes)
+	}
+	if _, _, err := image.Decode(bytes.NewReader(out.Bytes())); err != nil {
+		t.Errorf("re-encoded page does not decode: %v", err)
+	}
+}
+
+// With the retry disabled, the first overrun is still fatal.
+func TestNormaliseRetryDisabled(t *testing.T) {
+	raw := encodeJPEG(t, synthPage(1620, 2160, 200))
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 1024
+	opts.RetryQuality = 0
+	if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); !errors.Is(err, imageproc.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+}
+
 // The prescale must not change the output geometry, only the cost of getting
 // there.
 func TestPrescaleKeepsGeometry(t *testing.T) {

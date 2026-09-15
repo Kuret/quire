@@ -39,6 +39,7 @@
 package imageproc
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
@@ -94,6 +95,11 @@ type Options struct {
 	// MaxBytes is the per-page budget. Exceeding it returns ErrTooLarge.
 	// Zero disables the check.
 	MaxBytes int64
+
+	// RetryQuality is the JPEG quality to re-encode a page at when the first
+	// encode exceeds MaxBytes. Zero disables the retry, so the first overrun
+	// is fatal. See Result.Requantised.
+	RetryQuality int
 
 	// Scaler selects the resampling kernel. The zero value is the default,
 	// measured on the device — see the Scaler docs.
@@ -165,13 +171,19 @@ func (s Scaler) String() string {
 // pathological input rather than a tight budget.
 const DefaultMaxPageBytes = 1 << 20
 
-// DefaultOptions returns the panel-native settings: 1620 × 2160, JPEG q85,
-// white padding, 1% aspect tolerance, CatmullRom behind a box prescale.
+// DefaultRetryQuality is the second-attempt JPEG quality for a page that
+// busts the budget at DefaultOptions().Quality.
+const DefaultRetryQuality = 65
+
+// DefaultOptions returns the panel-native settings: 1620 × 2160, JPEG q85
+// (q65 on a retry), white padding, 1% aspect tolerance, CatmullRom behind a
+// box prescale.
 func DefaultOptions() Options {
 	return Options{
 		MaxWidth:        PanelWidth,
 		MaxHeight:       PanelHeight,
 		Quality:         85,
+		RetryQuality:    DefaultRetryQuality,
 		Background:      color.White,
 		AspectTolerance: 0.01,
 		MaxBytes:        DefaultMaxPageBytes,
@@ -188,6 +200,16 @@ type Result struct {
 	SrcFormat     string // "jpeg", "png", "webp", ...
 	Bytes         int64  // encoded size
 	Padded        bool   // true if an aspect mismatch was padded
+
+	// Requantised reports that the page busted MaxBytes at Options.Quality and
+	// was re-encoded once at Options.RetryQuality. A source where this happens
+	// on every page is systematically oversized and worth surfacing.
+	Requantised bool
+	// FirstBytes is the size of the rejected first encode, set only when
+	// Requantised.
+	FirstBytes int64
+	// Quality is the JPEG quality the written bytes were encoded at.
+	Quality int
 }
 
 // Normalise decodes src, fits it to the panel grid and writes a JPEG to dst.
@@ -213,11 +235,6 @@ func Normalise(dst io.Writer, src io.Reader, opts Options) (Result, error) {
 
 	out, padded := fit(img, opts)
 
-	cw := &countingWriter{w: dst}
-	if err := jpeg.Encode(cw, out, &jpeg.Options{Quality: opts.Quality}); err != nil {
-		return Result{}, fmt.Errorf("imageproc: encode: %w", err)
-	}
-
 	sb := img.Bounds()
 	ob := out.Bounds()
 	res := Result{
@@ -226,11 +243,41 @@ func Normalise(dst io.Writer, src io.Reader, opts Options) (Result, error) {
 		SrcWidth:  sb.Dx(),
 		SrcHeight: sb.Dy(),
 		SrcFormat: format,
-		Bytes:     cw.n,
 		Padded:    padded,
+		Quality:   opts.Quality,
 	}
-	if opts.MaxBytes > 0 && cw.n > opts.MaxBytes {
-		return res, fmt.Errorf("%w: %d bytes > %d", ErrTooLarge, cw.n, opts.MaxBytes)
+
+	// Encode into memory rather than straight to dst: the budget is only
+	// knowable after the fact, and a page that busts it gets one cheaper
+	// attempt before the whole volume fails. A page is ~0.5 MiB, so this
+	// buffer is not the memory that matters.
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, out, &jpeg.Options{Quality: opts.Quality}); err != nil {
+		return Result{}, fmt.Errorf("imageproc: encode: %w", err)
+	}
+
+	// One re-encode at a lower quality. Failing a 200-page volume because a
+	// single noisy page missed the budget is the wrong trade; silently
+	// degrading every page would be worse, so the retry is reported in
+	// Result.Requantised for the caller to log.
+	if opts.MaxBytes > 0 && int64(buf.Len()) > opts.MaxBytes && opts.RetryQuality > 0 && opts.RetryQuality < opts.Quality {
+		var retry bytes.Buffer
+		if err := jpeg.Encode(&retry, out, &jpeg.Options{Quality: opts.RetryQuality}); err != nil {
+			return Result{}, fmt.Errorf("imageproc: re-encode: %w", err)
+		}
+		res.FirstBytes = int64(buf.Len())
+		res.Requantised = true
+		res.Quality = opts.RetryQuality
+		buf = retry
+	}
+
+	n, err := dst.Write(buf.Bytes())
+	res.Bytes = int64(n)
+	if err != nil {
+		return res, fmt.Errorf("imageproc: write: %w", err)
+	}
+	if opts.MaxBytes > 0 && res.Bytes > opts.MaxBytes {
+		return res, fmt.Errorf("%w: %d bytes > %d at quality %d", ErrTooLarge, res.Bytes, opts.MaxBytes, res.Quality)
 	}
 	return res, nil
 }
@@ -357,15 +404,4 @@ func relDiff(a, b float64) float64 {
 		return -d
 	}
 	return d
-}
-
-type countingWriter struct {
-	w io.Writer
-	n int64
-}
-
-func (c *countingWriter) Write(p []byte) (int, error) {
-	n, err := c.w.Write(p)
-	c.n += int64(n)
-	return n, err
 }
