@@ -651,6 +651,21 @@ message naming what was tried.
      what the plan meant by "volume"; runs-of-N is the *fallback* it was always
      described as, not the primary mechanism.
   2. Runs of N (default 10) only when the source publishes no volume labels.
+  3. **A hard byte budget, which overrides both.** Measured on the device
+     2026-09-15: **xochitl's `/upload` rejects any multipart body of
+     100,000,000 bytes or more** — a decimal 100 MB cap on the *body*, not the
+     PDF. Worse, past that it frequently **resets the connection mid-upload**
+     instead of answering `413`, so the whole transfer is wasted and the error
+     is a confusing transport failure rather than a clear refusal.
+     At M4's measured ~307 KiB/page that is about **325 pages**, and a
+     10-chapter MangaDex volume can exceed it comfortably — this is not a
+     corner case, it is the first real download we attempted.
+     **So a volume must split when it would exceed the budget** (default ~90 MB,
+     leaving margin for multipart overhead and per-page variance), into
+     `Vol 3 (part 1 of 2)` and so on. The chapter→(PDF, page offset) map must
+     follow the split, since it is M6's input.
+     **Check the assembled size before uploading** and fail with a plain-language
+     message rather than discovering it as a reset socket 90 MB in.
   **When `OrderIsKnown` is false, do not build a multi-chapter volume at all —
   fall back to one PDF per chapter**, and tell the user why in plain language.
   A volume is a *run* of chapters, so assembling one from a list whose order we
