@@ -529,9 +529,12 @@ site has nowhere to vary.
   was broken.
 - **Off-domain hosts.** Covers come from `uploads.mangadex.org` (same
   registrable domain, so the guard is content) but **page images come from
-  `*.mangadex.network`**, which is not. See the §7.4 note below — a MangaDex
-  source needs `mangadex.network` in `allowedHosts` before M4 can download a
-  page.
+  generated labels under `mangadex.network`**, which is not. This is what made
+  PLAN §7.2 grow an `AllowedHosts()` method: the theme declares
+  `*.mangadex.network`, §7.5 stage 6 seeds it onto the stored source, and M4
+  can download. Verified live on 2026-09-15 against one real page image —
+  refused without the declaration, `HTTP 200, image/png` with it. See the
+  `allowedHosts` section below for the numbers and the limits.
 - **Data-saver exists and we do not use it.** `/at-home/` returns both a
   full-quality `data` list and a recompressed `dataSaver` list (JPEG, smaller).
   Quire takes full quality: M4 resizes and re-encodes for the device anyway, so
@@ -545,6 +548,51 @@ site has nowhere to vary.
 - **UUIDs, stored as paths.** IDs are `/manga/{uuid}` and `/chapter/{uuid}`, so
   they keep the "site-relative" convention, stay self-describing in a state
   file, and make a series UUID handed to `Pages()` an error rather than a 404.
+
+**`allowedHosts` — and why this theme changed `theme.Theme`**
+
+Page images do not come from `api.mangadex.org`. `/at-home/server/{id}` returns
+a base URL on a host like `cmdxd98sb0x3yprd.mangadex.network` — a generated
+label on a **different registrable domain**. §7.4's redirect boundary refuses
+it, so before this change M4 could list a chapter and download none of it, and
+the user's only clue was an SSRF rejection naming a host they had never seen.
+
+PLAN §7.2 therefore gained `AllowedHosts() []string` (2026-09-15). Two forms:
+`example.test` matches that host and anything under it; `*.example.test`
+matches subdomains only. This theme declares `*.mangadex.network` — the
+narrower form, because the apex serves nothing. Covers are *not* declared:
+`uploads.mangadex.org` is inside the API's own registrable domain, so naming it
+would imply a widening that is not happening.
+
+§7.5 stage 6 copies the declaration onto the stored source, so it is visible in
+the source entry, editable by the user, and unaffected if a later version of
+the theme changes its mind. Seeding happens when the draft is built, before
+stage 5, so the capability check runs under the same policy the stored source
+will have.
+
+**What this does not do, and the test that pins it.** `allowedHosts` widens the
+registrable-domain boundary and *only* that. `Guard.CheckURL` runs the address
+check after the domain check, unconditionally, so a declared host that resolves
+into a private, loopback or link-local range is still refused — a theme cannot
+name its way onto the local network, and neither can a hand-edited or imported
+source entry. `TestAllowedHostsCannotReachAPrivateAddress` declares each host
+three ways at once (exact, wildcard, bare domain) and requires every one to be
+refused; mutating `CheckURL` to short-circuit when `allowedHosts` matches makes
+it fail.
+
+Verified live on 2026-09-15 against one real page image:
+
+```
+theme declares: [*.mangadex.network]
+unseeded  allowedHosts=[]                   -> REFUSED: leaves the source's domain "mangadex.org"
+seeded    allowedHosts=[*.mangadex.network] -> OK: HTTP 200, 476737 bytes, image/png
+```
+
+**No other theme needed one.** `madara`, `mangathemesia` and `generic` all
+return nil, checked rather than assumed: every image reference in their
+fixtures is relative or on the site's own host, and none of them redirects
+off-domain. A family of independently hosted installs has no shared CDN to
+name, and inventing one would widen the boundary for every site in the family.
 
 **robots.txt — and why this theme changed the fetch layer**
 
@@ -724,10 +772,15 @@ actually seen, and say where it was seen in general terms — never name the sit
    negative signal if two families share too much surface.
 6. Add a section here: fingerprint signals with weights, endpoint table,
    overrides table with a "why" column, and the quirks that cost you an hour.
-7. If the theme needs a request that robots disallows, read §7.4's
+7. Implement `AllowedHosts()`. **nil is the right answer for a site family**
+   — hundreds of independent installs have no CDN in common, and naming one
+   widens the redirect boundary for all of them. Return hosts only if the
+   theme's own images genuinely live on another registrable domain, and check
+   the fixtures rather than assuming.
+8. If the theme needs a request that robots disallows, read §7.4's
    discovery/retrieval decision and the `mangadex` section before reaching for
    `GetRetrieval`. The bar is "the user named this thing", not "this request is
    inconvenient to lose".
-8. If it is a JSON API rather than a markup family, say so at the top of its
+9. If it is a JSON API rather than a markup family, say so at the top of its
    section the way `mangadex` does, and gate the fingerprint on something that
    cannot be worn by accident. A JSON envelope is not a fingerprint.
