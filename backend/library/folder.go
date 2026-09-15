@@ -6,8 +6,22 @@ import (
 	"strings"
 )
 
-// ComicsFolder is the top-level folder PLAN §6 M5 puts downloads in.
+// ComicsFolder is the folder PLAN §6 M5 puts downloads in.
+//
+// It is **flat**. A volume goes straight into Comics, carrying its series in
+// the document name, because Quire cannot create folders at all (see Resolve).
+// A per-series subfolder is honoured if the user made one and is never
+// required: tidy nesting we cannot create is worth less than a correct file the
+// user can find.
 const ComicsFolder = "Comics"
+
+// ComicsRemedy is the one-time setup instruction for the Comics folder, in the
+// same register as the WebInterfaceEnabled one — because it is the same kind of
+// thing. Both are things only the user can do, once, on the tablet.
+const ComicsRemedy = "Quire keeps downloaded comics in a folder called " +
+	"“Comics” on your reMarkable, and there isn’t one yet. On the tablet, in " +
+	"My Files, make a folder called Comics and Quire will use it from then on. " +
+	"Until then downloads go to the top of My Files."
 
 // Placement is the answer to "where does this volume go".
 type Placement struct {
@@ -40,10 +54,45 @@ func (p Placement) Remedy() string {
 	if len(p.Path) > 0 {
 		where = "My Files → " + strings.Join(p.Path, " → ")
 	}
+	// The one case the user actually meets: they have not made Comics yet.
+	// Place never reports anything else missing, because the series subfolder
+	// is optional by design.
+	if len(p.Path) == 0 && len(p.Missing) == 1 && p.Missing[0] == ComicsFolder {
+		return ComicsRemedy
+	}
 	return fmt.Sprintf("The reMarkable has no folder %s yet. "+
 		"Create it on the tablet under %s and the next download will go there. "+
 		"Until then Quire saves into %s.",
 		strings.Join(full, " → "), where, where)
+}
+
+// Place decides where a volume of a series goes, and is the shape PLAN §6 M5
+// settled on: flat into Comics, with a per-series subfolder used only if the
+// user happens to have made one.
+//
+// If Comics itself is missing the volume goes to the top of My Files and
+// Remedy says how to fix that for next time. It is never a refusal: by the time
+// this is called the pages are fetched and the PDF is built, and a file in the
+// wrong folder can be dragged into the right one — a refused download cannot.
+func (l *Library) Place(ctx context.Context, series string) (Placement, error) {
+	comics, err := l.Resolve(ctx, ComicsFolder)
+	if err != nil {
+		return Placement{}, err
+	}
+	if !comics.Complete() {
+		return comics, nil
+	}
+	if strings.TrimSpace(series) == "" {
+		return comics, nil
+	}
+	nested, err := l.Resolve(ctx, ComicsFolder, series)
+	if err != nil {
+		return Placement{}, err
+	}
+	if nested.Complete() {
+		return nested, nil
+	}
+	return comics, nil
 }
 
 // Resolve walks a folder path from the top level down, and reports how far it

@@ -360,3 +360,65 @@ func TestAliasFailureStopsTheUpload(t *testing.T) {
 		t.Fatal("want the alias failure surfaced")
 	}
 }
+
+// The library is flat by design: a volume goes straight into Comics, with its
+// series in the name.
+func TestPlaceIsFlatIntoComics(t *testing.T) {
+	f := newFake(library.Entry{ID: "comics", Parent: "", Type: library.Collection, VisibleName: "Comics"})
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	place, err := lib.Place(context.Background(), "Snotgirl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !place.Complete() {
+		t.Fatalf("missing %v; a series subfolder must not be required", place.Missing)
+	}
+	if place.FolderID != "comics" {
+		t.Errorf("folder %q, want comics", place.FolderID)
+	}
+	if place.Remedy() != "" {
+		t.Errorf("remedy %q, want none", place.Remedy())
+	}
+}
+
+// A per-series subfolder the user made is honoured, because someone who has
+// tidied their library should not have Quire untidy it.
+func TestPlaceUsesASeriesFolderIfTheUserMadeOne(t *testing.T) {
+	f := newFake(
+		library.Entry{ID: "comics", Parent: "", Type: library.Collection, VisibleName: "Comics"},
+		library.Entry{ID: "snot", Parent: "comics", Type: library.Collection, VisibleName: "Snotgirl"},
+	)
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	place, err := lib.Place(context.Background(), "Snotgirl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place.FolderID != "snot" {
+		t.Errorf("folder %q, want snot", place.FolderID)
+	}
+	if len(place.Path) != 2 {
+		t.Errorf("path %v", place.Path)
+	}
+}
+
+// No Comics folder is the one-time setup step, not a failure: the volume still
+// lands, at the top of My Files, and the user is told how to fix it.
+func TestPlaceWithoutComicsFallsBackAndSaysSo(t *testing.T) {
+	lib := newLibrary(t, newFake(), confWith(t, enabledConf))
+
+	place, err := lib.Place(context.Background(), "Snotgirl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place.FolderID != library.RootID {
+		t.Errorf("folder %q, want the root", place.FolderID)
+	}
+	if got := place.Missing; len(got) != 1 || got[0] != library.ComicsFolder {
+		t.Fatalf("missing %v, want just Comics — the series folder is optional", got)
+	}
+	if place.Remedy() != library.ComicsRemedy {
+		t.Errorf("remedy %q, want the one-time setup instruction", place.Remedy())
+	}
+}

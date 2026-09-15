@@ -75,9 +75,9 @@ func TestDeviceUploadAVolume(t *testing.T) {
 	}
 	t.Logf("assembled %d pages, %d bytes", manifest.PageCount, manifest.Bytes)
 
-	place, err := lib.Resolve(ctx, library.ComicsFolder, vol.Series)
+	place, err := lib.Place(ctx, vol.Series)
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("place: %v", err)
 	}
 	t.Logf("placement: folder=%q path=%v missing=%v", place.FolderID, place.Path, place.Missing)
 	if len(place.Path) == 0 {
@@ -93,7 +93,7 @@ func TestDeviceUploadAVolume(t *testing.T) {
 	}
 	defer f.Close()
 
-	res, err := lib.Upload(ctx, place.FolderID, vol.Title+".pdf", f)
+	res, err := lib.Upload(ctx, place.FolderID, vol.Series+" — Vol "+vol.Label+".pdf", f)
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
