@@ -134,7 +134,16 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		return cap
 	}
 
-	pages, err := th.Pages(ctx, src, chapters[0].ID)
+	// The *newest* chapter, which is the last one now that PLAN §7.2 has
+	// Chapters return ascending reading order (2026-09-15).
+	//
+	// Deliberate, not incidental. A site that has changed its reader markup
+	// keeps the old chapters exactly as they were, so probing the earliest
+	// chapter can report a capability the user will not actually have on
+	// anything they read. The most recent chapter is the one that reflects
+	// what the site does today, which is what stage 5 is asking about.
+	newest := chapters[len(chapters)-1]
+	pages, err := th.Pages(ctx, src, newest.ID)
 	switch {
 	case err != nil:
 		cap.Pages.Note = plainError(err)
