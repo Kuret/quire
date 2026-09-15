@@ -246,6 +246,95 @@ above about overclaiming still stands.
 
 ---
 
+## Chapter ordering — the contract every theme owes
+
+**PLAN §7.2, decided 2026-09-15: `Chapters` returns ascending reading order,
+earliest chapter first.** Implemented in `backend/theme/order.go`.
+
+**The bug it replaced.** madara's markup lists chapters newest-first; MangaDex's
+feed sorts oldest-first; nothing said which was correct. §6 M4 groups a run of
+chapters into *one* volume PDF, so a descending source produced a PDF whose
+pages ran backwards — inside a file whose reading position xochitl then owns.
+M5 surfaced it as a volume titled "The Lantern Keeper — 4–1". Silent until
+someone opened it.
+
+**Why the theme and not the caller.** Only the theme knows what its identifiers
+mean. A generic sort at the call site is how this goes wrong a second time:
+`"10"` sorts before `"9"` as a string, `"12.5"` is not an integer, and
+mangathemesia's chapter 1 is *titled* "Final Lamp" with the real number hidden
+in a `data-num` attribute that no caller can see.
+
+**What `theme.Chapter` grew**
+
+| Field | Why |
+|---|---|
+| `Volume string` | The source's own volume label, `""` when it publishes none. A *label*, not a number, because that is what sites give ("3", "Vol. 3", "TBD"). §6 M4's "runs of ten" grouping is the fallback for sources with no volume structure; this field is what tells it which case it is in. |
+| `OrderUnknown bool` | Quire could not establish a reading order for the list this chapter came from. Set on **every** chapter of such a list, because it describes the list; `theme.OrderIsKnown(chs)` reads it back at that level. |
+
+`OrderUnknown` lives on the element only because `Theme.Chapters` returns a
+plain slice, and inventing a wrapper type to carry one boolean would change the
+interface for every caller to say something they can already be told.
+
+**How `SortAscending` decides — direction first, sorting second**
+
+Sites list chapters in a consistent direction. What they do *not* do is
+interleave unnumbered extras predictably. Given `5 4 Extra 3 2 1`, sorting by
+number puts `Extra` at one end, belonging to nobody; detecting that the numbered
+chapters run *downwards* and reversing the whole list keeps `Extra` between 3
+and 4, where the site put it.
+
+| Case | Action | `ordered` |
+|---|---|---|
+| No chapter carries a number | keep source order | **false** |
+| The numbered chapters already ascend | keep | true |
+| The numbered chapters descend | reverse the whole list, extras included | true |
+| Neither, and *every* chapter is numbered | stable sort by number | true |
+| Neither, and some are unnumbered | keep source order | **false** |
+
+Chapter number is the primary key. **Volume is a tie-break, not a prefix** —
+chapter numbers run continuously across volumes on every source seen so far, so
+keying on volume first would reorder a correct list the moment one label was
+missing. Volume only speaks up when two chapters claim the same number, which
+is what a re-release in volumes looks like.
+
+**Signalling "unknowable".** The two `false` rows above are the honest failures:
+the source order is kept untouched and `SortAndMark` sets `OrderUnknown` on
+every chapter. A caller assembling several chapters into one PDF must consult
+`theme.OrderIsKnown` rather than assume. A wrong order is worse than an admitted
+one.
+
+**What each theme does**
+
+| Theme | Source order | Derived from |
+|---|---|---|
+| `madara` | newest first | `li.wp-manga-chapter` in document order, reversed. One call in `parseChapters`, the single exit for all three of its chapter paths (inline HTML, current AJAX, legacy AJAX). |
+| `mangathemesia` | newest first | `#chapterlist li` in document order, reversed. The number comes from `data-num` when the title is decorative. |
+| `generic` | unknown | Whatever the user's selectors or script yield. Normalised like everyone else: selectors say *where* the chapters are, never which way round they run, and a user's script is not trusted to have got it right either. |
+| `mangadex` | oldest first | `order[chapter]=asc`, then normalised anyway — see below. |
+
+**mangadex normalises even though the server sorts.** Not defensive
+box-ticking: the feed is paginated and the pages are concatenated in *request*
+order, `order[chapter]=desc` is an equally documented value of the same
+parameter, and a chapter with no number has no defined position in the server's
+sort at all. The cost is one pass over a slice we already own. `Volume` comes
+from `attributes.volume` and is no longer baked into the display title.
+
+**Testing it.** Every theme has a `TestChaptersAreAscending`, and the fixtures
+are adversarial on purpose — a test over a fixture that happens to be ascending
+proves nothing. `chapters-ajax.html` and `series.html` are newest-first because
+that is what those themes' markup does, and `mangadex/testdata/feed-descending.json`
+exists solely so the MangaDex test is not just watching the server sort.
+Confirmed by mutation: deleting the `theme.SortAndMark` call in madara's
+`parseChapters` fails `TestChaptersAreAscending` on the first comparison.
+
+**One caller changed with it.** §7.5 stage 5 extracts pages from
+`chapters[len-1]`, the *newest*, where it used to take `chapters[0]`. That is a
+deliberate choice rather than an index fix: a site that has changed its reader
+markup leaves old chapters exactly as they were, so probing the earliest one
+can report a capability the user will not have on anything they actually read.
+
+---
+
 ## Per-theme notes
 
 ### `madara` — WordPress `wp-manga` plugin
@@ -756,8 +845,9 @@ actually seen, and say where it was seen in general terms — never name the sit
 
 ## Writing theme #6 — the short version
 
-1. New package under `backend/theme/`. Implement `theme.Theme` (six methods,
-   PLAN §7.2) plus `theme.OverrideValidator`.
+1. New package under `backend/theme/`. Implement `theme.Theme` (seven methods
+   as of 2026-09-15 — the six of PLAN §7.2 plus `AllowedHosts`) and
+   `theme.OverrideValidator`.
 2. Declare a `theme.OverrideSpec`. Every key needs a `Default` and a `Why` —
    there is a test that fails if either is missing, because a key whose reason
    has been forgotten is a key nobody dares remove.
@@ -772,15 +862,19 @@ actually seen, and say where it was seen in general terms — never name the sit
    negative signal if two families share too much surface.
 6. Add a section here: fingerprint signals with weights, endpoint table,
    overrides table with a "why" column, and the quirks that cost you an hour.
-7. Implement `AllowedHosts()`. **nil is the right answer for a site family**
+7. Return chapters in **ascending reading order** (PLAN §7.2). Call
+   `theme.SortAndMark` and make the fixture adversarial — if it is already
+   ascending, the test proves nothing. See the chapter-ordering section above
+   for what to do when the order is genuinely unknowable.
+8. Implement `AllowedHosts()`. **nil is the right answer for a site family**
    — hundreds of independent installs have no CDN in common, and naming one
    widens the redirect boundary for all of them. Return hosts only if the
    theme's own images genuinely live on another registrable domain, and check
    the fixtures rather than assuming.
-8. If the theme needs a request that robots disallows, read §7.4's
+9. If the theme needs a request that robots disallows, read §7.4's
    discovery/retrieval decision and the `mangadex` section before reaching for
    `GetRetrieval`. The bar is "the user named this thing", not "this request is
    inconvenient to lose".
-9. If it is a JSON API rather than a markup family, say so at the top of its
+10. If it is a JSON API rather than a markup family, say so at the top of its
    section the way `mangadex` does, and gate the fingerprint on something that
    cannot be worn by accident. A JSON envelope is not a fingerprint.
