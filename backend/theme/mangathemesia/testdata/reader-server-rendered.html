@@ -1,0 +1,33 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the minority MangaThemesia shape: a reader rendered entirely
+  server-side, with no ts_reader.run({...}) blob at all. The full page list is
+  in #readerarea. This is what the `pageSource: "dom"` override exists for, and
+  it is also the fallback the theme takes when a blob is present but
+  unparseable.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Salt and Cedar Chapter 2 &#8211; Second Example Scans</title>
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/example-theme/style.css">
+</head>
+<body class="single single-chapter">
+<div id="content">
+  <div class="postbody">
+    <div class="headpost"><h1 class="entry-title">Salt and Cedar Chapter 2</h1></div>
+
+    <div id="readerarea" class="rdminimal">
+      <p><img src="https://cdn.example.invalid/pages/salt-cedar/2/001.jpg" alt=""></p>
+      <p><img data-src="https://cdn.example.invalid/pages/salt-cedar/2/002.jpg"
+              src="https://example.invalid/wp-content/themes/example-theme/img/loading.gif" alt=""></p>
+      <p><img src="/wp-content/uploads/pages/salt-cedar/2/003.jpg" alt=""></p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

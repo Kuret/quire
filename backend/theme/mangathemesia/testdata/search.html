@@ -1,0 +1,106 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a MangaThemesia (formerly WPMangaStream) search results
+  page generates: WordPress's stock /?s= query — with no post_type filter, so
+  ordinary pages and posts appear alongside series — rendered into a .listupd
+  grid of .bs > .bsx > a cards. The title lives in the anchor's title attribute
+  and, redundantly, in a .tt element that also carries a badge.
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing source URLs
+  or anything that functions as a catalogue, and §1.4 forbids copying others'
+  expression. The markup structure is an observable property of a distributed
+  WordPress theme; the content is invented and the host is example.invalid
+  (RFC 2606), which can never resolve.
+
+  Deliberate variations exercised by the test:
+    - the second card uses the older .utao/.uta/.imgu markup the theme also ships
+    - the .tt of the first card carries a "HOT" badge that must not end up in
+      the title, which is why the title attribute is preferred
+    - a plain WordPress page is in the results and must be filtered out, since
+      this theme's search has no post_type filter to do it for us
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search results for lantern &#8211; Example Scans</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/example-theme/style.css">
+</head>
+<body class="search search-results">
+<div id="content">
+  <div class="postbody">
+    <div class="bixbox">
+      <div class="releases"><h1>Search results for "lantern"</h1></div>
+
+      <div class="listupd">
+
+        <div class="bs">
+          <div class="bsx">
+            <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
+              <div class="limit">
+                <span class="type Manga"></span>
+                <div class="ply"></div>
+                <img class="ts-post-image wp-post-image attachment-medium"
+                     src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E"
+                     data-src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper.jpg"
+                     alt="The Lantern Keeper">
+              </div>
+              <div class="bigor">
+                <div class="tt">The Lantern Keeper<span class="hotbadge">HOT</span></div>
+                <div class="adds">
+                  <div class="epxs">Chapter 4</div>
+                </div>
+              </div>
+            </a>
+          </div>
+        </div>
+
+        <div class="utao styletwo">
+          <div class="uta">
+            <div class="imgu">
+              <a href="/manga/salt-and-cedar/" title="Salt and Cedar">
+                <img class="ts-post-image"
+                     src="https://example.invalid/wp-content/uploads/2026/02/salt-cedar.jpg"
+                     alt="Salt and Cedar">
+              </a>
+            </div>
+            <div class="luf">
+              <a href="/manga/salt-and-cedar/" title="Salt and Cedar"><h4>Salt and Cedar</h4></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="bs">
+          <div class="bsx">
+            <a href="/manga/paper-lanterns-of-the-ninth-ward/">
+              <div class="limit">
+                <img class="ts-post-image"
+                     srcset="https://example.invalid/wp-content/uploads/2026/03/ninth-ward.jpg 300w"
+                     alt="">
+              </div>
+              <div class="bigor"><div class="tt">Paper Lanterns of the Ninth Ward</div></div>
+            </a>
+          </div>
+        </div>
+
+        <!-- An ordinary WordPress page, not a series. Must be filtered out. -->
+        <div class="bs">
+          <div class="bsx">
+            <a href="https://example.invalid/about-lanterns/" title="About Lanterns">
+              <div class="bigor"><div class="tt">About Lanterns</div></div>
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="pagination">
+      <a class="next page-numbers" href="https://example.invalid/page/2/?s=lantern">Next</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

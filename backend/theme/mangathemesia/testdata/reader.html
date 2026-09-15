@@ -1,0 +1,50 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a MangaThemesia reader page generates, and the second
+  structural difference from madara: PLAN §7.3's "page list typically embedded
+  in an inline ts_reader.run({...}) JSON blob rather than in the DOM".
+
+  The #readerarea below deliberately contains only the first two images, as a
+  lazily-hydrated reader does. A parser that reads the DOM gets a truncated
+  chapter and no error; the blob is the authoritative list. That trap is the
+  whole reason this fixture exists.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+
+  Deliberate variations exercised by the test:
+    - the blob lists two sources (the site's own and a mirror); the first wins
+    - the blob is minified onto one line, as the theme emits it
+    - the blob's JSON contains keys we do not care about, which must not break
+      decoding
+    - one image URL is site-relative and must resolve against baseUrl
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper Chapter 4 &#8211; Example Scans</title>
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/example-theme/style.css">
+</head>
+<body class="single single-chapter">
+<div id="content">
+  <div class="postbody">
+    <div class="headpost">
+      <h1 class="entry-title">The Lantern Keeper Chapter 4</h1>
+    </div>
+
+    <div id="readerarea" class="rdminimal">
+      <p><img decoding="async" src="https://cdn.example.invalid/pages/lantern-keeper/4/001.jpg" alt=""></p>
+      <p><img decoding="async" src="https://cdn.example.invalid/pages/lantern-keeper/4/002.jpg" alt=""></p>
+      <!-- The remaining pages are inserted by the reader from the blob below. -->
+    </div>
+
+    <div class="chnav">
+      <a href="/the-lantern-keeper-chapter-3/" class="ch-prev-btn">Prev</a>
+    </div>
+  </div>
+</div>
+
+<script>ts_reader.run({"post_id":9182,"chapter":"4","nextUrl":"","prevUrl":"https://example.invalid/the-lantern-keeper-chapter-3/","fullscreen":false,"sources":[{"source":"Example Scans","images":["https://cdn.example.invalid/pages/lantern-keeper/4/001.jpg","https://cdn.example.invalid/pages/lantern-keeper/4/002.jpg","https://cdn.example.invalid/pages/lantern-keeper/4/003.jpg","https://cdn.example.invalid/pages/lantern-keeper/4/004.jpg","/wp-content/uploads/pages/lantern-keeper/4/005.jpg"]},{"source":"Mirror","images":["https://mirror.example.invalid/x/1.jpg"]}]});</script>
+</body>
+</html>

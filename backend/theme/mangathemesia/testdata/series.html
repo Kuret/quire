@@ -1,0 +1,117 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a MangaThemesia series page generates, and the
+  structural difference from madara that PLAN §6 M2's acceptance test wants:
+  the chapter list is right here in #chapterlist, not behind an AJAX POST.
+  There is no post ID and no second round trip.
+
+  Metadata sits in a flat .tsinfo list of .imptdt rows — a label in <i> and the
+  value beside it — rather than in madara's heading/content pairs.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+
+  Deliberate variations exercised by the test:
+    - one chapter's display title is decorative ("Final Lamp") while its
+      data-num carries the real number, which must win
+    - the Artist row is the theme's "-" placeholder and must yield no artist
+    - chapter dates are absolute in the site's WordPress date format
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper &#8211; Example Scans</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/example-theme/style.css">
+</head>
+<body class="single single-manga">
+<div id="content">
+  <div class="postbody">
+    <div class="bixbox animefull">
+      <div class="seriestucon">
+        <div class="seriestucontent">
+          <div class="seriestucontl">
+            <div class="thumb">
+              <img class="wp-post-image"
+                   src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E"
+                   data-src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper.jpg"
+                   alt="The Lantern Keeper">
+            </div>
+            <div class="rt">
+              <div class="rating"><div class="numscore">8.4</div></div>
+            </div>
+          </div>
+
+          <div class="seriestucontentr">
+            <div class="seriestuheader">
+              <h1 class="entry-title" itemprop="name">The Lantern Keeper</h1>
+              <span class="seriestualt">Rōtō no Bannin, The Keeper of Lanterns</span>
+            </div>
+
+            <div class="seriestucontr">
+              <div class="infox">
+                <div class="tsinfo">
+                  <div class="imptdt"><i>Status</i> <i>Ongoing</i></div>
+                  <div class="imptdt"><i>Type</i> <a href="/type/manga/">Manga</a></div>
+                  <div class="imptdt"><i>Released</i> 2026</div>
+                  <div class="imptdt"><i>Author</i> E. Marchetti, M. Ferrer</div>
+                  <div class="imptdt"><i>Artist</i> -</div>
+                  <div class="imptdt"><i>Posted On</i> <time datetime="2026-01-04">January 4, 2026</time></div>
+                </div>
+                <span class="mgen">
+                  <a href="/genres/fantasy/" rel="tag">Fantasy</a>
+                  <a href="/genres/slice-of-life/" rel="tag">Slice of Life</a>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bixbox synp">
+      <div class="wd-full">
+        <div class="entry-content entry-content-single" itemprop="description">
+          <p>Every dusk, Mira walks the harbour road lighting forty-one lamps.
+             On the night the forty-second lights itself, she stops counting and
+             starts asking.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bixbox bxcl epcheck">
+      <div class="releases"><h2>Chapter List</h2></div>
+      <div class="eplister" id="chapterlist">
+        <ul class="clstyle">
+          <li data-num="4">
+            <a href="https://example.invalid/the-lantern-keeper-chapter-4/">
+              <span class="chapternum">Chapter 4</span>
+              <span class="chapterdate">March 2, 2026</span>
+            </a>
+          </li>
+          <li data-num="3.5">
+            <a href="/the-lantern-keeper-chapter-3-5/">
+              <span class="chapternum">Chapter 3.5 Interlude</span>
+              <span class="chapterdate">February 24, 2026</span>
+            </a>
+          </li>
+          <li data-num="3">
+            <a href="/the-lantern-keeper-chapter-3/">
+              <span class="chapternum">Chapter 3</span>
+              <span class="chapterdate">February 17, 2026</span>
+            </a>
+          </li>
+          <li data-num="1">
+            <a href="/the-lantern-keeper-chapter-1/">
+              <span class="chapternum">Final Lamp</span>
+              <span class="chapterdate">February 3, 2026</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
