@@ -674,11 +674,37 @@ unless the above breaks: xochitl does not watch its document directory, so
 direct writes need a full restart, and a restart costs the user their reading
 position — the exact thing Goal 5 exists to protect.
 
-**Preferred (upload endpoint):** ensure/create `Comics` and a per-series
-subfolder. Folders are documents with a collection type; children reference the
-parent's UUID. **Verify exact field names by creating a folder in the UI and
-diffing the directory** — do not guess. `GET /documents/<folder-guid>`
-immediately before `POST /upload`; serialise this.
+**Preferred (upload endpoint):** ~~ensure/create `Comics` and a per-series
+subfolder.~~ **CORRECTION 2026-09-15 — Quire cannot create folders at all.**
+Established, not assumed: `strings /usr/bin/xochitl` exposes exactly three
+routes — `/documents/`, `/download/`, `/upload`; the shipped web app references
+only those; `POST`/`PUT`/`PATCH`/`MKCOL` on `/documents/` all return `200` with
+the listing (the method is ignored); and a `CollectionType` written directly to
+disk never appears in `GET /documents/`, because xochitl does not watch that
+directory (§11 Q1b). A folder can therefore only be made **by the user on the
+tablet**, or by a direct write plus a restart — which this milestone rules out.
+
+**Resolved design — flat, not nested:**
+- **`Comics` is a one-time user setup step**, alongside `WebInterfaceEnabled`.
+  Detect its absence and say so in plain language, with the remedy.
+- **Upload flat into `Comics`**, carrying the series in the document name
+  (`<Series> — Vol N`). Per-series subfolders are *optional*: if the user has
+  made one, use it; never require it. Tidy nesting we cannot create is worth
+  less than a correct file the user can find.
+- If `Comics` is missing, upload into the deepest folder that does exist (root
+  at worst) and tell the user where to create it. **Placing the volume slightly
+  wrong beats refusing the download** — the bytes are fetched, and a file in the
+  wrong folder is recoverable by dragging it; a refused download is not.
+- **Names always end in `.pdf`** — xochitl appends it to the multipart filename
+  when missing. "Correct name" in the acceptance test includes the extension.
+
+`GET /documents/<folder-guid>` immediately before `POST /upload`; serialise this.
+**§11 Q1c is answered and it is worse than "per-connection":** the upload target
+is **one mutable global inside xochitl**, not connection state. Measured — an
+upload with *no* preceding GET still landed in the previously-listed folder, and
+a GET on one connection steered an upload on another, from a different process.
+So *any* client can move it, including the user's own browser on the USB web UI.
+Read the landing folder back rather than trusting it.
 
 **Fallback (direct write):** UUIDv4; write `{uuid}.pdf`, `.metadata`,
 `.content`, `.pagedata` skeletons; `systemctl restart xochitl`, batched once
@@ -883,6 +909,8 @@ type Theme interface {
     Fingerprint(p *probe.Page) int
     Search(ctx context.Context, s *Source, q string, page int) ([]SeriesStub, error)
     Series(ctx context.Context, s *Source, id string) (*Series, error)
+    // Chapters MUST return ascending reading order — earliest chapter first.
+    // See the ordering contract below; this is not optional.
     Chapters(ctx context.Context, s *Source, id string) ([]Chapter, error)
     Pages(ctx context.Context, s *Source, chapterID string) ([]string, error)
 }
@@ -912,6 +940,26 @@ A configured source, stored on device, validated against
 `overrides` is a per-theme, schema-declared map. Themes declare which keys they
 accept and sensible defaults; unknown keys are a validation error, not silently
 ignored.
+
+**ORDERING CONTRACT (decided 2026-09-15, forced by a real bug in M5) —
+`Chapters` returns ascending reading order, earliest first.** M5 assembled a
+test volume titled *"The Lantern Keeper — 4–1"*: madara's markup lists chapters
+newest-first, MangaDex sorts oldest-first, and nothing in this interface said
+which was right. Since §6 M4 groups runs of chapters into one volume PDF, a
+descending source produces a **volume that reads backwards** — pages in reverse
+order inside a file whose reading position xochitl then owns. Silent, and
+ruinous.
+
+Ordering is the **theme's** job, because only the theme knows what its chapter
+identifiers mean — string sorting `"10"` against `"9"`, or guessing at
+`"12.5"`, `"Extra"` and `"Vol. 2 Ch. 3"` generically, is how this goes wrong
+a second time. Every theme normalises to ascending and **every theme has a test
+asserting it**. Requirements that follow:
+- `Chapter` needs enough structure to order by — a comparable number and,
+  where the source has one, a volume label. Grouping "runs of 10" is a fallback
+  for sources with no volume structure (§6 M4), not the primary mechanism.
+- Where a source's order is genuinely unknowable, say so rather than guessing:
+  a wrong order is worse than an admitted one.
 
 **INTERFACE CHANGE (decided 2026-09-15, forced by MangaDex) — a theme must be
 able to declare the hosts it legitimately needs.** MangaDex serves page images
