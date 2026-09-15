@@ -410,6 +410,69 @@ schema.
 
 ---
 
+## Challenge detection — what is verified, and what is not
+
+Implemented in `backend/probe/prober/challenge.go` (PLAN §7.5 stage 3). A fired
+signal means verdict `blocked_challenge` and the source is **refused**: no
+degraded add, no retry, no workaround (PLAN §7.6). There is no flag that skips
+it, and `TestNoBypassVocabularyInSource` fails if one starts to appear.
+
+**Read this before quoting the table below as coverage.** PLAN §7.5 asks each
+signal to be checked against a live example. PLAN §1.3 forbids this repository
+from naming an aggregator, and the developer cannot reach a challenge-protected
+site from CI, so **not one signal here has been observed firing against a live
+interstitial**. What each one rests on instead is stated in the "basis" column,
+and the honest summary is:
+
+- **Published-fact signals.** The marker is a vendor's own documented endpoint
+  path, header name or cookie name. The inference "if this string is on the page
+  we were served, that vendor is interstitialling us" is sound, but the exact
+  markup a current interstitial emits is unverified.
+- **Structural signals.** No vendor involved: a refusal status, an interstitial
+  title, an empty page. These are inference from shape alone and are the ones
+  most likely to be wrong in either direction.
+
+The fixtures under `backend/probe/prober/testdata/` are synthetic, at
+`example.invalid`, exactly like the theme fixtures, and the caveat in "What the
+fixtures do and do not prove" applies unchanged: they pin *our detector*, not
+any live page.
+
+| Signal | Fires on | Basis |
+|---|---|---|
+| `/cdn-cgi/challenge-platform/` | body | Published fact — Cloudflare's reserved `/cdn-cgi/` path prefix, which only its own edge serves |
+| `challenge-platform/h/b/orchestrate` | body | Published fact — the orchestrate script under that same prefix |
+| `__cf_chl_` | body | Published fact — the prefix of Cloudflare's challenge parameters/handles |
+| `cf-challenge-running` | body | Published fact — the class the challenge page sets while running |
+| `challenges.cloudflare.com/turnstile` | body | Published fact — the Turnstile widget's own host |
+| `cf-mitigated: challenge` | header | Published fact — a header Cloudflare added specifically so clients can tell a challenge from a block. Fires alone |
+| `/_incapsula_resource?swcgh`, `_incapsula_resource?swjsv` | body | Published fact — Imperva/Incapsula's own resource endpoint |
+| `sucuri_cloudproxy_js` | body | Published fact — Sucuri CloudProxy's script identifier |
+| `/ddos-guard/js-challenge`, `check.ddos-guard.net` | body | Published fact — DDoS-Guard's challenge path and check host |
+| `/.well-known/captcha/` | body | Published fact — the registered well-known URI for a CAPTCHA gate |
+| 403/503 from a CDN edge **and** an interstitial `<title>` | status + header + title | **Structural.** Either half alone is ordinary; the pair is the classic shape. Titles matched: "just a moment", "attention required", "checking your browser", "please wait while we verify", "verifying you are human", "ddos-guard", "access denied", "security check" |
+| 503 from a CDN edge, any body | status + header | **Structural.** A managed edge answering 503 for a home page is an interstitial far more often than it is an outage — but this is the signal most likely to misfire during a genuine outage |
+| `<meta http-equiv="refresh">` to a challenge endpoint | body | **Structural**, with a published-fact target list (`/cdn-cgi/`, `captcha`, `__ddg`, `_incapsula_resource`) |
+| Clearance cookie (`cf_clearance`, `__ddg*`, `sucuri_cloudproxy_uuid`, `incap_ses_*`, `visid_incap_*`, `datadome`) | `Set-Cookie` | Published fact for the names; **structural** for when it counts. Only fires alongside a refusal status *or* a page with no recognisable content, because a long-lived clearance cookie can be re-issued on an ordinary page view. `TestOrdinarySiteBehindACDNIsNotRefused` pins that |
+| Generic JS gate | 200 + body < 6 KiB + no theme match + `<noscript>` or an empty mount point | **Structural, and the least certain.** It is what catches a vendor we have never heard of, which is why it needs all four conditions at once |
+
+Edge headers used as the second half of a combined signal, never alone:
+`cf-ray`, `cf-mitigated`, `server: cloudflare`, `server: ddos-guard`,
+`server: sucuri/cloudproxy`, `x-sucuri-id`, `x-iinfo`, `x-datadome`,
+`x-datadome-cid`.
+
+**Warnings, not blocks.** A login wall (a password input on a page we cannot
+otherwise read), a paywall ("subscribers only", "members only", "subscribe to
+continue reading") and an age gate ("age verification", "are you over 18",
+"confirm your age") are surfaced as warnings and the user decides. PLAN §7.5 is
+explicit that these are not challenges, and treating them as blocks would make
+Quire refuse sites it can read perfectly well.
+
+**When one of these turns out to be wrong,** correct the table with what was
+actually seen, and say where it was seen in general terms — never name the site
+(PLAN §1.3).
+
+---
+
 ## Writing theme #6 — the short version
 
 1. New package under `backend/theme/`. Implement `theme.Theme` (six methods,
