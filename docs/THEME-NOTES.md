@@ -192,6 +192,60 @@ reason above.
 
 ---
 
+### What the fixture *server* adds — and what it still does not prove
+
+`backend/fixtures` closes one specific gap in the paragraphs above.
+
+Everything described so far stubs the transport: `themetest.Fetcher` hands a
+theme a `fetch.Response` it built in memory. That is the right tool for "does
+this theme parse this shape", and it proves nothing whatever about the layer
+underneath — connection handling, a redirect the HTTP client genuinely decides
+to follow, `robots.txt` being *fetched* rather than injected, the limiter's
+delays against elapsed time, `Retry-After`, backoff, the response cap meeting a
+real `Content-Length`, byte accounting, or the SSRF guard running on a hop
+Quire did not choose.
+
+The fixture server serves the same committed synthetic fixtures over a real
+socket on loopback, and can be told to misbehave on demand: 429 with
+`Retry-After`, 5xx for a bounded number of attempts, slow responses, oversized
+bodies with *and without* a declared length, a redirect chain leaving the
+registrable domain, and a `robots.txt` that disallows a path. `make check` runs
+the full path against it end to end, including the mangadex theme.
+
+Run it by hand when something needs poking at with curl:
+
+```sh
+go run ./backend/cmd/fixtureserver -dir backend/theme/mangadex/testdata \
+    -robots 'User-agent: *
+Disallow: /at-home/'
+curl -i 'localhost:8099/sim/status/429?retryAfter=5'
+curl -sD- -o/dev/null 'localhost:8099/sim/large?bytes=20000000'
+```
+
+**The SSRF exemption, and why it cannot reach production.** The guard rejects
+loopback, so a server on `127.0.0.1` is refused by default and the guard is not
+weakened to accommodate it. The exemption is granted by
+`fetch.AllowLoopbackForTests`, which lives in
+`backend/fetch/loopback_quiretest.go` behind `//go:build quiretest`. Three
+things hold, in the order they matter:
+
+1. `Options.allowLoopback` is unexported and has no JSON tag, no schema entry
+   and no flag, so no config file, imported sources file or goja script can set
+   it however it is constructed.
+2. Without `-tags quiretest` the function **does not exist**. It is not dead
+   code in a shipped binary; it is not compiled into one. `make test` runs the
+   tagged tests *and then* an untagged `go build ./...`, so the production
+   shape is built on every check.
+3. No production target passes the tag. `build/build-rmpp.sh` and
+   `build/build-pc.sh` do not.
+
+**Still not proved by any of this:** that a live site is parsed correctly. The
+socket is real; the fixtures are still ours. PLAN §7.5 stage 5 against the
+user's chosen site remains the only thing that proves that, and the paragraph
+above about overclaiming still stands.
+
+---
+
 ## Per-theme notes
 
 ### `madara` — WordPress `wp-manga` plugin
@@ -356,6 +410,185 @@ madara pages score 83–100 / 0, mangathemesia pages 65–80 / 0.
 
 ---
 
+### `mangadex` — a documented JSON API, and a different animal
+
+Implemented in `backend/theme/mangadex/`. Read this section before assuming it
+works like the two above, because in the ways that matter it does not.
+
+**It is one site, not a family.** PLAN §7.2 defines a theme as "a Go
+implementation of one site *family's* shape", and madara and mangathemesia are
+exactly that: one distributed WordPress plugin or theme, deployed across
+hundreds of independent sites, recognised from markup and configured per site
+with `overrides` because every deployment renames something. MangaDex has no
+family, no second deployment and nothing to rename. What it has instead is an
+official, documented, versioned, unauthenticated JSON API with published rate
+limits for third-party clients.
+
+It still implements `theme.Theme` — a theme with one instance costs nothing and
+keeps a single interface for the probe, the browse UI and the download queue.
+But three things follow from being a site rather than a family, and each is a
+place where copying the madara section's habits would be wrong:
+
+| | madara / mangathemesia | mangadex |
+|---|---|---|
+| Recognised by | markup: class names, asset paths, inline script markers | the API host and its response envelope |
+| Score for a non-match | low but non-zero (best near-miss 5) | **exactly 0** |
+| `overrides` absorb | where the site put things | what the user wants shown |
+| Parsing | goquery over HTML that may be skinned | `encoding/json` over a documented schema |
+| Language | one site, one language | multilingual by design; the filter is load-bearing |
+
+**Fingerprint signals**
+
+Unusually, the first signal is a **gate, not a weight**.
+
+| Signal | Weight | Why |
+|---|---|---|
+| registrable domain is `mangadex.org` | **gate** | Fails → score 0, and nothing below can lift it |
+| host is `api.mangadex.org` | 25 | What a source must actually point at |
+| `Server: MangaDex` response header | 20 | Set on every response from its edge, including the 308 at `/` and the four-byte `/ping` |
+| `"result":"ok"` envelope, `pong`, or a `/docs` path | 15 | The shape every endpoint shares |
+| base, given the gate | 40 | |
+
+Measured: the API root scores **100**, `/ping` **100**, a collection response
+**100**, the browser-facing `mangadex.org` **80**, and *everything else 0* —
+including a JSON API elsewhere returning the identical envelope with the
+identical `Server` header, and a `mangadex.org` URL that redirected off-domain.
+That is the whole reason for the gate. "Returns JSON with a `result` field"
+describes half the web, so a single-site theme that matched on shape alone
+would false-positive constantly. Consistent with the §7.5 threshold of 60:
+winners 80–100, losers 0.
+
+`Validate` (the `theme.SourceValidator` side interface) does the matching job
+for a configured source: it refuses any `baseUrl` that is not
+`https://api.mangadex.org`, permitting `.invalid` hosts only so the offline
+tests can run. Without it, an imported sources file could aim Quire's MangaDex
+support at any host answering MangaDex-shaped JSON.
+
+**Endpoint shapes**
+
+Confirmed live on 2026-09-15 against `https://api.mangadex.org` and against the
+official docs at `https://api.mangadex.org/docs/`.
+
+| Operation | Request | Kind (§7.4) |
+|---|---|---|
+| Search | `GET /manga?title={q}&limit=20&offset={n}&includes[]=cover_art&contentRating[]=…&availableTranslatedLanguage[]={lang}` | discovery |
+| Series | `GET /manga/{id}?includes[]=cover_art&includes[]=author&includes[]=artist` | discovery |
+| Chapters | `GET /manga/{id}/feed?translatedLanguage[]={lang}&limit=500&offset={n}&order[chapter]=asc&includes[]=scanlation_group` | discovery |
+| Pages | `GET /at-home/server/{chapterId}` | **retrieval** |
+| Cover image | `https://uploads.mangadex.org/covers/{mangaId}/{fileName}` | — |
+| Page image | `{baseUrl}/data/{hash}/{filename}` | — |
+
+Everything is the same envelope: `{result, response, data, limit, offset,
+total}` for a collection, `{result, response, data}` for one object. Each
+object is `{id, type, attributes, relationships}`, and a relationship carries
+its own `attributes` **only** if the request asked for it with `includes[]` —
+otherwise it is a bare UUID and a second round-trip.
+
+**Paging.** `limit` caps at 100 on `/manga` and 500 on a feed, and the API
+refuses `offset` past 10000. `Chapters` pages with `offset` until it reaches
+`total`, bounded at 20 requests. Asking for the documented maximum is the
+*polite* choice here, not the greedy one: one 500-chapter request is one
+request, and §7.4's floor spaces requests 2 s apart.
+
+**Rate limits.** MangaDex documents a global ≈5 req/s per IP. Quire's §7.4
+floor — 4 global / 2 per-host / 2 s minimum delay, i.e. 30 rpm — is well inside
+it and **must not be raised on that basis**. The floor is about being a polite
+guest, not about staying under a published ceiling. 429s do happen; the fetch
+layer's `Retry-After` handling covers them, and the theme reports a 429 that
+survived its retries as rate limiting rather than as a decode failure.
+
+**`overrides` keys and why each exists**
+
+| Key | Default | Why |
+|---|---|---|
+| `maxContentRating` | `suggestive` | MangaDex rates every series (`safe`, `suggestive`, `erotica`, `pornographic`) and filters on request. Naming the maximum makes the choice explicit instead of inheriting a site default that could change. |
+| `includeExternal` | `false` | Some chapters are hosted on the publisher's own site: they arrive with an `externalUrl` and `pages: 0`, and MangaDex serves no images for them. Hidden by default, because offering a chapter that cannot be downloaded is worse than omitting it. |
+
+Note what is *absent*: no path segments, no date format, no selector. A single
+site has nowhere to vary.
+
+**Quirks**
+
+- **There is no canonical title.** `attributes.title` is a language-keyed map
+  that often holds only a romanisation (`ja-ro`), while the English title lives
+  in `altTitles` — a list of *single-entry maps*, not one map, with repeats.
+  `bestTitle` therefore prefers the **language** over the **field**: for each of
+  `lang`, `en`, `{orig}-ro`, `{orig}` it checks `title` and then `altTitles`
+  before moving on. A series stored as "Tooi Tou no Kiroku" shows up for an
+  English source as "Record of the Distant Tower".
+- **The language filter is load-bearing, and checked twice.** Without
+  `translatedLanguage[]` the feed returns every translation of every chapter:
+  duplicate numbers in a dozen languages, and the download queue taking
+  whichever sorted first. The theme sends the parameter *and* re-checks
+  `attributes.translatedLanguage` locally, so a refactor that drops the
+  parameter yields an empty list — a bug someone notices — rather than a
+  quietly multilingual one.
+- **`externalUrl` and `isUnavailable` are not cosmetic.** Both mean "listed but
+  not readable". A popular title can have its entire English run external; a
+  capability check that picked the first chapter would conclude page extraction
+  was broken.
+- **Off-domain hosts.** Covers come from `uploads.mangadex.org` (same
+  registrable domain, so the guard is content) but **page images come from
+  `*.mangadex.network`**, which is not. See the §7.4 note below — a MangaDex
+  source needs `mangadex.network` in `allowedHosts` before M4 can download a
+  page.
+- **Data-saver exists and we do not use it.** `/at-home/` returns both a
+  full-quality `data` list and a recompressed `dataSaver` list (JPEG, smaller).
+  Quire takes full quality: M4 resizes and re-encodes for the device anyway, so
+  starting from an already-degraded JPEG compounds the loss. A future
+  `dataSaver` override is a reasonable option for a metered connection — it is
+  a deliberate omission, not an oversight.
+- **Volume in the title.** `theme.Chapter` has no volume field and MangaDex is
+  the first theme that reliably knows one, so it is composed into the title:
+  `Vol. 3 Chapter 12: The Long Walk`, degrading to `Chapter 12` and to
+  `Oneshot` when there is no number.
+- **UUIDs, stored as paths.** IDs are `/manga/{uuid}` and `/chapter/{uuid}`, so
+  they keep the "site-relative" convention, stay self-describing in a state
+  file, and make a series UUID handed to `Pages()` an error rather than a 404.
+
+**robots.txt — and why this theme changed the fetch layer**
+
+`api.mangadex.org/robots.txt` is, in full (confirmed 2026-09-15):
+
+```
+User-agent: *
+Disallow: /at-home/
+```
+
+Everything used to *find* a chapter is allowed. The single disallowed prefix is
+`/at-home/` — the endpoint that hands out page images. Under a blanket robots
+rule, Quire could search MangaDex, open a series and list its chapters, and
+then refuse to read one; stage 5 would report `partial` and §7.5 would refuse
+the source outright, because page extraction failing makes a source useless.
+By extension it would refuse **any officially supported API whose robots.txt
+was written for search engines**.
+
+That is what forced PLAN §7.4's decision of 2026-09-15: robots binds
+*crawling*, not user-directed retrieval. RFC 9309 scopes robots.txt to
+"automatic clients known as crawlers". Search, listings, link following and the
+probe's own crawling honour `Disallow` **strictly**; fetching one series,
+chapter or page the user explicitly asked for is retrieval.
+
+Implemented as `fetch.Kind` (`KindDiscovery` / `KindRetrieval`), passed
+explicitly at each call site. Three properties are load-bearing and are worth
+restating where a theme author will read them:
+
+1. **Never inferred.** Not from the path, not from the method. A caller says
+   which it is, where the reason is visible.
+2. **Never configurable.** `Kind` has no JSON tag, no schema entry, and is not
+   reachable from a `Source`. A source entry cannot flip a discovery request
+   into a retrieval one to get past a `Disallow`.
+3. **Narrows nothing else.** Rate limits, per-host delays, the honest
+   User-Agent, `Retry-After`, backoff, the response-size cap, byte accounting
+   and the SSRF guard apply identically to both. Retrieval is not a fast lane.
+
+In this theme exactly one call is retrieval — `Pages()` — and it says so in a
+comment at the call site. `TestPagesIsFetchedAsRetrieval` asserts it, and
+`TestDiscoveryCallsAreNotRetrieval` asserts the more important converse: search
+and series are discovery and stay bound by robots.
+
+---
+
 ### `generic` — the escape hatch
 
 Implemented in `backend/theme/generic/`. PLAN §6 M2: "escape hatch, not the
@@ -491,3 +724,10 @@ actually seen, and say where it was seen in general terms — never name the sit
    negative signal if two families share too much surface.
 6. Add a section here: fingerprint signals with weights, endpoint table,
    overrides table with a "why" column, and the quirks that cost you an hour.
+7. If the theme needs a request that robots disallows, read §7.4's
+   discovery/retrieval decision and the `mangadex` section before reaching for
+   `GetRetrieval`. The bar is "the user named this thing", not "this request is
+   inconvenient to lose".
+8. If it is a JSON API rather than a markup family, say so at the top of its
+   section the way `mangadex` does, and gate the fingerprint on something that
+   cannot be worn by accident. A JSON envelope is not a fingerprint.
