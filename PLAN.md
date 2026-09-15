@@ -331,6 +331,9 @@ logic as possible.
     `Referer: http://10.11.99.1/`. Field name `file`.
   - Listing responses use `VissibleName` (sic, double-s). Match the device's
     spelling; do not "fix" it.
+- ~~Package manager is **Vellum**~~ **DEAD SCOPE (2026-09-16): the user chose
+  not to publish to Vellum.** Quire installs from a clone via `./install.sh`.
+  The Vellum notes below are kept only as platform background.
 - Package manager is **Vellum** — a static build of Alpine's `apk` wrapped for
   this platform. Commands: `vellum add|del|update|upgrade|search|info`, plus
   `vellum check-os <version>` (pre-flight before an OS upgrade) and
@@ -427,20 +430,21 @@ quire/
 │   ├── SeriesGrid.qml
 │   ├── ChapterList.qml
 │   └── Settings.qml
-├── xovi/
-│   └── versions/
-│       └── 3.25.1.1/
-│           └── quireOpen.qmd   M6: the open-document hook
+├── install.sh                  one-command install from a clone (M8)
+├── uninstall.sh                asks before removing state; defaults to keeping
+├── prebuilt/
+│   └── resources.rcc           committed so Qt is NOT needed to install;
+│                               drift-checked without Qt by build/prebuilt.sh
 ├── schema/
 │   ├── source.schema.json      a configured source entry
 │   └── example-index/          public-domain / self-hosted entries ONLY
 ├── build/
-│   ├── Dockerfile              Codex SDK cross-build — written from scratch
+│   ├── prebuilt.sh             regenerates and drift-checks prebuilt/
 │   ├── build-rmpp.sh
 │   ├── build-pc.sh
 │   └── install-device.sh
-├── packaging/
-│   └── VELBUILD
+├── docs/
+│   └── DEVICE-CHECKLIST.md     manual pre-release pass (M8)
 └── docs/
     ├── DEVICE-NOTES.md
     ├── QMD-NOTES.md            QML type names per firmware version
@@ -459,7 +463,8 @@ quire/
 3. Install an SSH key; stop typing the password.
 4. **Confirm automatic OS updates are off and the device is on 3.25.1.1.**
    Already done on the target device, but verify rather than assume — an update
-   slipping through silently breaks M6. reManager exposes the toggle.
+   slipping through breaks **AppLoad**, not us — M6 ships no `.qmd` (see the
+   box at §6 M6), so the exposure is upstream's hooks, not our patch. reManager exposes the toggle.
 5. Record `cat /etc/version` (and whatever else identifies the build) in
    `docs/DEVICE-NOTES.md`, verbatim. The installer compares against this.
 6. **Hard gate — AppLoad compatibility.** Install xovi + qt-resource-rebuilder
