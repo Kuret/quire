@@ -532,6 +532,10 @@ func (f errFetcher) Get(context.Context, *fetch.Policy, string) (*fetch.Response
 	return nil, f.err
 }
 
+func (f errFetcher) GetRetrieval(context.Context, *fetch.Policy, string) (*fetch.Response, error) {
+	return nil, f.err
+}
+
 func (f errFetcher) PostForm(context.Context, *fetch.Policy, string, url.Values) (*fetch.Response, error) {
 	return nil, f.err
 }

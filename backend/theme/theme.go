@@ -62,7 +62,21 @@ type SourceValidator interface {
 // interface rather than the concrete client so tests can serve committed
 // fixtures without a network, a server or a loopback exemption.
 type Fetcher interface {
+	// Get is a discovery request (PLAN §7.4): a search, a listing, a link
+	// being followed. robots.txt gates it strictly.
 	Get(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error)
+
+	// GetRetrieval is a request for one thing the user named. Every other
+	// invariant — rate limits, the honest UA, Retry-After, the size cap, the
+	// SSRF guard — applies exactly as it does to Get; only the robots gate
+	// differs, because RFC 9309 scopes robots to crawlers.
+	//
+	// A theme should reach for this only where the call is genuinely the
+	// user's own request, and should say why at the call site. Most themes
+	// never need it: it exists because MangaDex disallows the endpoint that
+	// serves page images while allowing everything used to find them.
+	GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error)
+
 	PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error)
 }
 

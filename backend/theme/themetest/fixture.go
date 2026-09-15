@@ -35,6 +35,11 @@ type Request struct {
 	Method string
 	URL    string
 	Form   url.Values
+
+	// Kind is the PLAN §7.4 request kind the theme asked for. It is recorded
+	// because "was this fetched as retrieval?" is a claim a test should be
+	// able to check, not something to take a theme's word for.
+	Kind fetch.Kind
 }
 
 // Route answers one request. Body is either inline or loaded from a file under
@@ -105,15 +110,22 @@ func (f *Fetcher) routeKeys() []string {
 
 // Get implements theme.Fetcher.
 func (f *Fetcher) Get(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.answer(ctx, http.MethodGet, rawurl, nil)
+	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil)
+}
+
+// GetRetrieval records the PLAN §7.4 request kind alongside the URL, so a
+// theme test can assert that a call the user asked for was made as retrieval
+// and — just as importantly — that a search or a listing was not.
+func (f *Fetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
+	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil)
 }
 
 // PostForm implements theme.Fetcher.
 func (f *Fetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error) {
-	return f.answer(ctx, http.MethodPost, rawurl, form)
+	return f.answer(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, form)
 }
 
-func (f *Fetcher) answer(ctx context.Context, method, rawurl string, form url.Values) (*fetch.Response, error) {
+func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl string, form url.Values) (*fetch.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -123,7 +135,7 @@ func (f *Fetcher) answer(ctx context.Context, method, rawurl string, form url.Va
 	}
 
 	f.mu.Lock()
-	f.calls = append(f.calls, Request{Method: method, URL: rawurl, Form: form})
+	f.calls = append(f.calls, Request{Method: method, URL: rawurl, Form: form, Kind: kind})
 	f.mu.Unlock()
 
 	// Try the path+query key first, then the bare path, so a route only has to

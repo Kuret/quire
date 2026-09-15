@@ -5,7 +5,9 @@
 //
 //   - global and per-host concurrency caps, and a minimum inter-request delay
 //     per host (limiter.go);
-//   - robots.txt fetched, cached and honoured (robots.go);
+//   - robots.txt fetched, cached and honoured for *discovery* requests
+//     (robots.go), which is what RFC 9309 scopes it to; a page the user asked
+//     for by name is retrieval, not crawling (kind.go);
 //   - Retry-After honoured, exponential backoff with jitter on 429/5xx;
 //   - an honest User-Agent naming Quire, its version and the project URL —
 //     never a browser string (PLAN §7.6);
@@ -255,8 +257,25 @@ func (c *Client) UserAgent() string { return c.ua }
 func (c *Client) TotalBytes() int64 { return c.totalBytes.Load() }
 
 // Get performs a guarded, rate-limited, robots-checked GET.
+//
+// It is a *discovery* request (PLAN §7.4): searches, listings and link
+// following, where a Disallow is a refusal. The strict reading is the default
+// so that a caller who has not thought about it gets the safe answer; asking
+// for the other one takes a deliberate call to GetRetrieval.
 func (c *Client) Get(ctx context.Context, p *Policy, rawurl string) (*Response, error) {
-	return c.do(ctx, p, http.MethodGet, rawurl, nil, nil)
+	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, nil)
+}
+
+// GetRetrieval performs a GET for one thing the user explicitly asked for: a
+// series they opened, a chapter they chose, a page of it.
+//
+// Everything Get does, this does too — the limiter, the per-host delay, the
+// honest User-Agent, Retry-After, backoff, the size cap, byte accounting and
+// the SSRF guard. The *only* difference is that robots.txt does not gate it,
+// because RFC 9309 scopes robots to crawlers and this is not crawling. See
+// Kind for why that distinction is drawn here and not at a config file.
+func (c *Client) GetRetrieval(ctx context.Context, p *Policy, rawurl string) (*Response, error) {
+	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, nil)
 }
 
 // PostForm performs a guarded POST of an application/x-www-form-urlencoded
@@ -268,12 +287,16 @@ func (c *Client) PostForm(ctx context.Context, p *Policy, rawurl string, form ur
 	// Madara's admin-ajax endpoint only answers the AJAX shape when asked as
 	// one. This is a protocol fact about the endpoint, not browser cosplay.
 	h.Set("X-Requested-With", "XMLHttpRequest")
-	return c.do(ctx, p, http.MethodPost, rawurl, body, h)
+	// Discovery: the only POST a theme makes is a chapter *listing*, which is
+	// Quire working out what exists. There is deliberately no retrieval POST —
+	// nothing the user asks for by name is fetched with one, so the looser
+	// reading has no caller and is not offered.
+	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h)
 }
 
 type policyKey struct{}
 
-func (c *Client) do(ctx context.Context, p *Policy, method, rawurl string, body []byte, hdr http.Header) (*Response, error) {
+func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl string, body []byte, hdr http.Header) (*Response, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %w: %v", ErrInvalidURL, err)
@@ -290,7 +313,14 @@ func (c *Client) do(ctx context.Context, p *Policy, method, rawurl string, body 
 
 	// robots.txt is consulted before the limiter, because a denied path should
 	// not consume a request slot or a delay.
-	if !isRobotsURL(u) {
+	//
+	// Retrieval skips the consultation entirely rather than consulting and
+	// ignoring the answer: a request the user asked for by name is not
+	// crawling, so there is nothing for robots to be asked about, and fetching
+	// robots.txt to discard its verdict would be a request we did not need to
+	// make. Note what is *not* skipped — the guard above and the limiter
+	// below both still run.
+	if kind.gatedByRobots() && !isRobotsURL(u) {
 		ok, err := c.robots.Allowed(ctx, p, u)
 		if err != nil {
 			return nil, err

@@ -173,7 +173,10 @@ func (rc *RobotsCache) fetch(ctx context.Context, p *Policy, rawurl string) (*ro
 	// arrives here having been tried properly. A transport error never reached
 	// a server at all, so it gets its own bounded retry.
 	for attempt := 0; ; attempt++ {
-		resp, err := rc.client.do(ctx, p, "GET", rawurl, nil, nil)
+		// Discovery, and isRobotsURL stops the recursion. Fetching robots.txt
+		// is Quire finding out what it may crawl, which is the definition of
+		// the discovery kind even though this particular URL is never gated.
+		resp, err := rc.client.do(ctx, p, KindDiscovery, "GET", rawurl, nil, nil)
 		switch {
 		case err != nil:
 			// A guarded or malformed URL is not a transient fault; retrying it
