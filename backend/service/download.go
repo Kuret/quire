@@ -111,6 +111,13 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 		return s.sendError(out, "bad_request", "Quire needs a source, a series and a chapter to download.")
 	}
 
+	if !req.Confirmed {
+		// Read-only, and off the download queue on purpose: asking what a
+		// volume covers must not wait behind somebody else's download.
+		go s.askToConfirm(ctx, out, req)
+		return nil
+	}
+
 	s.dlOnce.Do(func() {
 		s.dlQueue = make(chan downloadJob, downloadQueueDepth)
 		go s.downloadWorker(ctx)
