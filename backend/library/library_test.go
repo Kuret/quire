@@ -3,6 +3,7 @@ package library_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -420,5 +421,45 @@ func TestPlaceWithoutComicsFallsBackAndSaysSo(t *testing.T) {
 	}
 	if place.Remedy() != library.ComicsRemedy {
 		t.Errorf("remedy %q, want the one-time setup instruction", place.Remedy())
+	}
+}
+
+// The cap is on the multipart body and xochitl usually enforces it by resetting
+// the connection mid-transfer, so a body over it must never leave the process:
+// the alternative is wasting a 90 MB upload to learn what we already knew.
+func TestAnOversizedUploadIsRefusedBeforeItIsSent(t *testing.T) {
+	f := newFake()
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	big := strings.NewReader(strings.Repeat("A", library.MaxUploadBytes))
+	_, err := lib.Upload(context.Background(), library.RootID, "huge.pdf", big)
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	if !errors.Is(err, library.ErrTooLarge) {
+		t.Errorf("error %v, want ErrTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("error %q is not plain enough to show anyone", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.requests {
+		if r == "POST /upload" {
+			t.Fatal("the body was sent anyway")
+		}
+	}
+}
+
+// The budget has to leave room under the cap for multipart framing, or a volume
+// assembled exactly to budget still fails.
+func TestTheUploadBudgetLeavesMarginUnderTheCap(t *testing.T) {
+	if library.UploadBudgetBytes >= library.MaxUploadBytes {
+		t.Fatalf("budget %d is not below the cap %d", library.UploadBudgetBytes, library.MaxUploadBytes)
+	}
+	if library.MaxUploadBytes != 100_000_000 {
+		t.Errorf("cap is %d; it was measured at exactly 100,000,000 on the device",
+			library.MaxUploadBytes)
 	}
 }

@@ -3,6 +3,7 @@ package library_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -148,4 +149,48 @@ func pageJPEG(t *testing.T, n int) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// TestDeviceRejectsAnOversizedUpload pins the boundary PLAN §6 M4 is built
+// around, from the safe side only.
+//
+// Only the *rejected* side is asserted, deliberately. Proving the accepted side
+// means uploading just under 100 MB to the user's own tablet, and xochitl's web
+// interface has no delete route — so the artefact could not be cleaned up
+// afterwards, only left for the user to remove by hand along with 100 MB of
+// their disk. The cap itself was established by binary search on the device
+// (see library.MaxUploadBytes); this asserts Quire respects it without sending
+// anything.
+//
+//	QUIRE_DEVICE_LIBRARY=1 ./library.test -test.run TestDeviceRejectsAnOversizedUpload
+func TestDeviceRejectsAnOversizedUpload(t *testing.T) {
+	if os.Getenv("QUIRE_DEVICE_LIBRARY") == "" {
+		t.Skip("set QUIRE_DEVICE_LIBRARY=1 and run this on the reMarkable")
+	}
+	ctx := context.Background()
+	lib := library.New(library.Options{})
+	if err := lib.EnsureReachable(ctx); err != nil {
+		t.Fatalf("the library is not reachable: %v", err)
+	}
+
+	before, err := lib.List(ctx, library.RootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := strings.NewReader(strings.Repeat("A", library.MaxUploadBytes))
+	_, err = lib.Upload(ctx, library.RootID, "quire-m5-test-oversized.pdf", body)
+	if !errors.Is(err, library.ErrTooLarge) {
+		t.Fatalf("upload of %d bytes returned %v, want ErrTooLarge", library.MaxUploadBytes, err)
+	}
+	t.Logf("refused before sending: %v", err)
+
+	after, err := lib.List(ctx, library.RootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("the library changed (%d -> %d entries); nothing should have been sent",
+			len(before), len(after))
+	}
 }

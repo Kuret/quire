@@ -57,6 +57,31 @@ import (
 	"time"
 )
 
+// MaxUploadBytes is the hard limit xochitl's /upload enforces on the **whole
+// multipart body** — not on the PDF inside it.
+//
+// Measured by binary search on the device, 2026-09-15:
+//
+//	body =  99,999,242 bytes -> 201 Upload successful
+//	body = 100,000,242 bytes -> connection reset by peer
+//	body = 100,663,538 bytes -> connection reset (413 on an earlier run)
+//
+// So it is exactly a decimal 100 MB. The failure mode is worse than a clean
+// 413: past the limit xochitl usually resets the connection *mid-upload*, so
+// the whole transfer is wasted and what surfaces is a confusing transport error
+// rather than a refusal. That is why Upload measures the body and refuses
+// before sending a byte.
+const MaxUploadBytes = 100_000_000
+
+// UploadBudgetBytes is what Quire aims a volume at, leaving margin below
+// MaxUploadBytes for multipart framing and for the fact that a volume's size is
+// only known exactly once it is assembled. PLAN §6 M4 splits a volume that
+// would exceed it.
+const UploadBudgetBytes = 90_000_000
+
+// ErrTooLarge means the body is over MaxUploadBytes and was not sent.
+var ErrTooLarge = errors.New("library: the volume is too large for the reMarkable to accept")
+
 // DefaultTimeout bounds a single request. An upload of a 100 MB volume over
 // loopback is fast, but xochitl indexes and renders a thumbnail before it
 // answers, so this is generous rather than tight.
@@ -336,6 +361,14 @@ func (l *Library) post(ctx context.Context, name string, pdf io.Reader) error {
 	}
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("library: %w", err)
+	}
+
+	// Measured here, on the framed body, because that is what the device
+	// counts — and refused here, before a byte goes out, because the
+	// alternative is a socket reset most of the way through a 90 MB transfer.
+	if int64(buf.Len()) >= MaxUploadBytes {
+		return fmt.Errorf("%w: %s is %d bytes to send and the reMarkable refuses anything "+
+			"from %d bytes upward", ErrTooLarge, name, buf.Len(), MaxUploadBytes)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.base+"/upload", &buf)
