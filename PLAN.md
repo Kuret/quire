@@ -283,9 +283,25 @@ logic as possible.
      away. Conversely, send **no** payload packet when the payload is empty:
      AppLoad skips its second read at length 0, so a stray empty packet gets
      consumed as the *next* header, reads 0 bytes, and tears down the
-     connection. (AppLoad's own send path is asymmetric here — it emits the
-     payload packet unconditionally — so a receiver should tolerate a stray
-     empty packet rather than error on it.)
+     connection. **AppLoad's send path is asymmetric to its own receive path**:
+     it emits the payload packet *unconditionally*. So an empty-payload message
+     is **two packets inbound but must be one packet outbound**. Implement both
+     halves or the stream drifts by one packet and dies on the next message.
+  4. **A zero-length datagram and a closed peer are indistinguishable through
+     Go's `net.Conn`** — both are a 0-byte read, which `net` converts to
+     `io.EOF`. This is not theoretical: it is what made the app vanish the
+     instant the user tapped a button whose payload happened to be empty.
+     **`MSG_EOR` does not help** — measured on this device, the kernel never
+     sets it on `AF_UNIX`/`SOCK_SEQPACKET`, not even for a non-empty datagram,
+     so it carries no information. What *does* work: **end of stream is sticky,
+     a datagram is not.** After a close every read returns 0 forever; a
+     zero-length record is consumed by the read that returns it. So a
+     non-blocking `MSG_PEEK` immediately after a 0-byte read separates them —
+     `EAGAIN` or `n > 0` means it was a record, `n == 0` means end of stream.
+     Peek *before* consuming, so a record carrying real data can never be
+     swallowed. The single unresolvable case is two zero-length records
+     back-to-back; the host never emits that, and such a record carries no
+     information anyway.
   3. Stream-style partial-read reassembly (`io.ReadFull` loops) is simply the
      wrong shape: there is no such thing as a partial packet. A header read
      that does not return exactly 8 bytes is a protocol error.
