@@ -39,7 +39,7 @@ say "deploy  $APP_DIR"
 # tar over ssh: one round trip, preserves the +x bit on backend/entry, and
 # needs only busybox tar on the far side.
 tar -C "$BUNDLE" -cf - manifest.json icon.png resources.rcc backend \
-    | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xf - -C '$APP_DIR' && chmod 0755 '$APP_DIR/backend/entry'"
+    | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/entry'"
 
 say "verify"
 "${SSH[@]}" "ls -l '$APP_DIR' '$APP_DIR/backend'"
