@@ -855,6 +855,31 @@ A configured source, stored on device, validated against
 accept and sensible defaults; unknown keys are a validation error, not silently
 ignored.
 
+**INTERFACE CHANGE (decided 2026-09-15, forced by MangaDex) — a theme must be
+able to declare the hosts it legitimately needs.** MangaDex serves page images
+from `*.mangadex.network`, not from `mangadex.org`. §7.4's SSRF guard rejects
+redirects leaving the source's registrable domain unless `allowedHosts` permits
+it, so **M4's download would be refused** even though search, series and
+chapters all succeed. Splitting the image CDN off the main domain is normal
+practice, so this will recur.
+
+The `Theme` interface gains a method declaring the host patterns that theme
+requires (e.g. `AllowedHosts() []string`), and §7.5 **stage 6 seeds the stored
+source's `allowedHosts` from it** at accept time. Rationale for putting it in
+the theme rather than in user config:
+
+- The theme is the thing that *knows* its own CDN. Making the user discover
+  `mangadex.network` by reading an SSRF rejection is a terrible first run.
+- It stays **auditable in code** and reviewable in a diff, rather than being an
+  arbitrary host list a user pastes in — which is exactly what §7.4 was
+  guarding against.
+
+**This does not soften the guard.** The private/loopback/link-local, scheme and
+credential checks remain absolute and are not overridable by a theme, a source,
+or anything else. A theme may only widen the *registrable-domain* boundary, and
+only to hosts it names in its own source. Persist the seeded list on the source
+so it is visible to the user and survives a theme changing its mind.
+
 Sources may be exported/imported as JSON so a user can move their setup between
 devices. Quire provides no discovery mechanism, no directory, and no bundled
 index (§1.3).
