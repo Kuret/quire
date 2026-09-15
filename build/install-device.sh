@@ -38,11 +38,17 @@ say "host    $SSH_USER@$HOST"
 say "deploy  $APP_DIR"
 # tar over ssh: one round trip, preserves the +x bit on backend/entry, and
 # needs only busybox tar on the far side.
-tar -C "$BUNDLE" -cf - manifest.json icon.png resources.rcc backend \
+#
+# COPYFILE_DISABLE=1 stops macOS tar emitting AppleDouble "._*" resource-fork
+# entries. Without it every file ships with a 163-byte "._name" twin, which
+# clutters the app directory and gives AppLoad junk to scan.
+COPYFILE_DISABLE=1 tar -C "$BUNDLE" --no-xattrs -cf - manifest.json icon.png resources.rcc backend \
     | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/entry'"
 
 say "verify"
-"${SSH[@]}" "ls -l '$APP_DIR' '$APP_DIR/backend'"
+# Repair earlier installs that shipped AppleDouble files, and prove none remain.
+"${SSH[@]}" "find '$APP_DIR' -name '._*' -delete 2>/dev/null; leftover=\$(find '$APP_DIR' -name '._*'); if [ -n \"\$leftover\" ]; then echo 'AppleDouble files still present:'; echo \"\$leftover\"; exit 1; fi"
+"${SSH[@]}" "ls -la '$APP_DIR' '$APP_DIR/backend'"
 
 cat >&2 <<EOF
 
