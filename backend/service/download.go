@@ -282,15 +282,18 @@ func (s *Service) storeVolume(ctx context.Context, vol assemble.Volume, dir stri
 	if err := s.library.EnsureReachable(ctx); err != nil {
 		return library.Result{}, library.Placement{}, err
 	}
-	place, err := s.library.Resolve(ctx, library.ComicsFolder, vol.Series)
+	// Flat into Comics, with the series in the document name. A per-series
+	// subfolder is used when the user has made one, and never required: Quire
+	// cannot create folders, so requiring one would be requiring the user to
+	// do housekeeping before every new series.
+	place, err := s.library.Place(ctx, vol.Series)
 	if err != nil {
 		return library.Result{}, library.Placement{}, err
 	}
 	if !place.Complete() {
-		// A missing folder is not a failure. xochitl's web interface has no
-		// folder-create route at all, so the alternative to putting the volume
-		// in the nearest folder that does exist is not putting it anywhere.
-		// The user is told, in Placement.Remedy, where to make the folder.
+		// Not a failure. The pages are fetched and the PDF is built; the
+		// volume goes to the top of My Files and Placement.Remedy tells the
+		// user how to make the folder for next time.
 		s.log.Info("library folder missing", "missing", place.Missing, "using", place.FolderID)
 	}
 
@@ -307,14 +310,26 @@ func (s *Service) storeVolume(ctx context.Context, vol assemble.Volume, dir stri
 	return res, place, nil
 }
 
-// documentName is what the volume is called on the tablet.
+// documentName is what the volume is called on the tablet: "<Series> — Vol N".
+//
+// The series is in the name because the library is flat (PLAN §6 M5): Comics
+// holds volumes from every series side by side, so a name that does not say
+// which series it belongs to is useless the moment there are two.
 //
 // xochitl appends ".pdf" when the uploaded filename does not end in it, so the
 // suffix is here rather than left to chance: a name that already carries it is
 // one the user can predict.
 func documentName(vol assemble.Volume, manifest *assemble.Manifest) string {
-	name := strings.TrimSpace(vol.Title)
-	if name == "" {
+	series := strings.TrimSpace(vol.Series)
+	label := strings.TrimSpace(vol.Label)
+
+	var name string
+	switch {
+	case series != "" && label != "":
+		name = fmt.Sprintf("%s — Vol %s", series, label)
+	case series != "":
+		name = series
+	default:
 		name = strings.TrimSpace(manifest.Title)
 	}
 	if name == "" {
