@@ -41,4 +41,10 @@ var CancelDownload = 42
 
 var OpenInReader = 50
 
+var WatchSeries = 60
+var UnwatchSeries = 61
+var CheckWatched = 62
+var WatchList = 63
+var WatchUpdate = 64
+
 var Error = 90

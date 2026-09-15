@@ -102,6 +102,41 @@ const (
 	// MessageOpenInReader is UI→BE, JSON {documentUuid}.
 	MessageOpenInReader MessageType = 50
 
+	// The 60s are PLAN §12.2's watched series: mark a series watched, and know
+	// when it has gained chapters since you last looked.
+	//
+	// MessageWatchSeries is UI→BE, JSON {sourceId, seriesId, title}. Sent from
+	// the series screen, where the user is by definition looking at the chapter
+	// list — so watching starts from "everything here is seen", not from an
+	// announcement of the entire back catalogue.
+	MessageWatchSeries MessageType = 60
+
+	// MessageUnwatchSeries is UI→BE, JSON {sourceId, seriesId}.
+	MessageUnwatchSeries MessageType = 61
+
+	// MessageCheckWatched is UI→BE, JSON {} — or {sourceId, seriesId} for one
+	// series. It is the explicit "check now", and it overrides the per-source
+	// cooldown: a user who taps a button has asked, and answering a direct
+	// request with silence because of a timer is the kind of thing that makes
+	// an app feel broken.
+	//
+	// The automatic check has no message of its own. It runs on attach and
+	// nowhere else — never on a timer, never in the background (PLAN §6 M7).
+	MessageCheckWatched MessageType = 62
+
+	// MessageWatchList is BE→UI, JSON {watched: [...]}. The whole list, pushed
+	// on attach and after any change to it.
+	MessageWatchList MessageType = 63
+
+	// MessageWatchUpdate is BE→UI, JSON — one series' state, streamed as each
+	// check lands.
+	//
+	// One per series rather than a list at the end because the checks are
+	// serialised by the §7.4 limiter at two seconds per host: forty watched
+	// series is well over a minute, and a shell that waits for all of it before
+	// drawing is a shell that looks broken.
+	MessageWatchUpdate MessageType = 64
+
 	// MessageError is BE→UI, JSON {code, message}.
 	MessageError MessageType = 90
 )
@@ -136,6 +171,11 @@ var messageNames = map[MessageType]string{
 	MessageDownloadProgress:      "DownloadProgress",
 	MessageCancelDownload:        "CancelDownload",
 	MessageOpenInReader:          "OpenInReader",
+	MessageWatchSeries:           "WatchSeries",
+	MessageUnwatchSeries:         "UnwatchSeries",
+	MessageCheckWatched:          "CheckWatched",
+	MessageWatchList:             "WatchList",
+	MessageWatchUpdate:           "WatchUpdate",
 	MessageError:                 "Error",
 }
 

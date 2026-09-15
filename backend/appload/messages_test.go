@@ -37,6 +37,11 @@ func TestMessageTypeValues(t *testing.T) {
 		"DownloadProgress":      41,
 		"CancelDownload":        42,
 		"OpenInReader":          50,
+		"WatchSeries":           60,
+		"UnwatchSeries":         61,
+		"CheckWatched":          62,
+		"WatchList":             63,
+		"WatchUpdate":           64,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {
