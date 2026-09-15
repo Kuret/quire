@@ -9,8 +9,10 @@ import (
 	"image/color"
 	"image/jpeg"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -519,6 +521,43 @@ func TestRunRequantisesOversizedPage(t *testing.T) {
 				t.Errorf("%s is %d bytes, over the %d budget", p.Path, st.Size(), opts.Image.MaxBytes)
 			}
 		}
+	}
+}
+
+// The soft memory limit is the fix for the device OOM, so it must actually be
+// applied — and must not override an operator's GOMEMLIMIT.
+func TestSetMemoryLimit(t *testing.T) {
+	restore := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(restore) })
+
+	t.Setenv("GOMEMLIMIT", "")
+	if got := download.SetMemoryLimit(); got != download.RecommendedMemoryLimit {
+		t.Errorf("SetMemoryLimit() = %d, want the recommended %d", got, download.RecommendedMemoryLimit)
+	}
+	if got := debug.SetMemoryLimit(-1); got != download.RecommendedMemoryLimit {
+		t.Errorf("runtime limit = %d, want %d", got, download.RecommendedMemoryLimit)
+	}
+
+	// With GOMEMLIMIT set, the operator's choice stands. The runtime parsed it
+	// at startup, so all this must do is leave it alone.
+	t.Setenv("GOMEMLIMIT", "900MiB")
+	before := debug.SetMemoryLimit(-1)
+	if got := download.SetMemoryLimit(); got != before {
+		t.Errorf("SetMemoryLimit() = %d with GOMEMLIMIT set, want the existing %d", got, before)
+	}
+}
+
+// Building a queue applies the soft limit, because the thing that gets
+// OOM-killed is the process that builds one.
+func TestNewAppliesMemoryLimit(t *testing.T) {
+	restore := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(restore) })
+	t.Setenv("GOMEMLIMIT", "")
+	debug.SetMemoryLimit(math.MaxInt64)
+
+	download.New(&stubFetcher{}, download.Options{})
+	if got := debug.SetMemoryLimit(-1); got > download.RecommendedMemoryLimit {
+		t.Errorf("limit after New = %d, want at most %d", got, download.RecommendedMemoryLimit)
 	}
 }
 

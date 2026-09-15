@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,47 @@ import (
 	"github.com/rickl/quire/backend/assemble"
 	"github.com/rickl/quire/backend/imageproc"
 )
+
+// RecommendedMemoryLimit is the soft heap limit a process running this queue
+// should set, via runtime/debug.SetMemoryLimit.
+//
+// It is not a nicety. Resizing a page allocates an intermediate of
+// destinationWidth × sourceHeight × 32 bytes — ~170 MB for an A4 scan — and
+// with several of those in flight Go's default pacing (no limit, GOGC=100)
+// lets the heap chase them upward. On the device that ended as an OOM kill at
+// ~1.73 GB resident on a 2 GB machine shared with xochitl, and it happened
+// with the resampler cache *disabled*, so the cache was never the whole story.
+//
+// Measured on device with 60 varied-geometry pages and two encode workers
+// (docs/DEVICE-NOTES.md §10.4):
+//
+//	no limit                 OOM-killed at ~1.73 GB
+//	SetMemoryLimit(512 MiB)  peak RSS 646 MiB, and 36% *faster*, because the
+//	                         device is no longer thrashing
+//	SetMemoryLimit(768 MiB)  peak RSS 804 MiB
+//
+// 512 MiB leaves roughly a gigabyte of the ~1.6 GB typically available to
+// xochitl and the rest of the system.
+const RecommendedMemoryLimit = 512 << 20
+
+// SetMemoryLimit applies RecommendedMemoryLimit unless the environment already
+// asked for something else via GOMEMLIMIT, in which case the operator's choice
+// wins. It reports the limit in force.
+//
+// New calls this once, for the first queue built without Options.NoMemoryLimit.
+// A library setting process-wide GC policy is normally rude, and this is the
+// exception that earns it: this package is the allocator that provokes the
+// failure, the failure is the whole app being killed, and the limit is soft —
+// the GC works harder, nothing is refused. A program that would rather own the
+// policy sets Options.NoMemoryLimit and calls this itself from main.
+func SetMemoryLimit() int64 {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return debug.SetMemoryLimit(-1) // read back what the runtime parsed
+	}
+	// SetMemoryLimit returns the *previous* limit, so read the new one back.
+	debug.SetMemoryLimit(RecommendedMemoryLimit)
+	return debug.SetMemoryLimit(-1)
+}
 
 // Fetcher retrieves a page image. It is owned by this package: whatever
 // implements it is responsible for the fetch-layer invariants of PLAN §7.4.
@@ -163,6 +205,10 @@ type Options struct {
 
 	// Sleep is the retry delay, overridable for tests.
 	Sleep func(ctx context.Context, d time.Duration)
+
+	// NoMemoryLimit stops New from applying RecommendedMemoryLimit. Set it if
+	// the program sets its own GC policy in main.
+	NoMemoryLimit bool
 }
 
 func (o *Options) applyDefaults() {
@@ -203,9 +249,15 @@ type Queue struct {
 	opts    Options
 }
 
+// memLimitOnce keeps repeated queue construction from re-applying the limit.
+var memLimitOnce sync.Once
+
 // New returns a queue that fetches through f.
 func New(f Fetcher, opts Options) *Queue {
 	opts.applyDefaults()
+	if !opts.NoMemoryLimit {
+		memLimitOnce.Do(func() { SetMemoryLimit() })
+	}
 	return &Queue{fetcher: f, opts: opts}
 }
 
