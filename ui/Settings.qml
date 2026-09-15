@@ -16,7 +16,12 @@ Item {
     property string backendStatus: ""
     property string lastError: ""
 
+    // The log, most recent last, as the backend sent it. Empty until asked for.
+    property var logLines: []
+    property bool logShown: false
+
     signal pingRequested()
+    signal logRequested()
     signal clearErrorRequested()
 
     Column {
@@ -109,6 +114,93 @@ Item {
                 id: clearArea
                 anchors.fill: parent
                 onClicked: screen.clearErrorRequested()
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        // The log viewer — PLAN §6 M7's "SSH-free debugging".
+        //
+        // Every bug found so far needed someone reading journalctl over SSH,
+        // which the person holding the tablet cannot do. This turns "it stopped
+        // working" into something they can read out.
+        Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "Log"
+            font.pointSize: Style.headingSize
+            color: Style.ink
+        }
+
+        Rectangle {
+            objectName: "showLogButton"
+            width: parent.width
+            height: Style.buttonHeight
+            color: logArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: screen.logShown ? "Hide the log" : "Show the log"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: logArea
+                anchors.fill: parent
+                onClicked: {
+                    screen.logShown = !screen.logShown
+                    if (screen.logShown)
+                        screen.logRequested()
+                }
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: screen.logShown ? 520 : 0
+            visible: screen.logShown
+            color: Style.paper
+            border.width: 1
+            border.color: Style.rule
+
+            ListView {
+                id: logView
+                objectName: "logView"
+                anchors { fill: parent; margins: Style.gap }
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickDeceleration: 10000
+                maximumFlickVelocity: 1600
+                model: screen.logLines
+
+                // The newest lines are the ones anyone diagnosing a problem
+                // wants, so start at the bottom.
+                onCountChanged: positionViewAtEnd()
+
+                delegate: Text {
+                    width: logView.width
+                    wrapMode: Text.WrapAnywhere
+                    text: modelData
+                    font.pointSize: Style.smallSize
+                    font.family: "monospace"
+                    color: Style.muted
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                text: "Nothing logged yet."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+                visible: logView.count === 0
             }
         }
 

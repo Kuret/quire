@@ -129,6 +129,8 @@ Rectangle {
             // that it is worth one quiet line rather than a dialogue.
             if (msg && msg.notice)
                 root.notice = msg.notice
+            if (msg && msg.logTail)
+                settingsScreen.logLines = msg.logTail
             return
 
         case Msg.Sources:
@@ -464,6 +466,10 @@ Rectangle {
             backendStatus: root.backendStatus
             lastError: root.lastError
             onPingRequested: root.send(Msg.Ping)
+            // The log rides on Ping with a flag rather than taking a message
+            // type of its own: the viewer is a panel on this screen, and this
+            // screen already pings.
+            onLogRequested: root.send(Msg.Ping, {"log": true})
             onClearErrorRequested: root.lastError = ""
         }
     }
