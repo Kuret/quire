@@ -1,0 +1,117 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "Reproduces the shape GET /manga?title=… returns: the paginated collection",
+    "envelope (result/response/data/limit/offset/total), each entry an entity",
+    "with a UUID, a language-keyed title map, an altTitles list of single-entry",
+    "maps, and relationships that carry attributes only because the request",
+    "asked for them with includes[]=cover_art.",
+    "",
+    "Why synthetic: PLAN §1.3 forbids this repository from containing anything",
+    "that functions as a catalogue of sources, and §1.4 forbids copying others'",
+    "expression — including their data. The response *shape* is a documented",
+    "fact (https://api.mangadex.org/docs/, confirmed live 2026-09-15); the",
+    "titles, UUIDs and filenames here are invented, and the host the tests use",
+    "is example.invalid (RFC 2606), which can never resolve.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - the first entry has no English title at all, only ja-ro, so the title",
+    "    has to come from altTitles — MangaDex has no single canonical title",
+    "  - the second is the ordinary case, English title present",
+    "  - the third has a cover_art relationship with no attributes, which is",
+    "    what a relationship looks like when includes[] was not sent",
+    "  - the fourth has no usable title in any language and must be dropped",
+    "    rather than rendered as an empty row"
+  ],
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "11111111-2222-4333-8444-555555555555",
+      "type": "manga",
+      "attributes": {
+        "title": { "ja-ro": "Tooi Tou no Kiroku" },
+        "altTitles": [
+          { "en": "Record of the Distant Tower" },
+          { "pt-br": "Registro da Torre Distante" },
+          { "ja": "遠い塔の記録" }
+        ],
+        "description": { "en": "A surveyor walks the length of a tower nobody finished." },
+        "originalLanguage": "ja",
+        "status": "ongoing",
+        "contentRating": "safe",
+        "year": 2024,
+        "availableTranslatedLanguages": ["en", "pt-br"],
+        "tags": []
+      },
+      "relationships": [
+        {
+          "id": "c0c0c0c0-1111-4111-8111-111111111111",
+          "type": "cover_art",
+          "attributes": { "fileName": "distant-tower-1.jpg", "locale": "ja" }
+        }
+      ]
+    },
+    {
+      "id": "22222222-3333-4444-8555-666666666666",
+      "type": "manga",
+      "attributes": {
+        "title": { "en": "Salt and Cedar", "pt-br": "Sal e Cedro" },
+        "altTitles": [],
+        "description": {},
+        "originalLanguage": "ko",
+        "status": "completed",
+        "contentRating": "suggestive",
+        "year": 2021,
+        "availableTranslatedLanguages": ["en"],
+        "tags": []
+      },
+      "relationships": [
+        {
+          "id": "c0c0c0c0-2222-4222-8222-222222222222",
+          "type": "cover_art",
+          "attributes": { "fileName": "salt-and-cedar.png", "locale": "en" }
+        },
+        { "id": "a0a0a0a0-2222-4222-8222-222222222222", "type": "author" }
+      ]
+    },
+    {
+      "id": "33333333-4444-4555-8666-777777777777",
+      "type": "manga",
+      "attributes": {
+        "title": { "en": "The Ninth Ward Lanterns" },
+        "altTitles": [],
+        "description": {},
+        "originalLanguage": "en",
+        "status": "hiatus",
+        "contentRating": "safe",
+        "year": 2019,
+        "availableTranslatedLanguages": ["en"],
+        "tags": []
+      },
+      "relationships": [
+        { "id": "c0c0c0c0-3333-4333-8333-333333333333", "type": "cover_art" }
+      ]
+    },
+    {
+      "id": "44444444-5555-4666-8777-888888888888",
+      "type": "manga",
+      "attributes": {
+        "title": {},
+        "altTitles": [],
+        "description": {},
+        "originalLanguage": "ja",
+        "status": "ongoing",
+        "contentRating": "safe",
+        "year": 2020,
+        "availableTranslatedLanguages": [],
+        "tags": []
+      },
+      "relationships": []
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "total": 4
+}

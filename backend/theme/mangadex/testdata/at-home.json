@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "Reproduces GET /at-home/server/{chapterId}: a short-lived image host, a",
+    "chapter hash, and the page filenames at two qualities. A page URL is",
+    "assembled as {baseUrl}/data/{hash}/{filename} for full quality, or",
+    "/data-saver/ for the recompressed set.",
+    "",
+    "This is the one endpoint api.mangadex.org disallows in robots.txt, and so",
+    "the one Quire fetches as PLAN §7.4 retrieval rather than discovery. The",
+    "test asserts the request kind, not just the URLs.",
+    "",
+    "Why synthetic: PLAN §1.3 and §1.4. The filenames here are invented and the",
+    "image host is example.invalid, so nothing in this file points at content.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - baseUrl carries a trailing slash, which must not produce a double one",
+    "  - dataSaver lists the same pages as .jpg, and must be ignored: M4",
+    "    re-encodes for the device anyway, so starting from an already",
+    "    recompressed JPEG would compound the loss",
+    "  - one empty filename, which must be skipped rather than yielding a URL",
+    "    that ends in a slash"
+  ],
+  "result": "ok",
+  "baseUrl": "https://images.example.invalid/",
+  "chapter": {
+    "hash": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    "data": [
+      "1-aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888.png",
+      "2-bbbb1111cccc2222dddd3333eeee4444ffff5555aaaa6666bbbb7777cccc8888.png",
+      "",
+      "3-cccc1111dddd2222eeee3333ffff4444aaaa5555bbbb6666cccc7777dddd8888.png"
+    ],
+    "dataSaver": [
+      "1-1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb.jpg",
+      "2-2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb9999cccc.jpg",
+      "3-3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb9999cccc0000dddd.jpg"
+    ]
+  }
+}

@@ -58,7 +58,7 @@ func BenchmarkNormalise(b *testing.B) {
 		{"panel-1620x2160", 1620, 2160},   // already native
 		{"huge-5000x7000", 5000, 7000},    // where a prescale can bite
 	}
-	scalers := []imageproc.Scaler{imageproc.ScalerCatmullRom, imageproc.ScalerApproxBiLinear}
+	scalers := []imageproc.Scaler{imageproc.ScalerCatmullRom, imageproc.ScalerBiLinear, imageproc.ScalerApproxBiLinear}
 
 	for _, src := range sources {
 		raw := comicPage(src.w, src.h)

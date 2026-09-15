@@ -47,6 +47,7 @@ import (
 	stddraw "image/draw"
 	"image/jpeg"
 	"io"
+	"sync"
 
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp" // register the WebP decoder: common for comic sources
@@ -142,6 +143,18 @@ const (
 	// ScalerBiLinear is the exact bilinear kernel.
 	ScalerBiLinear
 )
+
+// kernel returns the underlying x/image kernel, if this scaler has one.
+func (s Scaler) kernel() (*xdraw.Kernel, bool) {
+	switch s {
+	case ScalerBiLinear:
+		return xdraw.BiLinear, true
+	case ScalerApproxBiLinear:
+		return nil, false
+	default:
+		return xdraw.CatmullRom, true
+	}
+}
 
 func (s Scaler) scaler() xdraw.Scaler {
 	switch s {
@@ -334,6 +347,7 @@ func fit(src image.Image, opts Options) (image.Image, bool) {
 // render draws src scaled into imgRect on a canvas of dstRect, filling the
 // remainder with the background colour.
 func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) image.Image {
+	src = fastSource(src)
 	if opts.Prescale {
 		src = boxPrescale(src, imgRect.Dx(), imgRect.Dy())
 	}
@@ -346,8 +360,71 @@ func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) ima
 	if !imgRect.Eq(dstRect) {
 		xdraw.Draw(dst, dstRect, image.NewUniform(opts.Background), image.Point{}, xdraw.Src)
 	}
-	opts.Scaler.scaler().Scale(dst, imgRect, src, src.Bounds(), xdraw.Src, nil)
+	scalerFor(opts.Scaler, imgRect, src.Bounds()).Scale(dst, imgRect, src, src.Bounds(), xdraw.Src, nil)
 	return dst
+}
+
+// scalerCache memoises x/image scalers by geometry.
+//
+// It matters more than it looks. Kernel.Scale builds the kernel weight tables
+// *and* allocates its intermediate buffer — dstW × srcH × 32 bytes, which is
+// ~170 MB for an A4 page — on every single call. NewScaler computes the
+// weights once and pools the buffer across calls, and the pages of a volume
+// almost always share one geometry, so the cache hit rate is close to 1.
+// Measured on device: docs/DEVICE-NOTES.md §10.
+var scalerCache sync.Map // scalerKey -> xdraw.Scaler
+
+type scalerKey struct {
+	kernel         Scaler
+	dw, dh, sw, sh int
+}
+
+func scalerFor(k Scaler, dst, src image.Rectangle) xdraw.Scaler {
+	kern, ok := k.kernel()
+	if !ok {
+		// ApproxBiLinear has no weight tables and no intermediate buffer.
+		return k.scaler()
+	}
+	key := scalerKey{k, dst.Dx(), dst.Dy(), src.Dx(), src.Dy()}
+	if v, ok := scalerCache.Load(key); ok {
+		return v.(xdraw.Scaler)
+	}
+	s := kern.NewScaler(key.dw, key.dh, key.sw, key.sh)
+	// A volume is one geometry; a handful of entries covers a session, and an
+	// unbounded map here would pin pooled buffers for geometries never seen
+	// again.
+	if cacheLen(&scalerCache) >= 8 {
+		scalerCache.Clear()
+	}
+	scalerCache.Store(key, s)
+	return s
+}
+
+func cacheLen(m *sync.Map) int {
+	n := 0
+	m.Range(func(any, any) bool { n++; return true })
+	return n
+}
+
+// fastSource converts an image x/image/draw has no specialised path for into
+// *image.RGBA.
+//
+// This is not a micro-optimisation. image/jpeg returns *image.YCbCr, and
+// x/image/draw's kernel scalers (CatmullRom among them) have fast paths only
+// for RGBA, NRGBA and Gray sources — anything else falls back to the generic
+// per-pixel At()/RGBA() path, which on the device costs several seconds and
+// ~200 MB of garbage for a single A4 page. image/draw's own YCbCr → RGBA
+// conversion is specialised and cheap by comparison. Measured on device:
+// docs/DEVICE-NOTES.md §10.
+func fastSource(src image.Image) image.Image {
+	switch src.(type) {
+	case *image.RGBA, *image.NRGBA, *image.Gray:
+		return src
+	}
+	b := src.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	stddraw.Draw(out, out.Bounds(), src, b.Min, stddraw.Src)
+	return out
 }
 
 // boxPrescale averages src down by the largest integer factor that keeps it at

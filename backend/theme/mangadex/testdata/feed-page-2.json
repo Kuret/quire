@@ -1,0 +1,65 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "Page 2 of the same feed as feed.json, at offset 4. Together the two prove",
+    "that Chapters() pages with offset until it has reached total, rather than",
+    "silently returning the first page and calling it a chapter list — which is",
+    "the failure mode a long-running series would hit and a short one would not.",
+    "",
+    "Why synthetic: PLAN §1.3 and §1.4.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - a oneshot with no chapter number at all, whose parsed Number must be",
+    "    -1 (theme.Chapter documents that) and whose title must not read",
+    "    'Chapter '",
+    "  - a chapter marked isUnavailable, listed by the site but not servable"
+  ],
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "aaaaaaaa-3333-4333-8333-333333333333",
+      "type": "chapter",
+      "attributes": {
+        "volume": "2",
+        "chapter": "",
+        "title": "The Surveyor's Notebook",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": false,
+        "publishAt": "2026-04-02T07:15:00+00:00",
+        "readableAt": "2026-04-02T07:15:00+00:00",
+        "version": 1,
+        "pages": 12
+      },
+      "relationships": [
+        {
+          "id": "g0000002-0000-4000-8000-000000000002",
+          "type": "scanlation_group",
+          "attributes": { "name": "Ninth Ward Translations" }
+        }
+      ]
+    },
+    {
+      "id": "dddddddd-1111-4111-8111-111111111111",
+      "type": "chapter",
+      "attributes": {
+        "volume": "2",
+        "chapter": "14",
+        "title": "Withdrawn",
+        "translatedLanguage": "en",
+        "externalUrl": null,
+        "isUnavailable": true,
+        "publishAt": "2026-04-09T07:15:00+00:00",
+        "readableAt": "2026-04-09T07:15:00+00:00",
+        "version": 2,
+        "pages": 0
+      },
+      "relationships": []
+    }
+  ],
+  "limit": 500,
+  "offset": 4,
+  "total": 6
+}

@@ -1,0 +1,84 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "Reproduces GET /manga/{id}?includes[]=cover_art&includes[]=author&includes[]=artist:",
+    "the single-object envelope, with author, artist and cover_art relationships",
+    "carrying attributes because includes[] asked for them, and language-keyed",
+    "title, altTitles, description and tag-name maps.",
+    "",
+    "Why synthetic: PLAN §1.3 and §1.4. The shape is documented fact; the work,",
+    "the people and the UUIDs are invented, on a host that cannot resolve.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - description exists in en and pt-br, so the source's language decides",
+    "  - two authors and one artist, listed in API order",
+    "  - one author appears twice in the relationship list and must be",
+    "    deduplicated rather than shown twice",
+    "  - a tag whose name map has no entry in the source language falls back",
+    "    to English rather than disappearing",
+    "  - status is the site's own vocabulary and must survive normalisation"
+  ],
+  "result": "ok",
+  "response": "entity",
+  "data": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "type": "manga",
+    "attributes": {
+      "title": { "ja-ro": "Tooi Tou no Kiroku", "en": "Record of the Distant Tower" },
+      "altTitles": [
+        { "pt-br": "Registro da Torre Distante" },
+        { "ja": "遠い塔の記録" },
+        { "en": "Record of the Distant Tower" }
+      ],
+      "description": {
+        "en": "A surveyor walks the length of a tower nobody finished.",
+        "pt-br": "Um agrimensor percorre uma torre que ninguém terminou."
+      },
+      "originalLanguage": "ja",
+      "status": "ongoing",
+      "contentRating": "safe",
+      "year": 2024,
+      "availableTranslatedLanguages": ["en", "pt-br"],
+      "tags": [
+        {
+          "id": "t0000001-0000-4000-8000-000000000001",
+          "type": "tag",
+          "attributes": { "name": { "en": "Adventure", "pt-br": "Aventura" }, "group": "genre" }
+        },
+        {
+          "id": "t0000002-0000-4000-8000-000000000002",
+          "type": "tag",
+          "attributes": { "name": { "en": "Survival" }, "group": "theme" }
+        }
+      ]
+    },
+    "relationships": [
+      {
+        "id": "a0000001-0000-4000-8000-000000000001",
+        "type": "author",
+        "attributes": { "name": "Mira Vance" }
+      },
+      {
+        "id": "a0000002-0000-4000-8000-000000000002",
+        "type": "author",
+        "attributes": { "name": "Ono Haruki" }
+      },
+      {
+        "id": "a0000003-0000-4000-8000-000000000003",
+        "type": "author",
+        "attributes": { "name": "Mira Vance" }
+      },
+      {
+        "id": "b0000001-0000-4000-8000-000000000001",
+        "type": "artist",
+        "attributes": { "name": "Ono Haruki" }
+      },
+      {
+        "id": "c0c0c0c0-1111-4111-8111-111111111111",
+        "type": "cover_art",
+        "attributes": { "fileName": "distant-tower-1.jpg", "locale": "ja" }
+      }
+    ]
+  }
+}
