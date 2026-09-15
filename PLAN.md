@@ -795,6 +795,17 @@ Both header fields are **signed `int32`**, native-endian — see the correction 
 | 50 | UI→BE | OpenInReader | JSON `{documentUuid}` |
 | 90 | BE→UI | Error | JSON `{code, message}` |
 
+**Added during M3** (mirrored in `ui/Messages.js`, drift-tested):
+
+| ID | Direction | Name | Payload |
+|---|---|---|---|
+| 16 | UI→BE | ProbeAnswer | JSON — answers a question raised on the progress stream (e.g. an off-domain redirect) |
+| 17 | UI→BE | SetSourceEnabled | JSON `{sourceId, enabled}` |
+| 18 | UI→BE | RemoveSource | JSON `{sourceId}` |
+| 22 | UI→BE | Browse | Search with an empty query — see the stage-5 correction in §7.5 |
+| 23 | UI→BE | RequestCover | JSON `{sourceId, seriesId}` |
+| 24 | BE→UI | CoverReady | JSON `{seriesId, path}` — a **path**, never bytes (§7.1 above) |
+
 All payloads JSON. Images are **never** sent over the socket — write to disk,
 send a path. The 10 MiB cap and the per-hook mutex make large transfers a bad
 idea — and the *real* ceiling is lower still: the socket is `SOCK_SEQPACKET`,
@@ -1011,6 +1022,32 @@ default name derived from the site title, and the verdict with a timestamp.
 
 Verdict enum: `ok | partial | unrecognised | blocked_challenge | robots_denied |
 unreachable | invalid_url | blocked_address`.
+
+**CORRECTIONS from M3 — three places this section could not be built as written:**
+
+1. **Stage 5's "or the popular/latest listing if search needs a query" is not
+   implementable.** The §7.2 `Theme` interface has no popular/latest method, so
+   there is nothing to call. M3 probes with a one-character search query
+   instead, and the UI's "Browse" is a search with an empty query. If a real
+   popular/latest path is ever wanted it needs a **new interface method**, which
+   is a change to §7.2 — not a detail.
+2. **The verdict enum has no value for "the user declined a question"**, which
+   stage 2 can produce by asking about an off-domain redirect. Do **not** add a
+   ninth verdict: stopping is not a finding about the site. The result carries a
+   separate `cancelled` flag with an empty verdict.
+3. **§5's layout puts this in `backend/probe/`, which cannot work.** §7.2 spells
+   the interface `Fingerprint(p *probe.Page)`, so `theme` imports `probe`; the
+   stage machinery needs the registry, and that is an import cycle. `probe` keeps
+   only the leaf `Page` type; the machinery lives in `backend/probe/prober/`.
+
+**On challenge signals, be honest about what is verified.** §7.5 says to verify
+each signal against a live example — that is impossible under §1.3, which
+forbids reaching an aggregator from this project. `docs/THEME-NOTES.md` therefore
+splits every signal into **published fact** (a vendor's own documented path,
+header or cookie) versus **structural inference** (edge-status plus interstitial
+shape, and the generic JS gate, which is the least certain). A test fails if a
+marker ships without that provenance. Never describe the inferred ones as
+verified.
 
 **Testing:** every verdict needs a fixture-driven test. Record one real response
 per verdict once, commit it, and never hit the live network in CI.
