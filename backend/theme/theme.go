@@ -37,6 +37,14 @@ type Theme interface {
 
 	Search(ctx context.Context, s *Source, q string, page int) ([]SeriesStub, error)
 	Series(ctx context.Context, s *Source, id string) (*Series, error)
+	// Chapters returns the series' chapters in **ascending reading order**,
+	// earliest first — whatever order the site itself lists them in. See
+	// order.go: the guarantee is the theme's because only the theme knows
+	// what its identifiers mean, and a caller that sorted generically would
+	// put "10" before "9" and fling "Omake" to one end.
+	//
+	// A theme that cannot establish an order says so with MarkOrderUnknown
+	// rather than guessing. SortAndMark does both halves for it.
 	Chapters(ctx context.Context, s *Source, id string) ([]Chapter, error)
 	Pages(ctx context.Context, s *Source, chapterID string) ([]string, error)
 
@@ -257,15 +265,40 @@ const (
 )
 
 // Chapter is one chapter in a series.
+//
+// A slice of these is returned in **ascending reading order, earliest first**
+// (PLAN §7.2). See order.go for why that guarantee lives in the theme and what
+// happens when it cannot be met.
 type Chapter struct {
 	// ID is the theme's handle, site-relative for the same reason as
 	// SeriesStub.ID.
 	ID    string `json:"id"`
 	Title string `json:"title"`
 
+	// Volume is the source's own volume label, "" when it publishes none.
+	//
+	// It is a label rather than a number because that is what sites give:
+	// "3", "Vol. 3", "TBD". PLAN §6 M4 groups chapters into volume PDFs and
+	// falls back to runs of ten when a source has no volume structure — this
+	// field is what tells it which case it is in, and the fallback should be
+	// the exception rather than, as it was until 2026-09-15, the only
+	// mechanism.
+	Volume string `json:"volume,omitempty"`
+
 	// Number is the parsed chapter number, or -1 when the title carries none.
 	// Float because half-chapters ("10.5") are routine.
 	Number float64 `json:"number"`
+
+	// OrderUnknown says Quire could not establish a reading order for the list
+	// this chapter came from, so the list is in the site's own order and that
+	// order means nothing to us.
+	//
+	// It is set on every chapter of such a list, because it describes the list
+	// and not the chapter; OrderIsKnown reads it back at that level. A caller
+	// assembling several chapters into one PDF must consult it rather than
+	// assume — a volume whose pages run backwards is the bug this exists to
+	// prevent, and admitting the order is unknown is better than guessing it.
+	OrderUnknown bool `json:"orderUnknown,omitempty"`
 
 	// Published is the chapter date, zero when the site gave none or gave it
 	// in a format the source's dateFormat override does not describe.
