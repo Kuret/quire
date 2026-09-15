@@ -367,6 +367,90 @@ Document root: `/home/root/.local/share/remarkable/xochitl/`.
 
 ---
 
+## 6.5 AppLoad app layout and wire protocol (M1)
+
+Read off the AppLoad host (`src/protocol.h`, the symbols in the installed
+`appload.so`) and confirmed by a working install on this device.
+
+### App directory
+
+`/home/root/xovi/exthome/appload/<id>/`:
+
+```
+manifest.json
+icon.png
+resources.rcc      <- REQUIRED. AppLoad calls QResource::registerResource()
+                      on it. There is no loose-file fallback: without it the
+                      app does not load at all.
+backend/entry      <- executable; started with argv[1] = path to a unix socket
+                      AppLoad has already created
+```
+
+`manifest.json`: `id` (must equal the QML `AppLoad.applicationID`), `name`,
+`loadsBackend`, `entry` (path of the root QML *inside* the rcc, e.g.
+`/ui/Main.qml`), `supportsScaling`, `canHaveMultipleFrontends`; optional
+`aspectRatio`, `width`.
+
+Build the rcc with **`rcc --binary --format-version 3`**. The device runs Qt
+6.8.2 (§4); a host `rcc` from a newer Qt may default to a newer format. Qt
+6.11's `rcc` happens to default to 3 as well, but pin it rather than depend on
+that.
+
+AppLoad scans app roots at **xochitl start**, not on launcher open. After an
+install, restart xochitl and look for:
+
+```
+[AppLoad]: Loaded app root /home/root/xovi/services/xochitl.service//exthome/appload//quire
+```
+
+That line is emitted when the manifest parses. Confirmed on 2026-09-15.
+
+### Wire protocol — PLAN §7.1 is wrong about the header type
+
+```c
+struct PacketHeader { int type; int messageLength; };
+#define MAX_MESSAGE_LENGTH 10485760   /* 10 MiB */
+```
+
+**Two native-endian *signed* int32s**, not the u32s PLAN §6 M1 / §7.1 describe.
+Negative `type` values are reserved for system messages, so reading the type as
+unsigned misreads every one of them:
+
+| type | meaning |
+|---|---|
+| -1 | `MESSAGE_SYSTEM_TERMINATE` — shut the backend down |
+| -2 | `MESSAGE_SYSTEM_NEW_COORDINATOR` — a frontend attached |
+| -3 | `MESSAGE_SYSTEM_LOST_COORDINATOR` — the frontend detached |
+
+`messageLength` is signed too: a negative length is a protocol error, not a
+huge unsigned value. Validate the length against the 10 MiB cap **before**
+allocating — a garbled length otherwise OOMs the device. See
+`backend/appload/conn.go`.
+
+### QML side
+
+The type is `net.asivery.AppLoad 1.0` / `AppLoad`. Names verified against the
+installed `appload.so`: `applicationID`, `messageReceived`, **`sendMessage`**
+(one `s` in the middle — the upstream README's `sendMesssage` is a typo),
+`terminate`, `unloading`. The root element should declare `signal close` and a
+`function unloading()` that calls `appload.terminate()`, or the backend
+outlives the frontend.
+
+### Verified end to end on device
+
+`quired` cross-compiled for `linux/arm64` (CGO off, static), started with a
+unix socket path as argv[1], answered `Ping`(1) with `Pong`(2):
+
+```
+{"ok":true,"version":"6b3aa69","goVersion":"go1.25.14","arch":"arm64",
+ "os":"linux","pid":9998,"uptimeSeconds":1703.6,"uptime":"28m 24s", ...}
+```
+
+matching `/proc/uptime` (`1703.61 6468.05`) at the same instant, and exited
+cleanly on `MESSAGE_SYSTEM_TERMINATE`.
+
+---
+
 ## 7. Host-side access
 
 ```sh
