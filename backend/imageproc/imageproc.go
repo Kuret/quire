@@ -47,6 +47,7 @@ import (
 	stddraw "image/draw"
 	"image/jpeg"
 	"io"
+	"runtime"
 	"sync"
 
 	xdraw "golang.org/x/image/draw"
@@ -366,19 +367,143 @@ func render(src image.Image, dstRect, imgRect image.Rectangle, opts Options) ima
 	return dst
 }
 
-// scalerCache memoises x/image scalers by geometry.
+// The scaler cache is bounded by **retained bytes, not entry count**, and that
+// distinction is the whole point.
 //
-// It matters more than it looks. Kernel.Scale builds the kernel weight tables
-// *and* allocates its intermediate buffer — dstW × srcH × 32 bytes, which is
-// ~170 MB for an A4 page — on every single call. NewScaler computes the
-// weights once and pools the buffer across calls, and the pages of a volume
-// almost always share one geometry, so the cache hit rate is close to 1.
-// Measured on device: docs/DEVICE-NOTES.md §10.
-var scalerCache sync.Map // scalerKey -> xdraw.Scaler
+// x/image's kernel scalers allocate an intermediate buffer of
+// dstW × srcH × 32 bytes on every Scale call — about 170 MB for an A4 page.
+// NewScaler pools that buffer across calls, which is why caching a scaler is
+// worth anything at all; it is also why a cached scaler *retains* a buffer of
+// that size until the next GC drops the pool.
+//
+// An earlier version of this cache bounded itself at eight entries on the
+// premise that "a volume is one geometry". That premise came from synthetic
+// fixtures, which were all the same size. Real sources are not: MangaDex
+// serves pages that vary page to page, so the cache filled with eight distinct
+// geometries, pinned eight intermediate buffers, and the backend was
+// OOM-killed on the device at 1.63 GB resident (anon-rss, 2 GB device shared
+// with xochitl). Eight entries was never a memory bound — one entry can be
+// 170 MB and another 20 MB.
+//
+// So: a byte budget, worst-case per-entry costs, and LRU eviction rather than
+// dropping the whole map and losing the hot entry with the cold ones. A
+// geometry whose buffer alone exceeds the budget is never cached; it falls
+// back to Kernel.Scale, which allocates transiently and lets the GC reclaim.
+// That is slower in garbage terms and survivable in memory terms, which is the
+// right direction for this failure.
+//
+// One consequence, and it is the honest one: with the default budget a
+// full-size page's intermediate does not fit, so those pages are not cached at
+// all. That costs nothing measurable — on device the cache never changed wall
+// clock, only garbage — and it is what keeps the bound truthful.
+//
+// Measured on device: docs/DEVICE-NOTES.md §10.4.
+const DefaultScalerCacheBytes = 256 << 20
 
 type scalerKey struct {
 	kernel         Scaler
 	dw, dh, sw, sh int
+}
+
+// bytes is what a cached scaler can retain.
+//
+// The intermediate is one [4]float64 per (destination column × source row) —
+// and it is held in a sync.Pool, which keeps a *per-P* slot. So the worst case
+// is one buffer per GOMAXPROCS, not one per scaler, and counting one was how
+// the first version of this cache convinced itself that eight entries were
+// affordable. Count the worst case.
+func (k scalerKey) bytes() int64 {
+	return int64(k.dw) * int64(k.sh) * 32 * int64(poolFactor())
+}
+
+// poolFactor bounds how many copies of an intermediate a sync.Pool can hold.
+func poolFactor() int {
+	return min(runtime.GOMAXPROCS(0), 4)
+}
+
+type scalerCacheT struct {
+	mu      sync.Mutex
+	budget  int64
+	held    int64
+	entries map[scalerKey]*scalerEntry
+	// lru is most-recently-used last.
+	lru []scalerKey
+}
+
+type scalerEntry struct {
+	scaler xdraw.Scaler
+	bytes  int64
+}
+
+var scalerCache = &scalerCacheT{budget: DefaultScalerCacheBytes}
+
+// SetScalerCacheBytes sets the byte budget for cached resamplers and evicts
+// down to it. Zero disables caching entirely. It is exported for the device
+// measurement harness and for a caller that knows its memory is tighter than
+// the default assumes.
+func SetScalerCacheBytes(n int64) {
+	scalerCache.mu.Lock()
+	defer scalerCache.mu.Unlock()
+	scalerCache.budget = n
+	scalerCache.evictLocked()
+}
+
+// ScalerCacheBytes reports the bytes currently retained by cached resamplers.
+func ScalerCacheBytes() int64 {
+	scalerCache.mu.Lock()
+	defer scalerCache.mu.Unlock()
+	return scalerCache.held
+}
+
+func (c *scalerCacheT) get(k Scaler, key scalerKey, kern *xdraw.Kernel) xdraw.Scaler {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if e, ok := c.entries[key]; ok {
+		c.touchLocked(key)
+		return e.scaler
+	}
+
+	s := kern.NewScaler(key.dw, key.dh, key.sw, key.sh)
+
+	// Too big to be worth retaining, or caching is off: hand it back uncached.
+	// The scaler still works; it simply is not held, so its pooled buffer dies
+	// with it.
+	n := key.bytes()
+	if c.budget <= 0 || n > c.budget {
+		return s
+	}
+
+	if c.entries == nil {
+		c.entries = make(map[scalerKey]*scalerEntry)
+	}
+	c.entries[key] = &scalerEntry{scaler: s, bytes: n}
+	c.lru = append(c.lru, key)
+	c.held += n
+	c.evictLocked()
+	return s
+}
+
+// evictLocked drops least-recently-used entries until the budget is met.
+func (c *scalerCacheT) evictLocked() {
+	for c.held > c.budget && len(c.lru) > 0 {
+		oldest := c.lru[0]
+		c.lru = c.lru[1:]
+		if e, ok := c.entries[oldest]; ok {
+			c.held -= e.bytes
+			delete(c.entries, oldest)
+		}
+	}
+}
+
+func (c *scalerCacheT) touchLocked(key scalerKey) {
+	for i, k := range c.lru {
+		if k == key {
+			c.lru = append(c.lru[:i], c.lru[i+1:]...)
+			break
+		}
+	}
+	c.lru = append(c.lru, key)
 }
 
 func scalerFor(k Scaler, dst, src image.Rectangle) xdraw.Scaler {
@@ -387,37 +512,16 @@ func scalerFor(k Scaler, dst, src image.Rectangle) xdraw.Scaler {
 		// ApproxBiLinear has no weight tables and no intermediate buffer.
 		return k.scaler()
 	}
-	key := scalerKey{k, dst.Dx(), dst.Dy(), src.Dx(), src.Dy()}
-	if v, ok := scalerCache.Load(key); ok {
-		return v.(xdraw.Scaler)
-	}
-	s := kern.NewScaler(key.dw, key.dh, key.sw, key.sh)
-	// A volume is one geometry; a handful of entries covers a session, and an
-	// unbounded map here would pin pooled buffers for geometries never seen
-	// again.
-	if cacheLen(&scalerCache) >= 8 {
-		scalerCache.Clear()
-	}
-	scalerCache.Store(key, s)
-	return s
-}
-
-func cacheLen(m *sync.Map) int {
-	n := 0
-	m.Range(func(any, any) bool { n++; return true })
-	return n
+	return scalerCache.get(k, scalerKey{k, dst.Dx(), dst.Dy(), src.Dx(), src.Dy()}, kern)
 }
 
 // fastSource converts an image x/image/draw has no specialised path for into
 // *image.RGBA.
 //
-// This is not a micro-optimisation. image/jpeg returns *image.YCbCr, and
-// x/image/draw's kernel scalers (CatmullRom among them) have fast paths only
-// for RGBA, NRGBA and Gray sources — anything else falls back to the generic
-// per-pixel At()/RGBA() path, which on the device costs several seconds and
-// ~200 MB of garbage for a single A4 page. image/draw's own YCbCr → RGBA
-// conversion is specialised and cheap by comparison. Measured on device:
-// docs/DEVICE-NOTES.md §10.
+// image/jpeg returns *image.YCbCr, and x/image/draw's kernel scalers have fast
+// paths only for RGBA, NRGBA and Gray sources; anything else falls back to a
+// generic per-pixel At()/RGBA() path. image/draw's own YCbCr → RGBA conversion
+// is specialised and cheap by comparison.
 func fastSource(src image.Image) image.Image {
 	switch src.(type) {
 	case *image.RGBA, *image.NRGBA, *image.Gray:

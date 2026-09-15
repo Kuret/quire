@@ -349,3 +349,106 @@ func TestReportPageBytes(t *testing.T) {
 		t.Logf("%-16s %dx%d -> %dx%d  %d bytes (%.0f KiB)", tc.name, tc.w, tc.h, res.Width, res.Height, res.Bytes, float64(res.Bytes)/1024)
 	}
 }
+
+// The scaler cache must be bounded by the bytes it retains, not by how many
+// entries it holds. Eight entries of varied geometry was ~1.36 GB and
+// OOM-killed the backend on the device; this test is the regression.
+func TestScalerCacheStaysWithinByteBudget(t *testing.T) {
+	const budget = 512 << 20
+	t.Cleanup(func() { imageproc.SetScalerCacheBytes(imageproc.DefaultScalerCacheBytes) })
+	imageproc.SetScalerCacheBytes(0) // drop whatever earlier tests left
+	imageproc.SetScalerCacheBytes(budget)
+
+	// Deliberately varied geometry, the way a real source serves pages — the
+	// case the original eight-entry bound was never tested against.
+	sizes := [][2]int{
+		{2480, 3508}, {1600, 2300}, {1200, 1700}, {1400, 2000},
+		{900, 1600}, {2000, 2828}, {1131, 1600}, {1350, 1920},
+		{3200, 2200}, {1620, 2160}, {1000, 1400}, {2550, 3300},
+	}
+	for _, sz := range sizes {
+		raw := encodeJPEG(t, synthPage(sz[0], sz[1], 200))
+		opts := imageproc.DefaultOptions()
+		opts.MaxBytes = 0
+		if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); err != nil {
+			t.Fatalf("%dx%d: %v", sz[0], sz[1], err)
+		}
+		if held := imageproc.ScalerCacheBytes(); held > budget {
+			t.Fatalf("after %dx%d the cache retains %d bytes, over the %d budget", sz[0], sz[1], held, budget)
+		}
+	}
+	t.Logf("12 geometries later the cache retains %.0f MiB of a %d MiB budget",
+		float64(imageproc.ScalerCacheBytes())/(1<<20), budget>>20)
+	if imageproc.ScalerCacheBytes() == 0 {
+		t.Error("nothing was cached at a 512 MiB budget; the bound is not being exercised")
+	}
+}
+
+// A geometry whose intermediate buffer alone busts the budget is not cached at
+// all, rather than being cached and immediately evicting everything else.
+func TestScalerCacheSkipsOversizedGeometry(t *testing.T) {
+	t.Cleanup(func() { imageproc.SetScalerCacheBytes(imageproc.DefaultScalerCacheBytes) })
+	imageproc.SetScalerCacheBytes(0)
+	imageproc.SetScalerCacheBytes(1 << 20) // 1 MiB: smaller than any real page's buffer
+
+	raw := encodeJPEG(t, synthPage(2480, 3508, 200))
+	opts := imageproc.DefaultOptions()
+	opts.MaxBytes = 0
+	if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); err != nil {
+		t.Fatal(err)
+	}
+	if held := imageproc.ScalerCacheBytes(); held != 0 {
+		t.Errorf("cache retains %d bytes for a geometry larger than the whole budget", held)
+	}
+}
+
+// Caching off means retaining nothing, and still producing the same page.
+func TestScalerCacheDisabled(t *testing.T) {
+	t.Cleanup(func() { imageproc.SetScalerCacheBytes(imageproc.DefaultScalerCacheBytes) })
+	imageproc.SetScalerCacheBytes(0)
+
+	raw := encodeJPEG(t, synthPage(1620, 2160, 200))
+	opts := imageproc.DefaultOptions()
+	res, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Width != imageproc.PanelWidth || res.Height != imageproc.PanelHeight {
+		t.Errorf("output %dx%d with caching off", res.Width, res.Height)
+	}
+	if held := imageproc.ScalerCacheBytes(); held != 0 {
+		t.Errorf("cache retains %d bytes with caching off", held)
+	}
+}
+
+// The hot geometry survives; the cold one is what goes.
+func TestScalerCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	t.Cleanup(func() { imageproc.SetScalerCacheBytes(imageproc.DefaultScalerCacheBytes) })
+	imageproc.SetScalerCacheBytes(0)
+	// Two small geometries fit; a third forces one out. (Entry cost counts the
+	// per-P pool copies, so "small" is still tens of MB.)
+	imageproc.SetScalerCacheBytes(160 << 20)
+
+	run := func(w, h int) {
+		t.Helper()
+		raw := encodeJPEG(t, synthPage(w, h, 200))
+		opts := imageproc.DefaultOptions()
+		opts.MaxBytes = 0
+		if _, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(raw), opts); err != nil {
+			t.Fatalf("%dx%d: %v", w, h, err)
+		}
+	}
+
+	run(600, 800)
+	run(640, 850)
+	first := imageproc.ScalerCacheBytes()
+	run(600, 800) // touch the first again, making the second the coldest
+	run(700, 900)
+
+	if held := imageproc.ScalerCacheBytes(); held > 160<<20 {
+		t.Errorf("cache retains %d bytes, over budget", held)
+	}
+	if first == 0 {
+		t.Fatal("nothing was cached; the test proves nothing")
+	}
+}
