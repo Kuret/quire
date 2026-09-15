@@ -335,6 +335,27 @@ can report a capability the user will not have on anything they actually read.
 
 ---
 
+## Suggested display names
+
+PLAN §7.2, 2026-09-15. `Theme.SuggestedName() string` returns the display name
+a source of that shape should carry by default; `""` means "no opinion" and
+§7.5 stage 6 falls back to the page `<title>`, then to the host.
+
+| Theme | Suggestion | Why |
+|---|---|---|
+| `mangadex` | `"MangaDex"` | One site, which knows what it is called. Without this, adding `https://api.mangadex.org` produced a source named **"MangaDex API documentation"** — exactly what that page's `<title>` says, and meaningless in a source list. |
+| `madara`, `mangathemesia`, `generic` | `""` | Families of hundreds of independently branded sites, or an escape hatch pointed at a site nobody has themed. For these the page title genuinely *is* the best available default; inventing a name would be worse than the title ever is. |
+
+**There is no title cleaning, here or anywhere.** Stripping `" — Home"`,
+`" | Official Site"` or `" API documentation"` is an unwinnable game that
+eventually mangles a site whose real name ends in one of those. A theme either
+knows its site's name outright or has no opinion, and the suggestion is used
+verbatim — there is a test for that. Everything the suggestion does not cover
+is a user-facing rename, which is the other half of the fix and lives in the
+UI.
+
+---
+
 ## Per-theme notes
 
 ### `madara` — WordPress `wp-manga` plugin
@@ -845,8 +866,9 @@ actually seen, and say where it was seen in general terms — never name the sit
 
 ## Writing theme #6 — the short version
 
-1. New package under `backend/theme/`. Implement `theme.Theme` (seven methods
-   as of 2026-09-15 — the six of PLAN §7.2 plus `AllowedHosts`) and
+1. New package under `backend/theme/`. Implement `theme.Theme` (eight methods
+   as of 2026-09-15 — the six of PLAN §7.2 plus `AllowedHosts` and
+   `SuggestedName`) and
    `theme.OverrideValidator`.
 2. Declare a `theme.OverrideSpec`. Every key needs a `Default` and a `Why` —
    there is a test that fails if either is missing, because a key whose reason
@@ -860,21 +882,25 @@ actually seen, and say where it was seen in general terms — never name the sit
 5. Add the theme to `backend/theme/fingerprint_test.go`. It is not enough that
    it recognises its own pages — every other theme must *fail* to. Add a
    negative signal if two families share too much surface.
-6. Add a section here: fingerprint signals with weights, endpoint table,
+6. Implement `SuggestedName()`. `""` is the right answer for a site family —
+   the page title is a better default than anything the theme could invent —
+   and a real name is right only for a theme that drives exactly one site.
+   Never clean a title.
+7. Add a section here: fingerprint signals with weights, endpoint table,
    overrides table with a "why" column, and the quirks that cost you an hour.
-7. Return chapters in **ascending reading order** (PLAN §7.2). Call
+8. Return chapters in **ascending reading order** (PLAN §7.2). Call
    `theme.SortAndMark` and make the fixture adversarial — if it is already
    ascending, the test proves nothing. See the chapter-ordering section above
    for what to do when the order is genuinely unknowable.
-8. Implement `AllowedHosts()`. **nil is the right answer for a site family**
+9. Implement `AllowedHosts()`. **nil is the right answer for a site family**
    — hundreds of independent installs have no CDN in common, and naming one
    widens the redirect boundary for all of them. Return hosts only if the
    theme's own images genuinely live on another registrable domain, and check
    the fixtures rather than assuming.
-9. If the theme needs a request that robots disallows, read §7.4's
+10. If the theme needs a request that robots disallows, read §7.4's
    discovery/retrieval decision and the `mangadex` section before reaching for
    `GetRetrieval`. The bar is "the user named this thing", not "this request is
    inconvenient to lose".
-10. If it is a JSON API rather than a markup family, say so at the top of its
+11. If it is a JSON API rather than a markup family, say so at the top of its
    section the way `mangadex` does, and gate the fingerprint on something that
    cannot be worn by accident. A JSON envelope is not a fingerprint.
