@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,4 +174,80 @@ func ids(srcs []*theme.Source) []string {
 		out = append(out, s.ID)
 	}
 	return out
+}
+
+// Renaming exists because the name is guessed from the site's <title> and that
+// guess will be wrong for some site forever: the first real use produced
+// "MangaDex API documentation" from an API root.
+func TestRenameChangesTheDisplayNameOnly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := store.Add(source("MangaDex API documentation", "https://api.mangadex.invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := src.ID
+
+	if err := store.Rename(id, "MangaDex"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := store.Get(id)
+	if !ok {
+		t.Fatal("the source disappeared")
+	}
+	if got.Name != "MangaDex" {
+		t.Errorf("name %q", got.Name)
+	}
+	// The ID keys everything already downloaded (library.Key). Re-deriving it
+	// from the new name would orphan the user's books.
+	if got.ID != id {
+		t.Errorf("the ID changed from %q to %q", id, got.ID)
+	}
+
+	reopened, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, ok := reopened.Get(id)
+	if !ok || again.Name != "MangaDex" {
+		t.Errorf("the rename did not survive a reopen: %+v", again)
+	}
+}
+
+func TestRenameRejectsAnEmptyOrOverlongName(t *testing.T) {
+	store, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := store.Add(source("Example", "https://example.invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"", "   ", strings.Repeat("x", state.NameMaxLen+1)} {
+		if err := store.Rename(src.ID, name); !errors.Is(err, state.ErrBadName) {
+			t.Errorf("Rename(%q) = %v, want ErrBadName", name, err)
+		}
+	}
+	if got, _ := store.Get(src.ID); got.Name != "Example" {
+		t.Errorf("a rejected rename changed the name to %q", got.Name)
+	}
+	// The boundary itself is allowed: the schema says 1-120.
+	if err := store.Rename(src.ID, strings.Repeat("x", state.NameMaxLen)); err != nil {
+		t.Errorf("a %d-character name was rejected: %v", state.NameMaxLen, err)
+	}
+}
+
+func TestRenameAnUnknownSourceIsNotFound(t *testing.T) {
+	store, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Rename("nope", "Whatever"); !errors.Is(err, state.ErrNotFound) {
+		t.Errorf("Rename = %v, want ErrNotFound", err)
+	}
 }

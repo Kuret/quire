@@ -160,6 +160,45 @@ func (s *Store) SetEnabled(id string, on bool) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// NameMaxLen is schema/source.schema.json's maxLength for a source name. It is
+// mirrored here so a rename is refused with a sentence rather than by failing
+// schema validation somewhere further down.
+const NameMaxLen = 120
+
+// ErrBadName means the requested name is empty or too long.
+var ErrBadName = errors.New("state: a source needs a name of 1 to 120 characters")
+
+// Rename changes a source's display name (PLAN §7.1 type 19).
+//
+// It exists because the name is guessed from the site's <title> at probe time
+// and that guess will be wrong for some site forever — the first real use
+// produced "MangaDex API documentation" from an API root. The schema has always
+// described the name as "then user-editable"; this is what makes that true.
+//
+// The ID is deliberately *not* re-derived from the new name. It keys everything
+// already downloaded (library.Key), so renaming a source must not orphan the
+// user's books.
+func (s *Store) Rename(id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > NameMaxLen {
+		return ErrBadName
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			if src.Name == name {
+				return nil
+			}
+			src.Name = name
+			s.sort()
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // SetProbe records a new probe result against a source (PLAN §6 M7 re-probes an
 // existing source, and the UI shows the last result per source).
 func (s *Store) SetProbe(id string, r *theme.ProbeResult) error {
