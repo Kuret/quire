@@ -1031,8 +1031,13 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    does it exist **in 3.25.1.1 specifically**? Can it take a page offset? If the
    hook was written against a newer firmware, what is the 3.25.1.1 equivalent?
    *(Blocks M6. See §7.8.)*
-3. Exact panel resolution, and the MediaBox the stock reader expects for a
-   full-bleed page. *(Blocks M4 sizing.)*
+3. ~~Exact panel resolution, and the MediaBox the stock reader expects for a
+   full-bleed page.~~ **ANSWERED 2026-09-15 — `docs/DEVICE-NOTES.md` §4.**
+   **`MediaBox [0 0 514 685]`**, i.e. 1620×2160 px at **≈227 DPI** (not the
+   assumed 229). Measured, not inferred: had xochitl render one of its own
+   native notebooks to PDF via `GET /download/<uuid>/placeholder` and read the
+   box out of the output, so it is by construction the geometry the stock
+   reader does not letterbox. M4 emits exactly this box.
 4. Do uploaded documents sync to reMarkable cloud, and does that matter for
    storage quota or for a Connect subscription? *(Affects M5 UX.)*
 5. Does AppLoad provide an on-screen keyboard, or must we build one?

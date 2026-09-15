@@ -188,10 +188,40 @@ $ cat /sys/class/drm/card0-LVDS-1/modes   → 405x1084
 packs 4 greyscale pixels per LVDS pixel (405 × 4 = 1620). Consistent with the
 expected 1620×2160, but **not yet proof**.
 
-> **PLAN Q3 remains OPEN.** Confirm 1620×2160 the way the plan suggests —
-> read the MediaBox of a PDF that xochitl itself produced — before M4 sizing.
-> Note the `.content` default below advertises 1404×1872, which is the **rM2**
-> geometry and must not be taken as the Paper Pro panel size.
+### ✅ Q3 ANSWERED — use `MediaBox [0 0 514 685]`
+
+Settled the way the plan prescribes: had xochitl render one of its own native
+notebooks to PDF and read the MediaBox out of the result.
+
+```sh
+# with WebInterfaceEnabled=true, from the host over USB
+curl -o out.pdf "http://10.11.99.1/download/<notebook-uuid>/placeholder"
+# → %PDF-1.7,  /MediaBox [0 0 514 685]
+```
+
+| | value |
+|---|---|
+| **MediaBox xochitl itself emits** | **`[0 0 514 685]`** (514 × 685 pt) |
+| aspect | 0.7504 (3:4) |
+| implied pixel size | **1620 × 2160** |
+| implied DPI | **≈ 227** (`1620 × 72 / 514 = 226.9`; `2160 × 72 / 685 = 227.0`) |
+
+**M4 should emit `MediaBox [0 0 514 685]` and resize pages to 1620 × 2160.**
+That is not a guess about what the reader "probably" wants — it is the exact
+box xochitl's own renderer produces for a full-bleed native page, so it cannot
+letterbox.
+
+> PLAN §3.2 assumed "~229 DPI". The measured figure is **227**. The difference
+> is immaterial for image sizing but matters if anything ever computes a
+> physical size — use 227.
+
+A second `MediaBox [0 0 100 100]` also appears in the same file; that is a
+placeholder/template page, not the content geometry. Take the 514 × 685 one.
+
+> The `.content` default below advertises 1404×1872 on **every** document on
+> this device (all 44 of them, including PDFs and epubs). That is a fixed rM2-era
+> constant xochitl writes regardless of the actual panel — **it is not the panel
+> size and not a per-document value.** Do not read anything into it.
 
 ---
 
