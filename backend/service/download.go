@@ -310,52 +310,92 @@ func (s *Service) runDownload(ctx context.Context, out Sender, req downloadReque
 	}
 	vol.Chapters = pages
 
-	step(phaseAssembling, fmt.Sprintf("Building the PDF of %s…", vol.Title))
-	manifest, err := assemble.Assemble(ctx, dir, vol.Volume, assemble.DefaultOptions())
+	// xochitl refuses a multipart body of 100 MB or more, and usually by
+	// resetting the connection most of the way through rather than answering
+	// (PLAN §6 M4). So the budget decides the final shape of the volume, after
+	// the pages are on disk and their real sizes are known.
+	parts, err := splitToBudget(vol, s.uploadBudget())
 	if err != nil {
-		fail("Quire could not build the PDF: %s", plain(err))
+		fail("Quire could not work out how large %s is: %s", vol.Title, plain(err))
 		return
 	}
-	p.PagesDone, p.PagesTotal = manifest.PageCount, manifest.PageCount
-	p.BytesStored = stats.BytesStored
+	if len(parts) > 1 {
+		p.Note = strings.TrimSpace(p.Note + " " + fmt.Sprintf(
+			"%s is too big for the reMarkable to accept in one file, so Quire saved it as %d parts.",
+			vol.Title, len(parts)))
+	}
 
-	step(phaseStoring, "Putting it in your reMarkable library…")
-	res, place, err := s.storeVolume(ctx, vol, dir, manifest)
-	if err != nil {
-		fail("%s", plain(err))
-		return
-	}
-	p.DocumentUUID = res.DocumentUUID
-	p.FolderPath = place.Path
-	p.Note = strings.TrimSpace(strings.Join([]string{p.Note, place.Remedy()}, " "))
+	var (
+		lastResult library.Result
+		lastPlace  library.Placement
+		lastName   string
+		totalPages int
+	)
+	for _, part := range parts {
+		label := part.Title
+		if len(parts) > 1 {
+			label = fmt.Sprintf("%s (%d of %d)", part.Title, part.Part, part.Parts)
+		}
 
-	rec := library.Record{
-		Key:          library.Key{Source: src.ID, Series: req.SeriesID, Volume: vol.Label},
-		DocumentUUID: res.DocumentUUID,
-		FolderUUID:   res.FolderUUID,
-		FolderPath:   place.Path,
-		VisibleName:  res.VisibleName,
-		PDF:          assemble.PDFPath(dir, vol.Slug()),
-		Pages:        manifest.PageCount,
-		Bytes:        manifest.Bytes,
-		StoredAt:     time.Now(),
+		step(phaseAssembling, fmt.Sprintf("Building the PDF of %s…", label))
+		manifest, err := assemble.Assemble(ctx, dir, part.Volume, assemble.DefaultOptions())
+		if err != nil {
+			fail("Quire could not build the PDF: %s", plain(err))
+			return
+		}
+		totalPages += manifest.PageCount
+		p.PagesDone, p.PagesTotal = totalPages, totalPages
+		p.BytesStored = stats.BytesStored
+
+		step(phaseStoring, fmt.Sprintf("Putting %s in your reMarkable library…", label))
+		res, place, err := s.storeVolume(ctx, part, dir, manifest)
+		if err != nil {
+			fail("%s", plain(err))
+			return
+		}
+		lastResult, lastPlace, lastName = res, place, res.VisibleName
+
+		rec := library.Record{
+			Key:          library.Key{Source: src.ID, Series: req.SeriesID, Volume: part.Label},
+			DocumentUUID: res.DocumentUUID,
+			FolderUUID:   res.FolderUUID,
+			FolderPath:   place.Path,
+			VisibleName:  res.VisibleName,
+			PDF:          assemble.PDFPath(dir, part.Slug()),
+			Pages:        manifest.PageCount,
+			Bytes:        manifest.Bytes,
+			Chapters:     chapterIDs(part.Volume),
+			Part:         part.Part,
+			Parts:        part.Parts,
+			StoredAt:     time.Now(),
+		}
+		if err := s.libStore.Put(rec); err != nil {
+			// The document is on the tablet either way. Losing the UUID only
+			// costs M6's "Read" button, so say so rather than calling the
+			// whole download a failure.
+			s.log.Error("could not remember the document UUID", "uuid", res.DocumentUUID, "err", err)
+			p.Note = strings.TrimSpace(p.Note +
+				" Quire could not remember this volume, so opening it from Quire may not work.")
+		}
+		s.log.Info("volume stored", "document", res.DocumentUUID, "folder", res.FolderUUID,
+			"name", res.VisibleName, "pages", manifest.PageCount,
+			"part", part.Part, "parts", part.Parts)
 	}
-	if err := s.libStore.Put(rec); err != nil {
-		// The document is on the tablet either way. Losing the UUID only
-		// costs M6's "Read" button, so say so rather than calling the whole
-		// download a failure.
-		s.log.Error("could not remember the document UUID", "uuid", res.DocumentUUID, "err", err)
-		p.Note = strings.TrimSpace(p.Note + " Quire could not remember this volume, so opening it from Quire may not work.")
-	}
+
+	p.DocumentUUID = lastResult.DocumentUUID
+	p.FolderPath = lastPlace.Path
+	p.Note = strings.TrimSpace(p.Note + " " + lastPlace.Remedy())
 
 	where := "My Files"
-	if len(place.Path) > 0 {
-		where += " → " + strings.Join(place.Path, " → ")
+	if len(lastPlace.Path) > 0 {
+		where += " → " + strings.Join(lastPlace.Path, " → ")
 	}
 	p.Phase = phaseDone
-	p.Message = fmt.Sprintf("%s is in %s.", res.VisibleName, where)
-	s.log.Info("volume stored", "document", res.DocumentUUID, "folder", res.FolderUUID,
-		"name", res.VisibleName, "pages", manifest.PageCount)
+	if len(parts) > 1 {
+		p.Message = fmt.Sprintf("%s is in %s, in %d parts.", vol.Title, where, len(parts))
+	} else {
+		p.Message = fmt.Sprintf("%s is in %s.", lastName, where)
+	}
 	_ = send(out, appload.MessageDownloadProgress, p)
 }
 
@@ -484,6 +524,12 @@ type volumePlan struct {
 	// PerChapter is set when the theme could not establish a reading order, so
 	// this "volume" is a single chapter saved on its own.
 	PerChapter bool
+
+	// Part and Parts are 1-based and both 0 when the volume was not split.
+	// A volume splits when it would exceed xochitl's upload cap; see
+	// splitToBudget.
+	Part  int
+	Parts int
 }
 
 // UnorderedSeriesNote explains a one-PDF-per-chapter download.
@@ -540,6 +586,176 @@ func groupVolumes(seriesTitle string, chapters []theme.Chapter) []volumePlan {
 		})
 	}
 	return plans
+}
+
+// splitToBudget splits a downloaded volume into parts that each fit inside
+// xochitl's upload cap, and returns the volume unchanged when it already does.
+//
+// **Between chapters first, mid-chapter only as a last resort.** A part
+// boundary inside a chapter is a seam the reader trips over: you finish a page,
+// the chapter is not over, and the rest is in a different document. Between
+// chapters the seam lands where the source already put one. Evenly-sized parts
+// are worth less than that, and the measured data says the cost is small —
+// M4 measured ~307 KiB/page, so the 90 MB budget is about 300 pages while a
+// chapter is typically 20–40. Lopsidedness is bounded by one chapter.
+//
+// A single chapter that is itself over budget cannot be helped that way, and
+// refusing would leave the user with nothing, so that one chapter is split
+// across parts. It takes roughly a 300-page chapter to get there.
+func splitToBudget(vol volumePlan, budget int64) ([]volumePlan, error) {
+	sizes := make([]int64, len(vol.Chapters))
+	var total int64
+	for i, ch := range vol.Chapters {
+		n, err := chapterBytes(ch)
+		if err != nil {
+			return nil, err
+		}
+		sizes[i], total = n, total+n
+	}
+	if budget <= 0 || total <= budget {
+		return []volumePlan{vol}, nil
+	}
+
+	var groups [][]assemble.Chapter
+	var current []assemble.Chapter
+	var currentBytes int64
+
+	flush := func() {
+		if len(current) > 0 {
+			groups = append(groups, current)
+			current, currentBytes = nil, 0
+		}
+	}
+
+	for i, ch := range vol.Chapters {
+		if sizes[i] > budget {
+			// This one chapter does not fit on its own. Everything queued so
+			// far becomes a part, then the chapter is cut into page runs.
+			flush()
+			pieces, err := splitChapter(ch, budget)
+			if err != nil {
+				return nil, err
+			}
+			for _, piece := range pieces {
+				groups = append(groups, []assemble.Chapter{piece})
+			}
+			continue
+		}
+		if currentBytes+sizes[i] > budget {
+			flush()
+		}
+		current = append(current, ch)
+		currentBytes += sizes[i]
+	}
+	flush()
+
+	parts := make([]volumePlan, 0, len(groups))
+	for i, g := range groups {
+		part := vol
+		part.Volume.Chapters = g
+		part.Part, part.Parts = i+1, len(groups)
+		// The label is the store key and the PDF's filename stem, so each part
+		// needs its own. It is also what documentName turns into the name on
+		// the tablet, which is why it reads the way PLAN §6 M4 asks:
+		// "Vol 3 (part 1 of 2)".
+		part.Volume.Label = fmt.Sprintf("%s (part %d of %d)", vol.Label, i+1, len(groups))
+		part.Volume.Title = fmt.Sprintf("%s (part %d of %d)", vol.Title, i+1, len(groups))
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
+// splitChapter cuts one over-budget chapter into runs of pages that fit.
+//
+// The pieces keep the chapter's ID: it is the key of the chapter → (PDF, page
+// offset) map, and a chapter that genuinely spans two documents should be
+// findable from both. The map resolves to the first piece, which is where a
+// reader opening that chapter wants to start.
+func splitChapter(ch assemble.Chapter, budget int64) ([]assemble.Chapter, error) {
+	var (
+		pieces  []assemble.Chapter
+		current []assemble.Page
+		size    int64
+	)
+	for _, page := range ch.Pages {
+		n, err := fileBytes(page.Path)
+		if err != nil {
+			return nil, err
+		}
+		if len(current) > 0 && size+n > budget {
+			pieces = append(pieces, chapterPiece(ch, current, len(pieces)))
+			current, size = nil, 0
+		}
+		current = append(current, page)
+		size += n
+	}
+	if len(current) > 0 {
+		pieces = append(pieces, chapterPiece(ch, current, len(pieces)))
+	}
+	return pieces, nil
+}
+
+func chapterPiece(ch assemble.Chapter, pages []assemble.Page, index int) assemble.Chapter {
+	piece := ch
+	// Page.Index is the 0-based position *within its chapter*, and assemble
+	// rejects a chapter whose pages do not start at 0 and run in order. Each
+	// piece is a chapter in its own PDF, so each is renumbered from 0; the file
+	// paths are what carry the real reading order.
+	piece.Pages = make([]assemble.Page, len(pages))
+	for i, pg := range pages {
+		pg.Index = i
+		piece.Pages[i] = pg
+	}
+	if index > 0 {
+		piece.Title = ch.Title + " (continued)"
+	}
+	return piece
+}
+
+func chapterBytes(ch assemble.Chapter) (int64, error) {
+	var total int64
+	for _, page := range ch.Pages {
+		n, err := fileBytes(page.Path)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	return total, nil
+}
+
+func fileBytes(path string) (int64, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("measuring %s: %w", path, err)
+	}
+	return st.Size(), nil
+}
+
+// chapterIDs lists a volume's chapters in reading order, without repeating one
+// that was cut across pieces.
+func chapterIDs(vol assemble.Volume) []string {
+	ids := make([]string, 0, len(vol.Chapters))
+	seen := map[string]bool{}
+	for _, ch := range vol.Chapters {
+		if seen[ch.ID] {
+			continue
+		}
+		seen[ch.ID] = true
+		ids = append(ids, ch.ID)
+	}
+	return ids
+}
+
+// uploadBudget is the byte budget one document must fit in.
+//
+// It is deliberately not the download budget: that one fails a run that is
+// taking too much disk, this one only decides where a volume is cut.
+func (s *Service) uploadBudget() int64 {
+	if s.uploadBudgetBytes > 0 {
+		return s.uploadBudgetBytes
+	}
+	return library.UploadBudgetBytes
 }
 
 // perChapterVolumes is the fallback for a series whose reading order the theme

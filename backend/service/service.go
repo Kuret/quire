@@ -56,6 +56,11 @@ type Options struct {
 	// backend/download documents.
 	DownloadOptions download.Options
 
+	// UploadBudgetBytes overrides the size one document may reach before a
+	// volume is split into parts. Zero means library.UploadBudgetBytes, which
+	// is the real device limit with margin. Tests set it small.
+	UploadBudgetBytes int64
+
 	// Now is injectable for tests.
 	Now func() time.Time
 
@@ -73,10 +78,11 @@ type Service struct {
 	now    func() time.Time
 	guard  prober.AddressGuard
 
-	library         *library.Library
-	libStore        *library.Store
-	downloadDir     string
-	downloadOptions download.Options
+	library           *library.Library
+	libStore          *library.Store
+	downloadDir       string
+	downloadOptions   download.Options
+	uploadBudgetBytes int64
 
 	// dlQueue serialises downloads; see enqueueDownload for why there is
 	// exactly one worker behind it.
@@ -107,6 +113,8 @@ func New(opts Options) *Service {
 		libStore:        opts.LibraryStore,
 		downloadDir:     opts.DownloadDir,
 		downloadOptions: opts.DownloadOptions,
+
+		uploadBudgetBytes: opts.UploadBudgetBytes,
 	}
 	if s.log == nil {
 		s.log = slog.Default()

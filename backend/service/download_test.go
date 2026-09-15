@@ -3,6 +3,7 @@ package service_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -130,7 +131,8 @@ func newDownloadService(t *testing.T) (*service.Service, *state.Store, *library.
 	return newDownloadServiceWith(t, downloadRoutes(t))
 }
 
-func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route) (
+func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
+	tweaks ...func(*service.Options)) (
 	*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
 	t.Helper()
 
@@ -159,7 +161,7 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route) (
 		t.Fatal(err)
 	}
 
-	svc := service.New(service.Options{
+	opts := service.Options{
 		Store:      store,
 		Registry:   reg,
 		Fetcher:    f,
@@ -173,8 +175,11 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route) (
 		}),
 		LibraryStore: libStore,
 		DownloadDir:  filepath.Join(dir, "downloads"),
-	})
-	return svc, store, libStore, fake, &recorder{}
+	}
+	for _, tweak := range tweaks {
+		tweak(&opts)
+	}
+	return service.New(opts), store, libStore, fake, &recorder{}
 }
 
 func addSource(t *testing.T, store *state.Store) {
@@ -541,5 +546,83 @@ func TestAnUnorderedSeriesFallsBackToOnePDFPerChapter(t *testing.T) {
 	}
 	if n := len(libStore.List()); n != 1 {
 		t.Errorf("%d records stored", n)
+	}
+}
+
+// The whole reason splitToBudget exists: xochitl refuses a body of 100 MB or
+// more, usually by resetting the connection most of the way through. A volume
+// over budget must arrive as several documents rather than as one failure.
+func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
+	svc, store, libStore, fake, rec := newDownloadServiceWith(t, downloadRoutes(t),
+		func(o *service.Options) {
+			// The fixture volume is 20 small pages; a budget below that
+			// forces the split without downloading anything large.
+			o.UploadBudgetBytes = 4096
+		})
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	done := waitForPhase(t, rec, "done")
+
+	fake.mu.Lock()
+	names := append([]string(nil), fake.names...)
+	fake.mu.Unlock()
+
+	if len(names) < 2 {
+		t.Fatalf("uploaded %v, want the volume split into parts", names)
+	}
+	for i, name := range names {
+		want := fmt.Sprintf("(part %d of %d)", i+1, len(names))
+		if !strings.Contains(name, want) {
+			t.Errorf("part %d is called %q, want it to carry %q", i+1, name, want)
+		}
+	}
+	if note, _ := done["note"].(string); !strings.Contains(note, "parts") {
+		t.Errorf("note %q does not explain why there are several files", note)
+	}
+
+	// Every part is remembered separately, and between them they account for
+	// every chapter — the chapter map is M6's input and a split must not lose
+	// any of it.
+	recs := libStore.List()
+	if len(recs) != len(names) {
+		t.Fatalf("%d records for %d documents", len(recs), len(names))
+	}
+	chapters := map[string]bool{}
+	for _, r := range recs {
+		if r.Parts != len(names) {
+			t.Errorf("record %q says %d parts", r.Volume, r.Parts)
+		}
+		if len(r.Chapters) == 0 {
+			t.Errorf("record %q recorded no chapters", r.Volume)
+		}
+		for _, id := range r.Chapters {
+			chapters[id] = true
+		}
+	}
+	if len(chapters) != 4 {
+		t.Errorf("the parts between them hold %d chapters, want all 4", len(chapters))
+	}
+
+	// And the chapter list still offers Read on every one of them.
+	fresh := &recorder{}
+	handle(t, svc, fresh, appload.MessageSeriesDetail,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`"}`)
+	var detail struct {
+		Chapters []struct {
+			ID           string `json:"id"`
+			DocumentUUID string `json:"documentUuid"`
+		} `json:"chapters"`
+	}
+	if err := json.Unmarshal(fresh.wait(t, appload.MessageSeriesDetailResult), &detail); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range detail.Chapters {
+		if c.DocumentUUID == "" {
+			t.Errorf("chapter %s lost its document when the volume was split", c.ID)
+		}
 	}
 }
