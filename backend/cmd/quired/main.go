@@ -239,10 +239,27 @@ func formatUptime(secs float64) string {
 // use it; on the device the default is right.
 const dataDirEnv = "QUIRE_DATA_DIR"
 
-// dataDir is <app root>/data: AppLoad launches backend/entry from inside the
-// app directory, which is under /home/root and is writable (docs/DEVICE-NOTES.md).
-// Keeping state beside the app means an uninstall takes the state with it, and
-// nothing of Quire's ever lands in the user's document tree.
+// deviceDataDir is where Quire keeps state on the tablet.
+//
+// It is deliberately NOT inside the app directory. It used to be
+// (<app root>/data), on the reasoning that an uninstall should take the state
+// with it — but build/install-device.sh does `rm -rf "$APP_DIR"` before
+// unpacking, so every *reinstall* silently destroyed the user's configured
+// sources, their library records, the cover cache and any part-finished
+// download. That is exactly what happened on 2026-09-15: a redeploy wiped a
+// source the user had just added, and it looked like the app had forgotten.
+//
+// User data does not live where the installer writes. An uninstall leaving
+// configuration behind is normal and recoverable; an upgrade eating it is not.
+//
+// Hardcoded rather than derived from $HOME or the XDG variables because
+// **xochitl's environment sets none of them** — a backend launched by AppLoad
+// inherits only USER. Deriving a path from an unset variable would have put the
+// state somewhere surprising, or in "/.local/share/quire".
+const deviceDataDir = "/home/root/.local/share/quire"
+
+// dataDir resolves where state lives: the override first (the emulator and the
+// tests use it), then the device path, then a host fallback for development.
 func dataDir() (string, error) {
 	if dir := os.Getenv(dataDirEnv); dir != "" {
 		return dir, nil
@@ -251,6 +268,12 @@ func dataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate the backend binary: %w", err)
 	}
+	// On the device the binary is unpacked under /home/root/xovi/exthome/appload.
+	if strings.HasPrefix(exe, "/home/root/") {
+		return deviceDataDir, nil
+	}
+	// Host: keep it beside the bundle so a developer's tree stays self-contained
+	// and several checkouts do not share one state file.
 	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "data"), nil
 }
 

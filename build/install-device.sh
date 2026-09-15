@@ -42,6 +42,10 @@ say "deploy  $APP_DIR"
 # COPYFILE_DISABLE=1 stops macOS tar emitting AppleDouble "._*" resource-fork
 # entries. Without it every file ships with a 163-byte "._name" twin, which
 # clutters the app directory and gives AppLoad junk to scan.
+# The rm -rf below replaces the whole app bundle, so NOTHING the user cares
+# about may live under $APP_DIR. State lives at /home/root/.local/share/quire
+# (see deviceDataDir in backend/cmd/quired/main.go) precisely because this line
+# once ate a user's configured sources on a routine redeploy.
 COPYFILE_DISABLE=1 tar -C "$BUNDLE" --no-xattrs -cf - manifest.json icon.png resources.rcc backend \
     | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/entry'"
 
