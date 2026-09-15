@@ -188,5 +188,14 @@ func (r *Registry) Validate(s *Source) error {
 	} else if len(s.Overrides) > 0 {
 		return fmt.Errorf("theme: source %q: theme %q accepts no overrides, got %d", s.ID, s.Theme, len(s.Overrides))
 	}
+
+	// Last, anything only the theme itself can check — the generic theme's
+	// selector vocabulary and script, which must be rejected when the source
+	// is added rather than when a chapter is opened.
+	if v, ok := t.(SourceValidator); ok {
+		if err := v.Validate(s); err != nil {
+			return fmt.Errorf("theme: source %q: %w", s.ID, err)
+		}
+	}
 	return nil
 }

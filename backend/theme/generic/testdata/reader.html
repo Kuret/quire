@@ -1,0 +1,36 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Two readers in one file, because the generic theme has two ways to read a
+  page list and both need a fixture:
+
+    - .frame img is reachable by a plain selector
+    - the window.__PAGES__ blob below is not: the URLs are stored as a
+      base64-encoded JSON array, which no CSS selector can reach. That is the
+      one situation PLAN §6 M2's goja hook exists for.
+
+  The encoded array decodes to the same five URLs as .frame img would give if
+  it were complete, so a test can assert the script path and the selector path
+  agree.
+
+  Why synthetic: PLAN §1.3 forbids source URLs in this repository. Host is
+  example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper 4 &#8211; Fourth Example</title>
+</head>
+<body>
+<main>
+  <div class="viewer">
+    <div class="frame"><img src="https://cdn.example.invalid/f/lantern/4/1.jpg" alt=""></div>
+    <div class="frame"><img src="https://cdn.example.invalid/f/lantern/4/2.jpg" alt=""></div>
+  </div>
+</main>
+<script>
+window.__PAGES__ = "WyJodHRwczovL2Nkbi5leGFtcGxlLmludmFsaWQvZi9sYW50ZXJuLzQvMS5qcGciLCJodHRwczovL2Nkbi5leGFtcGxlLmludmFsaWQvZi9sYW50ZXJuLzQvMi5qcGciLCJodHRwczovL2Nkbi5leGFtcGxlLmludmFsaWQvZi9sYW50ZXJuLzQvMy5qcGciLCJodHRwczovL2Nkbi5leGFtcGxlLmludmFsaWQvZi9sYW50ZXJuLzQvNC5qcGciLCJodHRwczovL2Nkbi5leGFtcGxlLmludmFsaWQvZi9sYW50ZXJuLzQvNS5qcGciXQ==";
+</script>
+</body>
+</html>

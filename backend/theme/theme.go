@@ -50,6 +50,14 @@ type OverrideValidator interface {
 	OverrideKeys() []OverrideDoc
 }
 
+// SourceValidator is implemented by a theme that needs to check more of a
+// source than the registry can see — in practice the generic escape hatch,
+// which has a selector vocabulary and a script to compile. Registry.Validate
+// calls it last, after its own checks have passed.
+type SourceValidator interface {
+	Validate(s *Source) error
+}
+
 // Fetcher is the slice of fetch.Client a theme uses. Themes depend on this
 // interface rather than the concrete client so tests can serve committed
 // fixtures without a network, a server or a loopback exemption.
