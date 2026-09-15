@@ -46,6 +46,20 @@ type Route struct {
 	Body string
 	// Status defaults to 200.
 	Status int
+
+	// Header is merged into the response headers. The probe's PLAN §7.5 stage 3
+	// reads Set-Cookie and CDN edge headers, so a fixture has to be able to set
+	// them; themes themselves only ever look at the body.
+	Header http.Header
+
+	// FinalURL, when set, is the URL the response claims to have come from.
+	// It is how a fixture reproduces a redirect, which PLAN §7.5 stage 2 has to
+	// notice and ask the user about.
+	FinalURL string
+
+	// Err, when set, is returned instead of a response. Fixtures use it for the
+	// failures that have no body at all — a refused robots.txt, a dead host.
+	Err error
 }
 
 // Fetcher is an offline theme.Fetcher backed by committed fixtures.
@@ -123,6 +137,9 @@ func (f *Fetcher) answer(ctx context.Context, method, rawurl string, form url.Va
 		if !ok {
 			continue
 		}
+		if route.Err != nil {
+			return nil, route.Err
+		}
 		body := route.Body
 		if route.File != "" {
 			b, err := os.ReadFile(filepath.Join(f.dir, route.File))
@@ -135,11 +152,23 @@ func (f *Fetcher) answer(ctx context.Context, method, rawurl string, form url.Va
 		if status == 0 {
 			status = http.StatusOK
 		}
+		hdr := http.Header{"Content-Type": []string{"text/html; charset=utf-8"}}
+		for k, vs := range route.Header {
+			hdr[http.CanonicalHeaderKey(k)] = append([]string(nil), vs...)
+		}
+		final := u
+		if route.FinalURL != "" {
+			fu, err := url.Parse(route.FinalURL)
+			if err != nil {
+				f.t.Fatalf("themetest: route %q: bad FinalURL %q: %v", key, route.FinalURL, err)
+			}
+			final = fu
+		}
 		return &fetch.Response{
 			StatusCode: status,
-			Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Header:     hdr,
 			Body:       []byte(body),
-			FinalURL:   u,
+			FinalURL:   final,
 			Attempts:   1,
 		}, nil
 	}
