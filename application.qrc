@@ -1,0 +1,13 @@
+<!--
+  Quire QML resources.
+
+  AppLoad requires resources.rcc: it calls QResource::registerResource() on it
+  and there is no loose-file fallback. manifest.json's "entry" is a path
+  *inside* this resource tree, so /ui/Main.qml below must match it.
+-->
+<RCC>
+    <qresource>
+        <file>ui/Main.qml</file>
+        <file>ui/Messages.js</file>
+    </qresource>
+</RCC>
