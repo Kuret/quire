@@ -1546,3 +1546,73 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
 
 *Resolved: stock-reader performance on long image PDFs (§3.1) — a 593-page manga
 PDF is fast on device. The no-custom-reader design stands.*
+
+---
+
+## 12. Post-plan features
+
+M0–M8 are complete. These were asked for after first real use, and are recorded
+here because this file is the project's memory (§0).
+
+### 12.1 Paginated lists — scrolling is wrong for e-ink
+
+**Requested 2026-09-16: "scrolling sucks on e-ink".** It does, and this is a
+platform argument rather than a preference. A scroll is a continuous stream of
+partial refreshes, which on an e-ink panel means smearing and ghosting the whole
+way down. A page turn is **one full refresh of a settled screen** — the thing
+the display is actually good at, and what the stock reader does.
+
+Replace scrolling with page-at-a-time navigation everywhere a list appears:
+series grid, chapter list, source list, log viewer.
+
+Requirements:
+- **Page size is computed from the available height, never hardcoded.** A page
+  must hold whole rows — a half-visible row at the bottom is the scrolling
+  problem in miniature, and it invites the swipe we are trying to remove.
+- Show position honestly: "Page 3 of 12", or "Page 3" when the total is not yet
+  known (a source that paginates lazily may not have told us).
+- **Decouple display pages from source pages.** MangaDex returns 20 per request;
+  our page might hold 9 tiles. The backend fetches and caches; the UI pages
+  through what is cached and asks for more when it runs short. Do not make one
+  tap equal one HTTP request.
+- **No animation on the turn** (§6 M3 already forbids animation generally).
+- Keep the keyboard out of the way: paging controls must not move when the
+  on-screen keyboard opens.
+
+### 12.2 Watched series, and a "new since you last looked" indicator
+
+**Requested 2026-09-16.** Mark a series as watched; see at a glance when it has
+gained something since you last looked.
+
+**Track new *chapters*, not new volumes.** Volumes are *our* grouping (§6 M4
+groups chapters into a volume PDF) — the source publishes chapters, so chapters
+are the only unit with an external truth. Waiting for a volume's worth before
+saying anything would make the indicator both late and wrong whenever a source's
+volume labels are missing. Present it in plain language: "3 new chapters".
+
+**When the check runs — this is constrained, not chosen.** §6 M7 forbids holding
+wifi awake for background work and confines downloads to the foreground. The
+same reasoning applies with more force to a poll that exists purely for
+convenience:
+- Check **when the app is opened**, and on an explicit "check now".
+- **Never** on a timer, never in the background, never with a wakelock.
+- **Stagger and throttle.** Someone watching 40 series must not produce 40
+  requests in a burst on launch — the §7.4 limiter will serialise them anyway,
+  so make the UI honest about it and let results arrive incrementally rather
+  than blocking the screen.
+- Per-source cooldown, so reopening the app repeatedly does not re-poll.
+
+**Robots classification: a watch check is `discovery`.** It is automated and
+repeated, which is what §7.4's exception was written to exclude, even though the
+user did ask for the series. The exception stays narrow — that was the condition
+on granting it at all.
+
+**State:** a watched flag plus a last-seen marker per series, in the versioned
+store (§6 M7), so "new" is meaningful across restarts. Seeing the series clears
+it. A watched series whose source is removed is dropped with it.
+
+**Failure is not "new".** If a check fails — network, challenge, a theme that no
+longer matches — say so on the series rather than showing zero or, worse, a
+false badge. §6 M7's re-probe applies here: a watched series that starts
+returning nothing is evidence the source changed, and is exactly the trigger
+that machinery exists for.
