@@ -8,3 +8,6 @@ output-rmpp/
 
 # go build output
 /rccdump
+
+# AppLoad PC emulator: cloned and built locally, never vendored (PLAN §1.4)
+/.emulator/
