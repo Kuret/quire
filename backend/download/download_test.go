@@ -461,6 +461,67 @@ func TestEncodeWorkersBoundSeparately(t *testing.T) {
 	t.Logf("fetch fan-out peaked at %d, encodes at %d", stats.MaxInFlight, stats.MaxEncoding)
 }
 
+// A page over the budget is re-encoded once and counted, not fatal.
+func TestRunRequantisesOversizedPage(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 1620, 2160)}
+
+	probe := imageproc.DefaultOptions()
+	full, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(f.body), probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.Quality = 40
+	probe.MaxBytes = 0
+	low, err := imageproc.Normalise(new(bytes.Buffer), bytes.NewReader(f.body), probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := download.Options{Concurrency: 2, MinFreeBytes: -1}
+	opts.Image = imageproc.DefaultOptions()
+	opts.Image.RetryQuality = 40
+	opts.Image.MaxBytes = (full.Bytes + low.Bytes) / 2
+
+	var (
+		mu       sync.Mutex
+		reported []string
+	)
+	opts.OnRequantise = func(url string, res imageproc.Result) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !res.Requantised || res.FirstBytes <= opts.Image.MaxBytes {
+			t.Errorf("OnRequantise got %+v", res)
+		}
+		reported = append(reported, url)
+	}
+
+	q := download.New(f, opts)
+	out, stats, err := q.Run(t.Context(), dir, chapters(1, 4))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats.PagesRequantised != 4 {
+		t.Errorf("PagesRequantised = %d, want 4", stats.PagesRequantised)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reported) != 4 {
+		t.Errorf("OnRequantise called %d times, want 4", len(reported))
+	}
+	for _, ch := range out {
+		for _, p := range ch.Pages {
+			st, err := os.Stat(p.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Size() > opts.Image.MaxBytes {
+				t.Errorf("%s is %d bytes, over the %d budget", p.Path, st.Size(), opts.Image.MaxBytes)
+			}
+		}
+	}
+}
+
 func TestDefaultConcurrency(t *testing.T) {
 	if got := download.New(&stubFetcher{}, download.Options{}).Concurrency(); got != download.DefaultConcurrency {
 		t.Errorf("default concurrency = %d, want %d", got, download.DefaultConcurrency)

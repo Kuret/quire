@@ -151,6 +151,12 @@ type Options struct {
 	// OnWarn, if set, is called once when stored bytes cross WarnBytes.
 	OnWarn func(bytesStored, threshold int64)
 
+	// OnRequantise, if set, is called for each page that busted the per-page
+	// byte budget and was re-encoded at the lower quality. A source that
+	// triggers it on every page is systematically oversized and should be
+	// visible rather than silently degraded.
+	OnRequantise func(url string, res imageproc.Result)
+
 	// FreeSpace reports free bytes on the filesystem holding a directory.
 	// Defaults to a statfs call; overridable for tests.
 	FreeSpace func(dir string) (int64, error)
@@ -309,10 +315,11 @@ type run struct {
 	mu     sync.Mutex
 	warned bool
 
-	pagesDone    atomic.Int64
-	pagesFetched atomic.Int64
-	bytesStored  atomic.Int64
-	bytesFetched atomic.Int64
+	pagesDone        atomic.Int64
+	pagesFetched     atomic.Int64
+	pagesRequantised atomic.Int64
+	bytesStored      atomic.Int64
+	bytesFetched     atomic.Int64
 
 	inFlight    atomic.Int64
 	maxInFlight atomic.Int64
@@ -325,11 +332,12 @@ type run struct {
 
 func (r *run) snapshot() Progress {
 	return Progress{
-		PagesDone:    int(r.pagesDone.Load()),
-		PagesTotal:   r.total,
-		PagesFetched: int(r.pagesFetched.Load()),
-		BytesStored:  r.bytesStored.Load(),
-		BytesFetched: r.bytesFetched.Load(),
+		PagesDone:        int(r.pagesDone.Load()),
+		PagesTotal:       r.total,
+		PagesFetched:     int(r.pagesFetched.Load()),
+		PagesRequantised: int(r.pagesRequantised.Load()),
+		BytesStored:      r.bytesStored.Load(),
+		BytesFetched:     r.bytesFetched.Load(),
 	}
 }
 
@@ -470,6 +478,14 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 	res, err := r.normalise(ctx, tmp, counted)
 	if err != nil {
 		return 0, counted.n, err
+	}
+	if res.Requantised {
+		r.pagesRequantised.Add(1)
+		if r.q.opts.OnRequantise != nil {
+			r.mu.Lock()
+			r.q.opts.OnRequantise(j.url, res)
+			r.mu.Unlock()
+		}
 	}
 	if err := tmp.Sync(); err != nil {
 		return 0, counted.n, fmt.Errorf("download: sync: %w", err)
