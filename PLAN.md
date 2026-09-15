@@ -261,6 +261,14 @@ logic as possible.
 - **AppLoad wire protocol**: 8-byte header = u32 message type (arbitrary,
   developer-defined) + u32 payload length. Max payload **10485760 bytes
   (10 MiB)**. Bidirectional, same framing both ways. Receiver loops on headers.
+  **CORRECTION (verified 2026-09-15 against `rm-appload/src/protocol.h` and the
+  installed binary):** both fields are **native-endian *signed* `int32`**, not
+  `u32` — `struct PacketHeader { int type; int messageLength; }`. Negative
+  types are **reserved by the host**: `-1` terminate, `-2` new coordinator,
+  `-3` lost coordinator. Reading them unsigned misparses every system message,
+  and turns a negative length — which is a protocol error — into a ~4 GiB
+  allocation on a device with 47 MB of free rootfs. §7.1's table inherits this
+  correction.
 - **qt-resource-rebuilder**: xovi extension that loads `.qmd` (QMLDiff) and
   `.rcc` files automatically from `$XOVI_EXTHOME/qt-resource-rebuilder/`.
   Default `$XOVI_EXTHOME` is `/home/root/xovi`.
@@ -338,11 +346,21 @@ See §1.4. These are reference material, not a parts bin.
 
 ## 5. Repository layout
 
+*Corrected 2026-09-15 during M1:* AppLoad requires `manifest.json`, `icon.png`
+and a built `resources.rcc` (there is **no loose-file fallback** —
+`QResource::registerResource` simply fails), so those plus `application.qrc`
+live at the repo root and are listed below. `build/Dockerfile` was **not**
+needed and is not present: `CGO_ENABLED=0 GOOS=linux GOARCH=arm64` produces a
+working static aarch64 binary with the stock host toolchain, no Codex SDK.
+
 ```
 quire/
 ├── LICENSE                     Apache-2.0 — first commit
 ├── PLAN.md                     this file — keep it current
 ├── README.md                   incl. the §1.3 responsibility statement
+├── manifest.json               AppLoad app manifest
+├── application.qrc             → resources.rcc (rcc --binary --format-version 3)
+├── icon.png                    launcher tile
 ├── backend/
 │   ├── cmd/quired/main.go      entrypoint; argv[1] = AppLoad socket
 │   ├── appload/                protocol framing, message types
@@ -650,6 +668,9 @@ working Quire via one documented command.
 ### 7.1 AppLoad message types
 
 Go constants mirrored in QML. Reserve 0.
+
+Both header fields are **signed `int32`**, native-endian — see the correction in
+§3.1. Types below are ours; negative types are reserved by AppLoad itself.
 
 | ID | Direction | Name | Payload |
 |---|---|---|---|
