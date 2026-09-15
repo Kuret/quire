@@ -186,6 +186,28 @@ logic as possible.
   upstream pull request. **Consequence: the newest OS is the worst OS to target.
   Our app cannot run at all until upstream ships AppLoad support for a given
   release.** This, not our `.qmd`, is the binding version constraint.
+- **CORRECTION (verified on the target device, 2026-09-15).** The rule above is
+  right but its shape was wrong. The failure is **not** "newest OS bad, our
+  pinned version fine" — it is that *an AppLoad build targets a narrow window of
+  xochitl versions in both directions*. On our own 3.25.1.1, `appload.so`
+  **v0.5.3 fails exactly as it does on 3.26/3.28**: qt-resource-rebuilder loads
+  (19,825 entries cached), then AppLoad panics with `Couldn't resolve the hashed
+  identifier 17477757197668945522 required by AppLoad hooks in main UI` and
+  xochitl aborts with `SIGABRT`. **`v0.4.2` is the newest release whose hooks all
+  resolve on 3.25.1.1** — checked exhaustively, not by trial: every hashed
+  identifier in each release was tested against the device's own hashtab
+  (v0.4.2: 0 of 32 unresolvable; v0.5.0/v0.5.1: 2; v0.5.2/v0.5.3: 1). The
+  procedure is recorded in `docs/DEVICE-NOTES.md` §2 and should be re-run after
+  any AppLoad or OS change — it answers the compatibility question in seconds,
+  without installing anything.
+  **Two consequences for this project.** (a) `remagic` — which §4 recommends as
+  the user-facing prerequisite — pins **v0.5.3**, so a stock remagic install is
+  *broken* on our target. Our README and installer must pin v0.4.2 explicitly
+  and must not assume remagic's default is usable. (b) A failing AppLoad does
+  not look like a failure: the xochitl abort triggers a **full device reboot**,
+  which wipes the volatile `/etc` drop-in (§3.1, `/etc` is tmpfs-backed), so the
+  symptom is "xovi silently never started". Always diagnose from the *previous*
+  boot's journal (`journalctl -b -1`), never the current one.
 - **The hashtab is generated locally, not downloaded.** `xovi/rebuild_hashtable`
   builds it on-device, and must be re-run after every software update. There is
   no dependency on anyone publishing a hashtab for our version.
@@ -281,14 +303,14 @@ logic as possible.
 
 ### 3.2 Assumed — verify before depending on it
 
-| Assumption | How to verify | Blocks |
-|---|---|---|
-| `POST /upload` is reachable from on-device localhost, not only the USB interface | M0.5 spike, §11 Q1 | M5 |
-| Panel is 1620×2160 portrait, ~229 DPI | `fbset`, or read a stock-converted PDF's MediaBox | M4 |
-| Document `.content` JSON has a usable `parent`-folder mechanism via `.metadata` | Create a folder in the UI, inspect the resulting files | M5 |
-| xochitl indexes an uploaded document without a restart | M0.5 spike | M5 |
-| A QML hook can trigger "open document by UUID" | M6 spike, §11 Q2 | M6 |
-| Qt version is 6.x on current OS | `ls /usr/lib/libQt*` | M1 |
+| Assumption | How to verify | Blocks | Status |
+|---|---|---|---|
+| `POST /upload` is reachable from on-device localhost, not only the USB interface | M0.5 spike, §11 Q1 | M5 | ⚠️ **Partly wrong — see below.** There is **no loopback bind.** xochitl listens on `10.11.99.1:80` *only* (the usb-gadget address, on interface `usb1`). An on-device process does reach it there, and `POST /upload` returns `201` with xochitl running. But the interface is off by default (`WebInterfaceEnabled=false`) and whether the bind survives USB unplug is **still open (Q1b)** |
+| Panel is 1620×2160 portrait, ~229 DPI | `fbset`, or read a stock-converted PDF's MediaBox | M4 | ❌ **Method invalid.** There is no `/dev/fb0` on Paper Pro; `fbset` fails. DRM reports `405x1084` (LVDS timing, 4 px packed per clock → consistent with 1620 wide, not proof). Use the MediaBox method. **Still open (Q3)** |
+| Document `.content` JSON has a usable `parent`-folder mechanism via `.metadata` | Create a folder in the UI, inspect the resulting files | M5 | ✅ **Confirmed.** `parent` lives in `.metadata`, not `.content`, and holds the UUID of a `CollectionType` record (`""` = root). Real examples in `docs/DEVICE-NOTES.md` §6 |
+| xochitl indexes an uploaded document without a restart | M0.5 spike | M5 | ✅ **Confirmed.** Indexed within the same second, thumbnail rendered, no restart |
+| A QML hook can trigger "open document by UUID" | M6 spike, §11 Q2 | M6 | Open |
+| Qt version is 6.x on current OS | `ls /usr/lib/libQt*` | M1 | ✅ **Confirmed: Qt 6.8.2** |
 
 ---
 
@@ -991,9 +1013,19 @@ on the spike outcomes.
 
 Answer by experiment, then move the answer into §3.1 and delete it here.
 
-1. **Q1** — Is `POST /upload` reachable from on-device localhost? Which bind
-   addresses and port? Does the "last listed folder" state persist across
-   connections? *(Blocks M5.)*
+1. ~~**Q1** — Is `POST /upload` reachable from on-device localhost?~~
+   **ANSWERED 2026-09-15 — see §3.2 and `docs/DEVICE-NOTES.md` §5.** Not on
+   loopback; only on `10.11.99.1:80` (interface `usb1`), which an on-device
+   process can nonetheless reach. `POST /upload` → `201`, indexed immediately,
+   no restart. Requires `WebInterfaceEnabled=true`, which is **off by default**.
+   - **Q1b (new, still open, blocks M5)** — does that bind survive **USB
+     unplug**? Goal 1 is "no computer involved", so if the gadget interface
+     drops its address when untethered, the upload path only works while
+     plugged in and the direct-write fallback becomes the primary path. A
+     sampler is recording carrier/addr/bind state on-device.
+   - **Q1c (still open)** — does the "last listed folder" state persist across
+     connections, i.e. must we `GET /documents/<guid>` immediately before every
+     `POST /upload`? Assume yes and serialise until measured.
 2. **Q2** — Which QML type/method does reTaskable's jump-back hook call, and
    does it exist **in 3.25.1.1 specifically**? Can it take a page offset? If the
    hook was written against a newer firmware, what is the 3.25.1.1 equivalent?
