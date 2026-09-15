@@ -548,8 +548,20 @@ func (r *run) unrecognisedDetail() string {
 // draft is the stage 6 source entry, built before stage 5 because the
 // capability check needs a Source to exercise the theme against.
 func (r *run) draft(base *url.URL, th theme.Theme) *theme.Source {
-	name := ""
-	if r.page != nil {
+	// PLAN §7.5 stage 6: a theme that knows its site's name says so, and that
+	// wins over the page title.
+	//
+	// The title is the right default for a family of independent sites and
+	// wrong for a single one: adding https://api.mangadex.org produced a
+	// source called "MangaDex API documentation", which is exactly what that
+	// page's <title> says and means nothing to a user browsing their sources.
+	//
+	// Note what is deliberately absent — any attempt to *clean* the title.
+	// Stripping " API documentation" here would mangle the next site whose
+	// real name ends that way. A theme either knows the name or has no
+	// opinion; anything else is the user's rename to make.
+	name := th.SuggestedName()
+	if name == "" && r.page != nil {
 		name = siteName(r.page.Title())
 	}
 	if name == "" {

@@ -16,15 +16,18 @@ import (
 // be registered. Stage 4's tie-breaking is about the *scores*, so a real theme
 // would only make the arithmetic harder to see.
 type stubTheme struct {
-	id           string
-	score        int
-	allowedHosts []string
+	id            string
+	score         int
+	allowedHosts  []string
+	suggestedName string
 }
 
 func (s stubTheme) ID() string                  { return s.id }
 func (s stubTheme) Fingerprint(*probe.Page) int { return s.score }
 
 func (s stubTheme) AllowedHosts() []string { return s.allowedHosts }
+
+func (s stubTheme) SuggestedName() string { return s.suggestedName }
 func (s stubTheme) ValidateOverrides(map[string]any) error {
 	return nil
 }
@@ -246,6 +249,64 @@ func TestDraftSeedsAllowedHostsFromTheTheme(t *testing.T) {
 		// serialise without an allowedHosts key at all.
 		if res.Draft.AllowedHosts != nil {
 			t.Errorf("draft allowedHosts = %v, want nil", res.Draft.AllowedHosts)
+		}
+	})
+}
+
+// PLAN §7.5 stage 6: a theme's suggested name wins over the page <title>, and
+// "" falls back to it.
+//
+// home-unrecognised.html carries a title of its own, so each case below is a
+// real preference rather than a vacuous one.
+func TestDraftNamePrefersTheThemeSuggestion(t *testing.T) {
+	run := func(t *testing.T, th theme.Theme) *theme.Source {
+		t.Helper()
+		f := themetest.New(t, map[string]themetest.Route{
+			"GET /": {File: "home-unrecognised.html"},
+		})
+		reg := theme.NewRegistry()
+		reg.MustRegister(th)
+		p := prober.New(prober.Options{
+			Fetcher: f, Registry: reg, Guard: allowGuard{}, Now: clock,
+			NewID: func() string { return "src-test" },
+		})
+		res, err := p.Run(context.Background(), "https://example.invalid", &recordUI{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Draft == nil {
+			t.Fatalf("no draft: %s (%s)", res.Verdict, res.Detail)
+		}
+		return res.Draft
+	}
+
+	// The title the fallback would produce, so the two cases can be compared
+	// rather than asserted blind.
+	fromTitle := run(t, stubTheme{id: "alpha", score: 90}).Name
+	if fromTitle == "" {
+		t.Fatal("the fixture's <title> yielded no name; this test would prove nothing")
+	}
+
+	t.Run("a suggestion wins", func(t *testing.T) {
+		got := run(t, stubTheme{id: "alpha", score: 90, suggestedName: "MangaDex"}).Name
+		if got != "MangaDex" {
+			t.Errorf("draft name = %q, want %q; the page title was %q", got, "MangaDex", fromTitle)
+		}
+	})
+
+	t.Run("no opinion falls back to the title", func(t *testing.T) {
+		got := run(t, stubTheme{id: "alpha", score: 90}).Name
+		if got != fromTitle {
+			t.Errorf("draft name = %q, want the page title %q", got, fromTitle)
+		}
+	})
+
+	t.Run("the suggestion is used verbatim", func(t *testing.T) {
+		// No cleaning, no trimming at a separator, no title-casing. A theme
+		// that answers owns its answer.
+		const odd = "Example — Home"
+		if got := run(t, stubTheme{id: "alpha", score: 90, suggestedName: odd}).Name; got != odd {
+			t.Errorf("draft name = %q, want %q unchanged", got, odd)
 		}
 	})
 }
