@@ -568,7 +568,21 @@ for the page count.
 
 ### M5 — Library integration
 
-Implement whichever path M0.5/Q1 proved.
+**M0.5 settled this: use the upload endpoint.** Two facts from §11 Q1/Q1b make
+it the clear choice, and both must be implemented:
+
+1. **Add the loopback alias first** — `ip addr add 10.11.99.1/32 dev lo`,
+   idempotent, at backend startup. Without it the endpoint is unreachable
+   whenever USB is unplugged, which is most of the time. It is safe to leave in
+   place while tethered and does not survive reboot.
+2. **Require `WebInterfaceEnabled=true`** as a first-run setup step (it is off
+   by default and needs an xochitl restart to take effect). Detect it and say
+   so plainly rather than failing obscurely.
+
+The direct-write path stays documented as a fallback but should not be built
+unless the above breaks: xochitl does not watch its document directory, so
+direct writes need a full restart, and a restart costs the user their reading
+position — the exact thing Goal 5 exists to protect.
 
 **Preferred (upload endpoint):** ensure/create `Comics` and a per-series
 subfolder. Folders are documents with a collection type; children reference the
@@ -1040,18 +1054,54 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    loopback; only on `10.11.99.1:80` (interface `usb1`), which an on-device
    process can nonetheless reach. `POST /upload` → `201`, indexed immediately,
    no restart. Requires `WebInterfaceEnabled=true`, which is **off by default**.
-   - **Q1b (new, still open, blocks M5)** — does that bind survive **USB
-     unplug**? Goal 1 is "no computer involved", so if the gadget interface
-     drops its address when untethered, the upload path only works while
-     plugged in and the direct-write fallback becomes the primary path. A
-     sampler is recording carrier/addr/bind state on-device.
+   - ~~**Q1b** — does that bind survive **USB unplug**?~~ **ANSWERED: no, but
+     it is fixable in one line, and the fix is now part of M5's design.**
+     Unplugging strips the address from `usb1` (the socket itself survives), so
+     the destination stops being local and the request leaks out over the
+     default route. On-device access never used USB at all — it worked because
+     the address was *local* and routed via `lo`. So Quire supplies that route
+     itself:
+     ```sh
+     ip addr add 10.11.99.1/32 dev lo      # idempotent, root, not reboot-persistent
+     ```
+     Verified untethered (`HTTP_OK` with no USB), and verified **safe to leave
+     in place while tethered** — USB SSH and the USB web interface both keep
+     working with the address on `usb1` and `lo` simultaneously.
+     **This rescues the preferred M5 path and Goal 1**: no restart, and xochitl
+     keeps doing all the `.content`/`.metadata`/thumbnail bookkeeping.
+     Relevant because xochitl does **not** watch its document directory (its
+     inotify watches are on other inodes), so direct writes are invisible to it
+     and a restart would otherwise be mandatory.
    - **Q1c (still open)** — does the "last listed folder" state persist across
      connections, i.e. must we `GET /documents/<guid>` immediately before every
      `POST /upload`? Assume yes and serialise until measured.
-2. **Q2** — Which QML type/method does reTaskable's jump-back hook call, and
-   does it exist **in 3.25.1.1 specifically**? Can it take a page offset? If the
-   hook was written against a newer firmware, what is the 3.25.1.1 equivalent?
-   *(Blocks M6. See §7.8.)*
+2. ~~**Q2** — Which QML type/method opens a document, in 3.25.1.1?~~
+   **ANSWERED 2026-09-15 — `docs/QMD-NOTES.md`. Found natively in our own dump;
+   reTaskable was never consulted.**
+   `/qml/device/view/documentview/DocumentView.qml:536,540`:
+   ```qml
+   function openDocument(documentToOpen)
+   function openDocumentOnPage(documentToOpen, pageToOpen, highlightDetails)
+   ```
+   **`documentToOpen` is a `Document` object, not a UUID.** The UUID→object step
+   is `Library.entryForId(documentId)` (C++ singleton, `com.remarkable`).
+   `documentView` is a `Loader` (`MainView.qml:385`), also reachable as
+   `Global.documentViewLoader`. The one-call form is:
+   ```js
+   windowNavigator.open("legacydevice/window/main",
+                        { documentId: "<uuid>", page: 12, openedFrom: "quire" })
+   ```
+   **Trap — page offset is silently dropped.** `MainView.qml:88` honours `page`
+   only when `pageHighlightDetails` is *also* truthy (a search-highlight object
+   we do not have), so `{documentId, page}` falls through to `openDocument()`
+   and lands on `lastOpenedPage`. xochitl works around its own bug by calling
+   `LibraryController.setLastOpenedPage(id, page)` first
+   (`Navigator.qml:857-860`) — do the same. Calling
+   `Global.documentViewLoader.item.openDocumentOnPage(...)` directly honours the
+   page but skips the archived / load-error / password checks in
+   `openDocument_helper`, so prefer the navigator route plus the workaround.
+   Opening is sufficient to bring the reader forward: state `"DocumentView"`
+   (`when: documentView.item.documentLoaded`) flips visibility by itself.
 3. ~~Exact panel resolution, and the MediaBox the stock reader expects for a
    full-bleed page.~~ **ANSWERED 2026-09-15 — `docs/DEVICE-NOTES.md` §4.**
    **`MediaBox [0 0 514 685]`**, i.e. 1620×2160 px at **≈227 DPI** (not the

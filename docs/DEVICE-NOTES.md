@@ -265,11 +265,65 @@ assumption "xochitl indexes an uploaded document without a restart" — it does.
 
 Probe source: `backend/library/internal/spike/` (see git history).
 
-> ⚠️ **Q1b OPEN — does the `10.11.99.1` bind survive USB unplug?** Goal 1 is
-> "no computer involved", so this matters. A sampler is recording
-> `carrier` / `addr` / bind presence to `/tmp/usbwatch.log` on the device.
-> Until answered, treat the upload path as *proven only while tethered*, and
-> keep the direct-write fallback (§6 M5) a first-class path, not a contingency.
+### ✅ Q1b ANSWERED — unplugging breaks it, and a loopback alias fixes it
+
+**The problem.** Sampled across two real unplug cycles:
+
+| USB state | `usb1` address | socket bound | on-device HTTP |
+|---|---|---|---|
+| plugged | `10.11.99.1/27` | yes | **OK** |
+| **unplugged** | **`NONE`** | **yes** | **FAIL** |
+
+The listening socket *survives* — only the address is stripped. And with the
+address gone the destination stops being local, so the request falls back to
+the default route and **leaks onto the LAN**:
+
+```
+unplugged: route=[10.11.99.1 via 192.168.68.1 dev wlan0  src 192.168.68.70]
+plugged:   route=[local 10.11.99.1 dev lo  src 10.11.99.1]
+```
+
+That second line is the whole mechanism: on-device access works because the
+address is *local*, so traffic is routed via **`lo`**, not over USB. USB
+carrier is irrelevant except that it is what causes the address to be assigned.
+
+**The fix — give the kernel the local route ourselves:**
+
+```sh
+ip addr add 10.11.99.1/32 dev lo      # idempotent; needs CAP_NET_ADMIN (we are root)
+```
+
+Tested directly, by removing the address from `usb1` over wifi to simulate an
+unplug:
+
+```
+usb1 address removed      → socket bound: 1, HTTP_FAIL
+ip addr add .../32 dev lo → route: local 10.11.99.1 dev lo
+                          → HTTP_OK   ← endpoint reachable with no USB at all
+```
+
+**It is also safe to leave in place while USB is connected** — verified with
+both addresses present simultaneously (`usb1 10.11.99.1/27` + `lo
+10.11.99.1/32`): on-device HTTP `OK`, **USB SSH from the host still works, and
+the USB web interface still answers `HTTP 200`**. Nothing about normal USB
+behaviour changed.
+
+**Consequences for M5 — this rescues the preferred design.**
+
+- The upload endpoint works **untethered**, so Goal 1 ("no computer involved")
+  holds and the direct-write fallback stays a fallback.
+- xochitl keeps doing all the bookkeeping — `.content`, `.metadata`, page
+  UUIDs, thumbnail rendering. We never hand-roll that.
+- **No `systemctl restart xochitl`.** Which matters, because xochitl does *not*
+  watch its own document directory: its inotify watches are on inodes 728 / 120
+  / 41, and `/home/root/.local/share/remarkable/xochitl` is inode 146. Files
+  written directly behind its back are simply not noticed — a restart would be
+  the only way, and a restart costs the user their place.
+- The alias is **not persistent across reboot**. Quire's backend must add it at
+  startup; make it idempotent and tolerate `EEXIST`.
+- Still gated on `WebInterfaceEnabled=true`, which is off by default. Flipping
+  it requires an xochitl restart to take effect, so it is a **first-run setup
+  step**, not something to toggle per download.
 
 ### `VissibleName` — both spellings, in different places
 
