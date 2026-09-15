@@ -233,3 +233,41 @@ func TestEnabledDefaultsToTrue(t *testing.T) {
 		t.Error("enabled:false was not honoured")
 	}
 }
+
+// PLAN §7.2, 2026-09-15: a theme declares the hosts it legitimately needs, and
+// stage 6 seeds them onto the source. Whatever a theme declares therefore has
+// to be a value the schema accepts — otherwise the probe would happily produce
+// a source entry that fails validation on the way to disk.
+func TestSchemaAcceptsWhatThemesDeclare(t *testing.T) {
+	s := loadSchema(t)
+
+	for _, hosts := range [][]string{
+		{"cdn.example.invalid"},
+		{"*.mangadex.network"},
+		{"example.invalid", "*.cdn-example.invalid"},
+	} {
+		src := theme.Source{
+			ID: "user-added-01", Name: "Example", Lang: "en",
+			Theme: "madara", BaseURL: "https://example.invalid",
+			AllowedHosts: hosts,
+			AddedAt:      time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC),
+		}
+		if err := validate(t, s, src); err != nil {
+			t.Errorf("allowedHosts %v is rejected by the schema: %v", hosts, err)
+		}
+	}
+
+	// And the pattern is still a pattern: a wildcard is the one metacharacter
+	// allowed, in the one position it means something.
+	for _, bad := range []string{"*", "cdn.*.invalid", "*cdn.invalid", "HTTPS://cdn.invalid", "cdn invalid"} {
+		src := theme.Source{
+			ID: "user-added-01", Name: "Example", Lang: "en",
+			Theme: "madara", BaseURL: "https://example.invalid",
+			AllowedHosts: []string{bad},
+			AddedAt:      time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC),
+		}
+		if err := validate(t, s, src); err == nil {
+			t.Errorf("allowedHosts entry %q was accepted by the schema", bad)
+		}
+	}
+}

@@ -119,6 +119,19 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// AllowedHosts implements theme.Theme.
+//
+// Nil, and confirmed rather than assumed: this is a family of hundreds of
+// independently hosted WordPress installs, and they have no CDN in common.
+// Each site's images come from its own /wp-content/uploads/, on its own
+// registrable domain, which the guard already permits. Naming a host here
+// would widen the boundary for every madara site at once on the strength of
+// what one of them happens to do.
+//
+// A site that does front its uploads with a third-party CDN is a per-source
+// allowedHosts entry, which is exactly what that field is for.
+func (t *Theme) AllowedHosts() []string { return nil }
+
 // ID implements theme.Theme.
 func (t *Theme) ID() string { return ID }
 

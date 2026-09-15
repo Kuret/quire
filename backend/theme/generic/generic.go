@@ -121,6 +121,13 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// AllowedHosts implements theme.Theme.
+//
+// Nil. The generic theme is the escape hatch for a site nobody has written a
+// theme for, so there is nothing it could know about that site's hosting. A
+// user who needs one sets allowedHosts on the source itself.
+func (t *Theme) AllowedHosts() []string { return nil }
+
 // ID implements theme.Theme.
 func (t *Theme) ID() string { return ID }
 

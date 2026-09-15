@@ -622,3 +622,27 @@ func TestOverridesRejectUnknownKeys(t *testing.T) {
 		t.Error("a value outside the enum was accepted")
 	}
 }
+
+// PLAN §7.2, 2026-09-15. MangaDex is the theme that made theme-declared
+// allowedHosts necessary: page images come from generated labels on
+// mangadex.network, a different registrable domain from the API.
+//
+// This pins the declaration itself. That it actually satisfies the SSRF guard
+// against a real /at-home/ host shape is asserted in
+// backend/fetch/allowedhosts_test.go, where the guard lives — the claim needs
+// both halves and they cannot both be checked from here.
+func TestAllowedHostsDeclaresThePageImageCDN(t *testing.T) {
+	th := mangadex.NewWithClock(themetest.New(t, nil), clock)
+	hosts := th.AllowedHosts()
+	if len(hosts) != 1 || hosts[0] != "*.mangadex.network" {
+		t.Fatalf("AllowedHosts() = %v, want [*.mangadex.network]", hosts)
+	}
+	// Covers are on uploads.mangadex.org — the same registrable domain as the
+	// API — so they need no declaration and must not have been given one.
+	for _, h := range hosts {
+		if strings.Contains(h, "mangadex.org") {
+			t.Errorf("%q is already inside the source's own registrable domain; "+
+				"declaring it implies a widening that is not happening", h)
+		}
+	}
+}

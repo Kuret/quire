@@ -19,9 +19,16 @@ import (
 	"github.com/rickl/quire/backend/probe"
 )
 
-// Theme is the interface of PLAN §7.2, unchanged. Everything a theme needs
-// beyond this — overrides validation, capability checks — is an *optional*
-// side interface below, so this one stays exactly as the plan specifies it.
+// Theme is the interface of PLAN §7.2. Everything a theme needs beyond it —
+// overrides validation, capability checks — is an *optional* side interface
+// below, so this one stays exactly as the plan specifies it.
+//
+// It has grown once since M2, and only because the plan grew: AllowedHosts was
+// added to §7.2 on 2026-09-15, when MangaDex turned out to serve page images
+// from a different registrable domain and the alternative was making users
+// discover a CDN's name by reading an SSRF rejection. It is on the required
+// interface rather than an optional side one so that every theme has to answer
+// the question — nil is a fine answer, but it is an answered one.
 type Theme interface {
 	ID() string
 
@@ -32,6 +39,35 @@ type Theme interface {
 	Series(ctx context.Context, s *Source, id string) (*Series, error)
 	Chapters(ctx context.Context, s *Source, id string) ([]Chapter, error)
 	Pages(ctx context.Context, s *Source, chapterID string) ([]string, error)
+
+	// AllowedHosts lists hosts outside the source's own registrable domain
+	// that this theme legitimately needs — in practice, image CDNs.
+	//
+	// Two forms are accepted: "example.invalid" matches that host and anything
+	// under it, and "*.example.invalid" matches subdomains only, never the
+	// bare domain. Prefer the second where a CDN's hostnames are generated
+	// labels and the domain itself serves nothing.
+	//
+	// PLAN §7.5 stage 6 seeds the stored source's allowedHosts from this, so
+	// the list ends up on the source entry: visible to the user, editable by
+	// them, and unchanged if the theme later changes its mind. A user should
+	// not have to discover a CDN's name by reading an SSRF rejection.
+	//
+	// The list lives in the theme's source code precisely so it is reviewable
+	// in a diff. That is the difference between "this theme's images come from
+	// here" and an arbitrary host list pasted into a config file, which is
+	// what PLAN §7.4's boundary exists to constrain.
+	//
+	// It widens the *registrable-domain boundary* and nothing else. A host
+	// named here still has to survive the address rules — private, loopback
+	// and link-local ranges stay refused — so a theme cannot name its way onto
+	// the local network. fetch.Guard.CheckURL enforces that by running the
+	// address check after the domain check, and there are tests on it.
+	//
+	// Most themes return nil. A family of independently hosted sites has no
+	// CDN in common to name, and guessing at one would widen the boundary for
+	// every site in the family.
+	AllowedHosts() []string
 }
 
 // OverrideValidator is implemented by a theme that has overrides — which, in

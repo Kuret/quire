@@ -22,12 +22,15 @@ func TestMain(m *testing.M) {
 // test their real behaviour against fixtures; this one only has to have an ID
 // and a score.
 type fake struct {
-	id    string
-	score int
+	id           string
+	score        int
+	allowedHosts []string
 }
 
 func (f *fake) ID() string                  { return f.id }
 func (f *fake) Fingerprint(*probe.Page) int { return f.score }
+
+func (f *fake) AllowedHosts() []string { return f.allowedHosts }
 func (f *fake) Search(context.Context, *theme.Source, string, int) ([]theme.SeriesStub, error) {
 	return nil, nil
 }

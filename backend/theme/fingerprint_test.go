@@ -4,10 +4,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
@@ -202,5 +204,59 @@ func TestPageDocumentIsParsedOnce(t *testing.T) {
 	}
 	if got := page.Title(); got == "" {
 		t.Error("Title() is empty; PLAN §7.5 stage 6 defaults a source name from it")
+	}
+}
+
+// PLAN §7.2, 2026-09-15. Two claims, both cheap and both easy to get wrong
+// later: a theme declares only hosts it genuinely needs, and the three
+// site-family themes declare nothing at all.
+//
+// The second is the one worth a test. madara and mangathemesia each cover
+// hundreds of independently hosted WordPress installs, whose images come from
+// their own /wp-content/uploads/ on their own registrable domain. Naming a
+// host for those families would widen the redirect boundary for *every* site
+// in the family on the strength of what one of them happens to do. Checked
+// against the fixtures, not assumed: no fixture in either theme's testdata
+// references an off-domain image host or redirects to one.
+func TestDeclaredAllowedHosts(t *testing.T) {
+	cases := []struct {
+		th   theme.Theme
+		want []string
+	}{
+		{madara.New(nil), nil},
+		{mangathemesia.New(nil), nil},
+		{generic.New(nil), nil},
+		// MangaDex serves page images from generated labels on a different
+		// registrable domain than its API, so it is the one theme that has
+		// something true to declare.
+		{mangadex.New(nil), []string{"*.mangadex.network"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.th.ID(), func(t *testing.T) {
+			got := tc.th.AllowedHosts()
+			if len(got) != len(tc.want) {
+				t.Fatalf("AllowedHosts() = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("AllowedHosts()[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+			// Whatever is declared has to be a host pattern, lower-case, with
+			// a wildcard only as a leading label. The schema enforces the same
+			// thing on the stored source; this catches it at the source.
+			for _, h := range got {
+				if h != strings.ToLower(h) || strings.TrimSpace(h) != h {
+					t.Errorf("%q is not a normalised host", h)
+				}
+				if i := strings.Index(h, "*"); i > 0 || strings.Count(h, "*") > 1 {
+					t.Errorf("%q: a wildcard is only meaningful as the leading label", h)
+				}
+				if strings.Contains(h, "/") || strings.Contains(h, ":") {
+					t.Errorf("%q is a URL, not a host", h)
+				}
+			}
+		})
 	}
 }

@@ -140,6 +140,27 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 // ID implements theme.Theme.
 func (t *Theme) ID() string { return ID }
 
+// imageCDN is where MangaDex serves page images from.
+//
+// /at-home/server/{id} returns a base URL on a host like
+// "cmdxd98sb0x3yprd.mangadex.network" — a generated label on a *different
+// registrable domain* from the API. Without this declaration, §7.4's redirect
+// boundary refuses every page image, so M4 could list a chapter and download
+// none of it, and the user's only clue would be an SSRF rejection naming a
+// host they have never heard of.
+//
+// The wildcard form is the honest one. The bare domain serves nothing; only
+// the generated subdomains do, and saying so keeps the widening as narrow as
+// the facts are.
+//
+// Covers are not here on purpose: uploads.mangadex.org is under the same
+// registrable domain as the API, so the guard already permits it and naming it
+// would imply a widening that is not happening.
+const imageCDN = "*.mangadex.network"
+
+// AllowedHosts implements theme.Theme.
+func (t *Theme) AllowedHosts() []string { return []string{imageCDN} }
+
 // ValidateOverrides implements theme.OverrideValidator.
 func (t *Theme) ValidateOverrides(raw map[string]any) error { return spec.Validate(raw) }
 

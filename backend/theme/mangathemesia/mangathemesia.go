@@ -96,6 +96,14 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// AllowedHosts implements theme.Theme.
+//
+// Nil, for the same reason as madara: independently hosted WordPress sites
+// with no shared CDN. Checked against our fixtures — the images in
+// testdata/reader.html and the ts_reader blob are all on the site's own host,
+// and no fixture redirects off-domain.
+func (t *Theme) AllowedHosts() []string { return nil }
+
 // ID implements theme.Theme.
 func (t *Theme) ID() string { return ID }
 
