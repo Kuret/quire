@@ -943,3 +943,59 @@ device stops thrashing.
 fixture you generated yourself only tests the shape you imagined. Vary the
 input geometry deliberately, and measure peak RSS on the device — `VmHWM` in
 `/proc/<pid>/status` — not on the host.
+
+### 10.5 Bounding the resampler's intermediate
+
+§10.4 capped the heap. It could not cap the *allocation*: the resampler's
+intermediate is `destinationWidth × sourceHeight × 32` bytes, which scales with
+the **input**, so a soft limit only decides how hard the GC works around it.
+`imageproc` now box-downscales by an exact integer factor first, whenever that
+product would exceed `DefaultMaxResampleBytes` (**256 MiB**).
+
+**Why 256 MiB.** The worst ordinary page lands at 171 MB (a 2480 × 3508 A4 scan
+resamples through a 1527 × 3508 intermediate; a 2550 × 3300 letter scan the
+same). 256 MiB sits ~50% above that, so the guard never fires on normal manga —
+a guard that quietly engaged on everything would be a silent quality
+regression — while bounding two concurrent encodes to 512 MiB, which is exactly
+the soft heap limit from §10.4.
+
+Measured on device, 15 pages mixing ordinary scans with a 5000 × 7000, a
+6000 × 8000, a 6000 × 4000 spread and two 20000 px strips, two encode workers,
+xochitl running:
+
+| configuration | pages guarded | peak RSS | wall clock |
+|---|---|---|---|
+| **guard on (shipped, 256 MiB)** | 2 of 15 | **603 MiB** | 46.05 s |
+| guard off | 0 | **1189 MiB** | 46.19 s |
+
+**Half the peak RSS, at no cost in time** — the box pass reads each source pixel
+exactly once and disappears into the noise.
+
+**Quality cost is academic at these ratios.** Box-then-kernel against kernel
+alone on the 5000 × 7000 page (guard factor 2): mean absolute difference
+**2.07/255**, worst pixel 26/255, and the JPEG came out 1.5% smaller. That is a
+rounding difference, not a visible softening — unsurprising, since an exact 2×2
+box average is what the kernel would largely have computed anyway.
+
+**Correction to the arithmetic that motivated this.** A long strip does *not*
+produce a huge intermediate. Fitting 800 × 20000 into a 3:4 page makes the
+destination a narrow sliver (86 × 2160), so the intermediate is
+86 × 20000 × 32 = 55 MB, not ~1 GB — that figure assumed the destination kept
+the full 1620 px panel width. The real offenders are **large** sources where
+the destination stays wide: 5000 × 7000 needs 346 MB, 6000 × 8000 needs 518 MB.
+
+**A limit of the mechanism, stated plainly.** The guard can only shrink a
+source that is at least twice the destination, because an integer factor below
+that would mean upscaling afterwards. An A4 scan is only ~1.6× the panel, so
+its 171 MB intermediate is irreducible this way. That is fine at 256 MiB × 2
+workers, but it is the reason the guard is a guard and not a general
+optimisation — bringing that case down would need banding the resample, with
+the seam handling banding implies.
+
+**The webtoon output is still poor, and this does not fix it.** The guard stops
+a long strip from being a memory problem; it does nothing about the fact that
+fitting 800 × 20000 into a 3:4 page yields a tiny centred sliver with white
+margins either side — a page nobody can read. That is the known webtoon
+limitation in PLAN §6 M4. Strip-splitting is the fix if the user asks for it,
+and it wants real banding rather than this guard, so the two concerns are kept
+separate in the code.
