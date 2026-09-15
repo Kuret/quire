@@ -954,6 +954,20 @@ Non-negotiable, and not configurable by a source entry:
   config: the *classification* is Quire's own, made per request-kind inside the
   fetch layer, never a per-source flag a user can flip. Requests must carry
   their kind explicitly — do not infer it from the URL.
+
+  **Worked classifications — when in doubt, classify as discovery.** The rule
+  above is a narrow exception and should stay narrow; "the user is ultimately
+  responsible for every request" would swallow it whole and is not the test.
+  The test is whether *this specific resource* is what the user asked for.
+
+  | Request | Kind | Why |
+  |---|---|---|
+  | Search, popular/latest, the probe's crawl | discovery | Textbook crawling |
+  | **Cover thumbnails for a results grid** | **discovery** | The user asked for a *list*, not for each cover. Fetching 20 thumbnails in a burst is crawling behaviour, whatever triggered it |
+  | Series detail page the user tapped | retrieval | One named resource, explicitly requested |
+  | Chapter list for that series | retrieval | Ditto |
+  | Page images of a volume the user queued | retrieval | The whole point of the request |
+  | Re-probe on failure (§6 M7) | discovery | Automated, not user-directed |
 - `Retry-After` honoured; exponential backoff with jitter on 429/5xx.
 - Honest `User-Agent` naming Quire, its version, and the project URL. **Never
   impersonate a browser** — see §7.6.
