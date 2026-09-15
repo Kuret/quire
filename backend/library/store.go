@@ -60,6 +60,21 @@ type Record struct {
 	Pages int   `json:"pages,omitempty"`
 	Bytes int64 `json:"bytes,omitempty"`
 
+	// Chapters are the source-side chapter IDs this document holds, in reading
+	// order.
+	//
+	// It is recorded rather than re-derived because a volume can be *split* to
+	// fit xochitl's upload cap, and the split depends on the byte size of page
+	// images that may since have been deleted to reclaim space. Without this,
+	// working out which document holds a chapter would mean reproducing a
+	// decision whose inputs are gone — and getting it wrong puts M6's "Read"
+	// button on the wrong rows.
+	Chapters []string `json:"chapters,omitempty"`
+
+	// Part and Parts are 1-based, and both 0 when the volume was not split.
+	Part  int `json:"part,omitempty"`
+	Parts int `json:"parts,omitempty"`
+
 	StoredAt time.Time `json:"storedAt"`
 }
 
