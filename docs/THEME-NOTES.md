@@ -179,7 +179,10 @@ tomorrow, or could have shipped a skin we never anticipated, and every test
 here would still pass.
 
 What proves a live site works is **PLAN §7.5 stage 5's capability check, run at
-runtime against whatever site the user chooses to add** — and, when a working
+runtime against whatever site the user chooses to add** — which since
+2026-09-16 **fetches** one page image rather than only extracting its URL, for
+the reason recorded in the `mangakakalot` section: a site can hand over a
+perfect list of image addresses and then refuse every one of them — and, when a working
 source later goes quiet, the re-probe of PLAN §6 M7. Those are the real
 verification. These fixtures are regression protection for our own code, and
 should be described as nothing more.
@@ -894,17 +897,45 @@ it is why the two pieces of work landed together. With the setting at its
 default (not consulted) browsing works; with it turned on, expect
 `robots_denied` on the first search.
 
-**The mirrors challenge the search path, and the image hosts challenge
-everything.** Run by hand against a live mirror with the honest `User-Agent`:
-the home page, the listings, the series page, the chapter API and the reader all
-answered 200 and parsed, but `/search/story/...` answered **403 with a
-Cloudflare interstitial**, and so did a page image on the image host. PLAN §7.6
-is the answer to both: a challenge is a site saying no and we take the answer.
-There is no bypass in this codebase and none is to be added. In practice that
-means a source of this theme is browsable and its chapter lists are readable,
-while search and downloads may or may not be, per mirror and per day — the
-probe's stage-5 capability check is what reports which, and it reports it
-honestly rather than adding the source and failing later.
+**What was actually measured, 2026-09-16.** Run by hand against three live
+mirrors of this family with the honest `User-Agent`, so nobody has to repeat the
+afternoon:
+
+| Step | Result |
+|---|---|
+| Home page | **200**, parsed |
+| Listing / browse (`manga-list/...`) | **200**, 24 results parsed |
+| Series page | **200**, title, status, authors, genres, cover, description all parsed |
+| Chapter API | **200**, 286 chapters, ascending after the reversal, `OrderUnknown=false` |
+| Reader page | **200**, 76 page URLs extracted |
+| **Search** (`/search/story/...`) | **403, Cloudflare interstitial** — on all three mirrors |
+| **Page image** on the image host | **403, Cloudflare "Attention Required!"** |
+
+So: **the theme parses this family correctly, and the family is not usable for
+downloading today.** Browsing, series detail and chapter lists work; search and
+downloads are challenged. PLAN §7.6 is the answer to both — a challenge is a
+site saying no, we take the answer, and there is no bypass in this codebase.
+
+Two things follow that are worth stating plainly.
+
+**robots.txt was not the blocker on the critical path.** It blocked search and
+paginated listings, which is real and is what made the family unusable under the
+old rule — but the series page, the chapter API and the reader were all
+`Allow`ed, and what actually stops a download is the image host's challenge. The
+policy change of §7.4 was necessary to browse this family and is *not* sufficient
+to use it. Anyone reading the robots decision as "and then it worked" has the
+wrong picture.
+
+**This family is what corrected §7.5 stage 5.** Extraction succeeded — 76 URLs,
+parsed perfectly — and the fetch of the first one 403'd. Stage 5 as originally
+written checked "one page-image *extraction*", so it would have returned `ok`,
+the source would have been added, and the user would have discovered the
+problem minutes later when a download failed. That is a false `ok`, which is the
+one thing §7.5 and §6 M3 are most emphatic about not producing. Stage 5 now
+**fetches one image** through the real client, which also exercises the SSRF
+guard against the seeded `allowedHosts`. A challenge there is `blocked_challenge`
+and terminal, and the verdict names the host so it is not baffling after a
+search that worked; an unmarked 403 is `partial` naming page fetching.
 
 **Author rows are messy by nature.** The `Author(s)` row often carries a list of
 romanisations of one name. They are returned as the site gives them; picking a
