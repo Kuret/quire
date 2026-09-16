@@ -9,11 +9,14 @@ import (
 
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/comick"
+	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/webtoons"
 	"github.com/rickl/quire/backend/theme/weebcentral"
 )
 
@@ -71,12 +74,27 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(weebcentral.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// The three added on 2026-09-16 with PLAN §7.6's Referer decision. They
+	// are registered here for the same reason as the rest, and one of them
+	// raises a question none of the others did: comick and mangadex are both
+	// JSON APIs, so a signal that is really just "this answered JSON" would
+	// put them in a near-tie and send §7.5 stage 4 to the user over a question
+	// that is not close.
+	if err := reg.Register(webtoons.New(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Register(fanfox.New(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Register(comick.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 5
+const scorers = 8
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -157,6 +175,64 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a weebcentral reader fragment",
 			file:       "weebcentral/testdata/reader.html",
 			wantWinner: weebcentral.ID,
+		},
+		{
+			name:       "a webtoons home page",
+			file:       "webtoons/testdata/home.html",
+			wantWinner: webtoons.ID,
+		},
+		{
+			name:       "a webtoons search page",
+			file:       "webtoons/testdata/search.html",
+			wantWinner: webtoons.ID,
+		},
+		{
+			name:       "a webtoons series page",
+			file:       "webtoons/testdata/series.html",
+			wantWinner: webtoons.ID,
+		},
+		{
+			name:       "a webtoons viewer page",
+			file:       "webtoons/testdata/viewer.html",
+			wantWinner: webtoons.ID,
+		},
+		{
+			name:       "a fanfox home page",
+			file:       "fanfox/testdata/home.html",
+			wantWinner: fanfox.ID,
+		},
+		{
+			name:       "a fanfox search page",
+			file:       "fanfox/testdata/search.html",
+			wantWinner: fanfox.ID,
+		},
+		{
+			name:       "a fanfox series page",
+			file:       "fanfox/testdata/series.html",
+			wantWinner: fanfox.ID,
+		},
+		{
+			name:       "a fanfox mobile reader page",
+			file:       "fanfox/testdata/reader.html",
+			wantWinner: fanfox.ID,
+		},
+		{
+			name:       "a comick series page",
+			file:       "comick/testdata/series.html",
+			wantWinner: comick.ID,
+		},
+		{
+			name:       "a comick reader page",
+			file:       "comick/testdata/reader.html",
+			wantWinner: comick.ID,
+		},
+		{
+			// A JSON body rather than a page, and the case that makes the two
+			// API themes worth testing against each other: "answered JSON" is
+			// not a fingerprint.
+			name:       "a comick search response",
+			file:       "comick/testdata/search.json",
+			wantWinner: comick.ID,
 		},
 		{
 			// The deliberate near-miss: WordPress, comic-shaped, and neither
