@@ -85,6 +85,13 @@ type downloadProgress struct {
 	SeriesID string `json:"seriesId"`
 	VolumeID string `json:"volumeId"`
 
+	// Grouping echoes what the request asked for, so the frontend can put the
+	// frame on the row that asked. A volume's ID is its first chapter's, so
+	// without it a chapter download and a volume download starting at the same
+	// chapter are indistinguishable — and a chapter finishing would light up
+	// "Read" on a volume row that is not on the tablet.
+	Grouping string `json:"grouping,omitempty"`
+
 	Phase string `json:"phase"`
 
 	// Message is ready to display, in plain language.
@@ -181,8 +188,9 @@ func (s *Service) cancelDownload(out Sender, req downloadRequest) error {
 
 	return send(out, appload.MessageDownloadProgress, downloadProgress{
 		SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-		Phase:   phaseCancelled,
-		Message: "Stopped.",
+		Grouping: req.grouping(),
+		Phase:    phaseCancelled,
+		Message:  "Stopped.",
 	})
 }
 
@@ -251,8 +259,9 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 	case s.dlQueue <- downloadJob{out: out, req: req}:
 		return send(out, appload.MessageDownloadProgress, downloadProgress{
 			SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-			Phase:   phaseQueued,
-			Message: "Queued.",
+			Grouping: req.grouping(),
+			Phase:    phaseQueued,
+			Message:  "Queued.",
 		})
 	default:
 		return s.sendError(out, "busy",
@@ -272,7 +281,8 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 // queues ten chapters and a few hundred megabytes, which is exactly what it
 // was written for.
 func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequest) {
-	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
+	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
+		Grouping: req.grouping()}
 
 	th, src, err := s.themeFor(req.SourceID)
 	if err != nil {
@@ -357,9 +367,9 @@ func (s *Service) downloadWorker(ctx context.Context) {
 			if s.takeCancelled(job.req.key()) {
 				_ = send(job.out, appload.MessageDownloadProgress, downloadProgress{
 					SourceID: job.req.SourceID, SeriesID: job.req.SeriesID,
-					VolumeID: job.req.VolumeID,
-					Phase:    phaseCancelled,
-					Message:  "Stopped before it started.",
+					VolumeID: job.req.VolumeID, Grouping: job.req.grouping(),
+					Phase:   phaseCancelled,
+					Message: "Stopped before it started.",
 				})
 				continue
 			}
@@ -371,7 +381,8 @@ func (s *Service) downloadWorker(ctx context.Context) {
 // runDownload is the whole path: chapter list → pages → images on disk → one
 // PDF → the reMarkable library → a remembered UUID.
 func (s *Service) runDownload(parent context.Context, out Sender, req downloadRequest) {
-	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
+	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
+		Grouping: req.grouping()}
 
 	ctx, done := s.beginDownload(parent, req.key())
 	defer done()

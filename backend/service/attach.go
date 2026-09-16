@@ -115,9 +115,9 @@ func (s *Service) FrontendDetached(log *slog.Logger) {
 			drained++
 			_ = send(job.out, appload.MessageDownloadProgress, downloadProgress{
 				SourceID: job.req.SourceID, SeriesID: job.req.SeriesID,
-				VolumeID: job.req.VolumeID,
-				Phase:    phaseCancelled,
-				Message:  "Stopped, because Quire was closed. Start it again to carry on.",
+				VolumeID: job.req.VolumeID, Grouping: job.req.grouping(),
+				Phase:   phaseCancelled,
+				Message: "Stopped, because Quire was closed. Start it again to carry on.",
 			})
 			continue
 		default:
