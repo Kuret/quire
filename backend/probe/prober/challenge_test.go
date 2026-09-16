@@ -24,6 +24,10 @@ type stubTheme struct {
 	// Empty keeps the default, so every existing test is unaffected; the
 	// stage-5 image tests use it to point the fetch somewhere specific.
 	pageURL string
+	// searchErr makes Search fail with exactly the error a real theme builds
+	// for a refusal ("comick: /v1.0/search: HTTP 444"), which is what the
+	// status-wording tests are about. Nil keeps the working default.
+	searchErr error
 }
 
 func (s stubTheme) ID() string                  { return s.id }
@@ -38,6 +42,9 @@ func (s stubTheme) ValidateOverrides(map[string]any) error {
 func (s stubTheme) OverrideKeys() []theme.OverrideDoc { return nil }
 
 func (s stubTheme) Search(context.Context, *theme.Source, string, int) ([]theme.SeriesStub, error) {
+	if s.searchErr != nil {
+		return nil, s.searchErr
+	}
 	return []theme.SeriesStub{{ID: "/series/one/", Title: "One"}}, nil
 }
 
