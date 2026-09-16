@@ -1625,9 +1625,25 @@ interstitial**. What each one rests on instead is stated in the "basis" column,
 and the honest summary is:
 
 - **Published-fact signals.** The marker is a vendor's own documented endpoint
-  path, header name or cookie name. The inference "if this string is on the page
-  we were served, that vendor is interstitialling us" is sound, but the exact
-  markup a current interstitial emits is unverified.
+  path, header name or cookie name.
+
+  > **CORRECTION 2026-09-16 — this column said "published fact" about two
+  > different claims, and only one of them was.** The *string* is a published
+  > fact. The inference "**if this string is on a page we were served, that
+  > vendor is interstitialling us**" is **not**, and for several markers it is
+  > simply false: Cloudflare injects `/cdn-cgi/challenge-platform/` on ordinary
+  > 200 pages under bot management, Turnstile is routinely embedded in a form on
+  > a page served in full, and DDoS-Guard's `check.ddos-guard.net` script ships
+  > on pages it serves normally. Quire refused a working site on that inference
+  > — 200, 168 KB, 71 series links — and because `blocked_challenge` is
+  > terminal, the user could not add it at all.
+  >
+  > The table below now states the tier as well as the basis, and the code
+  > enforces the distinction (`conclusiveBodyMarkers` versus
+  > `corroboratedBodyMarkers`). If you are adding a marker, the question is not
+  > "is this string the vendor's?" but "**does this string only ever appear when
+  > content was withheld?**" — and if you cannot answer yes, it is
+  > corroboration-required.
 - **Structural signals.** No vendor involved: a refusal status, an interstitial
   title, an empty page. These are inference from shape alone and are the ones
   most likely to be wrong in either direction.
@@ -1637,23 +1653,41 @@ The fixtures under `backend/probe/prober/testdata/` are synthetic, at
 fixtures do and do not prove" applies unchanged: they pin *our detector*, not
 any live page.
 
-| Signal | Fires on | Basis |
-|---|---|---|
-| `/cdn-cgi/challenge-platform/` | body | Published fact — Cloudflare's reserved `/cdn-cgi/` path prefix, which only its own edge serves |
-| `challenge-platform/h/b/orchestrate` | body | Published fact — the orchestrate script under that same prefix |
-| `__cf_chl_` | body | Published fact — the prefix of Cloudflare's challenge parameters/handles |
-| `cf-challenge-running` | body | Published fact — the class the challenge page sets while running |
-| `challenges.cloudflare.com/turnstile` | body | Published fact — the Turnstile widget's own host |
-| `cf-mitigated: challenge` | header | Published fact — a header Cloudflare added specifically so clients can tell a challenge from a block. Fires alone |
-| `/_incapsula_resource?swcgh`, `_incapsula_resource?swjsv` | body | Published fact — Imperva/Incapsula's own resource endpoint |
-| `sucuri_cloudproxy_js` | body | Published fact — Sucuri CloudProxy's script identifier |
-| `/ddos-guard/js-challenge`, `check.ddos-guard.net` | body | Published fact — DDoS-Guard's challenge path and check host |
-| `/.well-known/captcha/` | body | Published fact — the registered well-known URI for a CAPTCHA gate |
-| 403/503 from a CDN edge **and** an interstitial `<title>` | status + header + title | **Structural.** Either half alone is ordinary; the pair is the classic shape. Titles matched: "just a moment", "attention required", "checking your browser", "please wait while we verify", "verifying you are human", "ddos-guard", "access denied", "security check" |
-| 503 from a CDN edge, any body | status + header | **Structural.** A managed edge answering 503 for a home page is an interstitial far more often than it is an outage — but this is the signal most likely to misfire during a genuine outage |
-| `<meta http-equiv="refresh">` to a challenge endpoint | body | **Structural**, with a published-fact target list (`/cdn-cgi/`, `captcha`, `__ddg`, `_incapsula_resource`) |
-| Clearance cookie (`cf_clearance`, `__ddg*`, `sucuri_cloudproxy_uuid`, `incap_ses_*`, `visid_incap_*`, `datadome`) | `Set-Cookie` | Published fact for the names; **structural** for when it counts. Only fires alongside a refusal status *or* a page with no recognisable content, because a long-lived clearance cookie can be re-issued on an ordinary page view. `TestOrdinarySiteBehindACDNIsNotRefused` pins that |
-| Generic JS gate | 200 + body < 6 KiB + no theme match + `<noscript>` or an empty mount point | **Structural, and the least certain.** It is what catches a vendor we have never heard of, which is why it needs all four conditions at once |
+**The governing rule, added 2026-09-16 after a false refusal cost a user a
+working site:**
+
+> **A response that served us real content is not a challenge, whatever markers
+> it carries.** An interstitial's whole purpose is to withhold content. If we
+> got the content, we were not interstitialled.
+
+Measured shapes, for calibration: a real interstitial is **~5 KB and a 403**; a
+served listing page is **150 KB+ at 200**. The code prefers "did a theme
+fingerprint this page, and is there a page here at all" over a raw byte
+threshold, because a threshold is a number somebody eventually has to re-tune.
+
+**Corroboration** means one of: a refusal status (403/503/429), or a body under
+6 KiB that no theme recognises. It is what `challengeCookies` has always
+required — that signal was right, and the body markers have now been brought
+into line with it.
+
+| Signal | Fires on | Tier | Basis |
+|---|---|---|---|
+| `__cf_chl_` | body | **Conclusive — fires alone** | Published fact — the prefix of Cloudflare's challenge options blob and handles. It configures the widget, and there is nothing to configure on a page that is not one |
+| `cf-challenge-running` | body | **Conclusive — fires alone** | Published fact — the class the challenge page sets on `<body>` while it runs |
+| `/ddos-guard/js-challenge` | body | **Conclusive — fires alone** | Published fact — DDoS-Guard's challenge document itself |
+| `sucuri_cloudproxy_js` | body | **Conclusive — fires alone** | Published fact — Sucuri CloudProxy's challenge loader, whose job is to reload the page once solved |
+| `/_incapsula_resource?swcgh`, `_incapsula_resource?swjsv` | body | **Conclusive — fires alone** | Published fact — Imperva/Incapsula's resource endpoint *with the challenge query parameters*. The bare path is ordinary instrumentation, so the parameters are load-bearing and stay in the string |
+| `/cdn-cgi/challenge-platform/` | body | **Corroboration required** | The path is Cloudflare's; its presence is **not** a challenge. Injected on ordinary served pages under bot management — this is the exact string of the 2026-09-16 false refusal |
+| `challenge-platform/h/b/orchestrate` | body | **Corroboration required** | Same script family, same problem |
+| `challenges.cloudflare.com/turnstile` | body | **Corroboration required** | Turnstile is routinely embedded in a login or comment form on a page served in full. A widget on a page is not a gate in front of it |
+| `check.ddos-guard.net` | body | **Corroboration required** | DDoS-Guard's ordinary client script, present on pages it serves normally. Previously listed alongside the challenge path as if the two were equivalent; they are not |
+| `/.well-known/captcha/` | body | **Corroboration required** | A CAPTCHA endpoint a page *references* may equally be one a form posts to |
+| `cf-mitigated: challenge` | header | **Conclusive — fires alone** | Published fact — a header Cloudflare added specifically so clients can tell a challenge from a block. It states the mitigation; nothing else sends it |
+| 403/503 from a CDN edge **and** an interstitial `<title>` | status + header + title | Combined | **Structural.** Either half alone is ordinary; the pair is the classic shape. Titles matched: "just a moment", "attention required", "checking your browser", "please wait while we verify", "verifying you are human", "ddos-guard", "access denied", "security check" |
+| 503 from a CDN edge, any body | status + header | Combined | **Structural.** A managed edge answering 503 for a home page is an interstitial far more often than it is an outage — but this is the signal most likely to misfire during a genuine outage |
+| `<meta http-equiv="refresh">` to a challenge endpoint | body | **Corroboration required** | **Structural**, with a published-fact target list (`/cdn-cgi/`, `captcha`, `__ddg`, `_incapsula_resource`). Brought into line with the body markers on 2026-09-16 by the same audit: a served page may carry a refresh to almost anything |
+| Clearance cookie (`cf_clearance`, `__ddg*`, `sucuri_cloudproxy_uuid`, `incap_ses_*`, `visid_incap_*`, `datadome`) | `Set-Cookie` | **Corroboration required** | Published fact for the names; **structural** for when it counts. Only fires alongside a refusal status *or* a page with no recognisable content, because a long-lived clearance cookie can be re-issued on an ordinary page view. `TestOrdinarySiteBehindACDNIsNotRefused` pins that |
+| Generic JS gate | 200 + body < 6 KiB + no theme match + `<noscript>` or an empty mount point | Combined (all four) | **Structural, and the least certain.** Home page only: it asks a question that only means anything about a document, so stage 5's image fetch never applies it. It is what catches a vendor we have never heard of, which is why it needs all four conditions at once |
 
 Edge headers used as the second half of a combined signal, never alone:
 `cf-ray`, `cf-mitigated`, `server: cloudflare`, `server: ddos-guard`,
@@ -1669,7 +1703,19 @@ Quire refuse sites it can read perfectly well.
 
 **When one of these turns out to be wrong,** correct the table with what was
 actually seen, and say where it was seen in general terms — never name the site
-(PLAN §1.3).
+(PLAN §1.3). That has happened once, on 2026-09-16, and the regression fixture
+is `testdata/home-served-with-challenge-script.html`: a 200 full of content with
+one challenge-platform script in it, which must never again be refused. The
+paired assertion is `TestVerdictBlockedChallenge`, which pins the true positives
+— the fix was a corroboration requirement, not a softening, and both halves have
+to stay green.
+
+**Which failure is worse?** Both are lies and neither is acceptable, but they
+fail differently. A missed challenge produces a `partial` or a failed capability
+check — Quire says something honest and unhelpful. A false `blocked_challenge`
+is **terminal**: the source cannot be added at all, there is no override, and
+the user is told a site refused them when it did not. So when a signal is
+genuinely ambiguous, require corroboration.
 
 ---
 
