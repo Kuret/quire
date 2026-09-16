@@ -144,6 +144,20 @@ const (
 	// drawing is a shell that looks broken.
 	MessageWatchUpdate MessageType = 64
 
+	// The 70s are device-wide settings — things that are about Quire rather
+	// than about any one source.
+	//
+	// MessageSetConsultRobots is UI→BE, JSON {consultRobots}. It is the one
+	// global robots.txt switch of PLAN §7.4, which is off by default: RFC 9309
+	// scopes robots.txt to crawlers, and a person searching and tapping is
+	// driving every request.
+	//
+	// There is no BE→UI answer of its own. The current value rides on the Pong
+	// status, which is the one message the shell already has to receive before
+	// it can draw itself, so the settings screen pings after toggling and gets
+	// the stored value back rather than trusting its own optimism.
+	MessageSetConsultRobots MessageType = 70
+
 	// MessageError is BE→UI, JSON {code, message}.
 	MessageError MessageType = 90
 )
@@ -183,6 +197,7 @@ var messageNames = map[MessageType]string{
 	MessageCheckWatched:          "CheckWatched",
 	MessageWatchList:             "WatchList",
 	MessageWatchUpdate:           "WatchUpdate",
+	MessageSetConsultRobots:      "SetConsultRobots",
 	MessageError:                 "Error",
 }
 

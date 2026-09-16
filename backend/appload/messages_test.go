@@ -42,6 +42,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"CheckWatched":          62,
 		"WatchList":             63,
 		"WatchUpdate":           64,
+		"SetConsultRobots":      70,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {

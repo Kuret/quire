@@ -47,4 +47,8 @@ var CheckWatched = 62
 var WatchList = 63
 var WatchUpdate = 64
 
+// The one global robots.txt switch (PLAN §7.4, off by default). The current
+// value comes back on the Pong status rather than in a reply of its own.
+var SetConsultRobots = 70
+
 var Error = 90
