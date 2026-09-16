@@ -40,7 +40,7 @@ func TestTrashingADocumentForgetsItAndReclaimsThePDF(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","trashed":true}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true}`)
 
 	var reply struct {
 		DocumentUUID string `json:"documentUuid"`
@@ -79,7 +79,7 @@ func TestAFailedTrashKeepsTheRecord(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","trashed":false}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":false}`)
 
 	var e struct {
 		Code    string `json:"code"`
@@ -126,7 +126,7 @@ func TestDeletingOnePartLeavesTheOtherParts(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+victim.DocumentUUID+`","trashed":true}`)
+		`{"documentUuid":"`+victim.DocumentUUID+`","confirmed":true,"trashed":true}`)
 	fresh.wait(t, appload.MessageDownloadDeleted)
 
 	after := libStore.List()
@@ -146,7 +146,7 @@ func TestDeletingNothingIsRefused(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
 	addSource(t, store)
 
-	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","trashed":true}`)
+	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","confirmed":true,"trashed":true}`)
 
 	var e struct {
 		Code string `json:"code"`
@@ -155,6 +155,64 @@ func TestDeletingNothingIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.Code != "bad_request" {
+		t.Errorf("code %q", e.Code)
+	}
+}
+
+// The confirmation step. An accidental tap must not destroy a download, so the
+// first message deletes nothing and answers with the question — named, so the
+// user can see which file is going.
+func TestDeletingAsksFirstAndNamesTheDocument(t *testing.T) {
+	svc, store, libStore, _, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	done := waitForPhase(t, rec, "done")
+	uuid, _ := done["documentUuid"].(string)
+	name := recordFor(t, libStore, uuid).VisibleName
+
+	fresh := &recorder{}
+	handle(t, svc, fresh, appload.MessageDeleteDownload, `{"documentUuid":"`+uuid+`"}`)
+
+	var q struct {
+		DocumentUUID string `json:"documentUuid"`
+		Message      string `json:"message"`
+	}
+	if err := json.Unmarshal(fresh.wait(t, appload.MessageDeleteConfirm), &q); err != nil {
+		t.Fatal(err)
+	}
+	if q.DocumentUUID != uuid {
+		t.Errorf("the question is about %q, want %q", q.DocumentUUID, uuid)
+	}
+	if !strings.Contains(q.Message, name) {
+		t.Errorf("question %q does not name %q", q.Message, name)
+	}
+	if !strings.Contains(q.Message, "Trash") {
+		t.Errorf("question %q does not say where the document goes", q.Message)
+	}
+	if n := len(libStore.List()); n != 1 {
+		t.Errorf("%d records; asking must not delete anything", n)
+	}
+}
+
+// Asking about a document Quire no longer knows about is answered, not
+// ignored: the row on screen can outlive the record behind it.
+func TestAskingAboutAnUnknownDocumentSaysSo(t *testing.T) {
+	svc, store, _, _, rec := newDownloadService(t)
+	addSource(t, store)
+
+	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"no-such-document"}`)
+
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageError), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "not_found" {
 		t.Errorf("code %q", e.Code)
 	}
 }

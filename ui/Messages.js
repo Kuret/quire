@@ -49,6 +49,7 @@ var OpenInReader = 50
 // ReaderHandoff.qml — and DeleteDownload reports what it did, so the backend
 // can forget the record only when the document really went.
 var DeleteDownload = 51
+var DeleteConfirm = 53
 var DownloadDeleted = 52
 
 var WatchSeries = 60

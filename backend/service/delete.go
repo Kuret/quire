@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/library"
 )
 
 // deleteRequest is the MessageDeleteDownload payload.
@@ -18,9 +19,15 @@ import (
 type deleteRequest struct {
 	DocumentUUID string `json:"documentUuid"`
 
+	// Confirmed is false on the first message, which is the frontend asking
+	// *what to ask the user*. It mirrors MessageEnqueueDownload: the question
+	// is a sentence, and PLAN §2 keeps every sentence in the backend — this is
+	// also the only side that knows what the document is called on the tablet.
+	Confirmed bool `json:"confirmed,omitempty"`
+
 	// Trashed is what the frontend observed, not what it intended. False means
 	// the document is still on the tablet.
-	Trashed bool `json:"trashed"`
+	Trashed bool `json:"trashed,omitempty"`
 }
 
 // DeleteFailedRemedy is what the user is told when the trash call did not take.
@@ -41,6 +48,35 @@ const DeleteFailedRemedy = "Quire could not remove that document from your reMar
 const DeleteNotForgottenRemedy = "That document is in your reMarkable's Trash, but Quire could not update " +
 	"its own record of it. Tapping Read will sort itself out."
 
+// DeleteUnknownRemedy answers a delete for a document Quire has no record of.
+//
+// It can happen honestly — a record dropped by the reader handoff a moment ago,
+// a list on screen older than the store — so it is phrased as the state of the
+// world rather than as the user having done something wrong.
+const DeleteUnknownRemedy = "Quire has no record of that download any more, so there is nothing for it " +
+	"to delete."
+
+// deleteQuestion is the sentence the confirm strip asks.
+//
+// It names the document exactly as the tablet does, which is the whole point:
+// for a volume split across the upload cap the row's title is the chapter range
+// and the *document* is "… (part 2 of 3)". Naming the file is what makes it
+// legible that one part is going and the others are staying.
+//
+// It says Trash, not deleted, because Trash is where the document goes (PLAN
+// §12.4 — the metadata reads "parent": "trash" afterwards). Copy that claimed
+// otherwise would be a lie the user finds out about later, with a full Trash.
+func deleteQuestion(name string) string {
+	if name == "" {
+		// A record from before names were kept. "That download" is vague, but
+		// it is not wrong, and inventing a name would be.
+		return "Move that download to your reMarkable’s Trash? It stays in the Trash until you empty it, " +
+			"and Quire will offer the download again."
+	}
+	return "Move “" + name + "” to your reMarkable’s Trash? It stays in the Trash until you empty it, " +
+		"and Quire will offer the download again."
+}
+
 // deleteDownload forgets a document the frontend has moved to xochitl's Trash,
 // and reclaims the PDF that was assembled to make it.
 //
@@ -51,6 +87,19 @@ const DeleteNotForgottenRemedy = "That document is in your reMarkable's Trash, b
 func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 	if req.DocumentUUID == "" {
 		return s.sendError(out, "bad_request", "Quire was asked to delete nothing.")
+	}
+
+	if !req.Confirmed {
+		// Step one: hand back the question. Nothing is touched, and an
+		// accidental tap can get no further than this.
+		rec, ok := s.recordFor(req.DocumentUUID)
+		if !ok {
+			return s.sendError(out, "not_found", DeleteUnknownRemedy)
+		}
+		return send(out, appload.MessageDeleteConfirm, map[string]any{
+			"documentUuid": req.DocumentUUID,
+			"message":      deleteQuestion(rec.VisibleName),
+		})
 	}
 
 	if !req.Trashed {
@@ -95,4 +144,17 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 	// saying "Read", the document really is in the Trash, and a silent reply
 	// would leave the row offering to open something that is not there.
 	return send(out, appload.MessageDownloadDeleted, map[string]any{"documentUuid": req.DocumentUUID})
+}
+
+// recordFor finds the stored record for a document UUID.
+func (s *Service) recordFor(uuid string) (library.Record, bool) {
+	if s.libStore == nil {
+		return library.Record{}, false
+	}
+	for _, rec := range s.libStore.List() {
+		if rec.DocumentUUID == uuid {
+			return rec, true
+		}
+	}
+	return library.Record{}, false
 }

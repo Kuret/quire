@@ -126,6 +126,15 @@ const (
 	// longer account for, which is strictly worse than no delete button.
 	MessageDeleteDownload MessageType = 51
 
+	// MessageDeleteConfirm is BE→UI, JSON {documentUuid, message}: the question
+	// to put in front of the user before anything is deleted.
+	//
+	// It mirrors the download confirmation, and for the same reason — the
+	// sentence is the backend's (PLAN §2), and here it is also the only side
+	// that knows what the document is called on the tablet, which for a split
+	// volume is the part number the user needs to see.
+	MessageDeleteConfirm MessageType = 53
+
 	// MessageDownloadDeleted is BE→UI, JSON {documentUuid}. It is the backend
 	// saying it has forgotten that document, which is the frontend's cue to put
 	// every row pointing at it back to offering a download.
@@ -227,6 +236,7 @@ var messageNames = map[MessageType]string{
 	MessageCancelDownload:        "CancelDownload",
 	MessageOpenInReader:          "OpenInReader",
 	MessageDeleteDownload:        "DeleteDownload",
+	MessageDeleteConfirm:         "DeleteConfirm",
 	MessageDownloadDeleted:       "DownloadDeleted",
 	MessageWatchSeries:           "WatchSeries",
 	MessageUnwatchSeries:         "UnwatchSeries",

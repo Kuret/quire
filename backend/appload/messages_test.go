@@ -40,6 +40,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"OpenInReader":          50,
 		"DeleteDownload":        51,
 		"DownloadDeleted":       52,
+		"DeleteConfirm":         53,
 		"WatchSeries":           60,
 		"UnwatchSeries":         61,
 		"CheckWatched":          62,
