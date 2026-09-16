@@ -17,6 +17,7 @@ import (
 	"github.com/rickl/quire/backend/assemble"
 	"github.com/rickl/quire/backend/download"
 	"github.com/rickl/quire/backend/fetch"
+	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/theme"
 )
@@ -575,6 +576,20 @@ func (s *Service) downloadPages(ctx context.Context, out Sender, src *theme.Sour
 	chs []download.Chapter, p *downloadProgress) ([]assemble.Chapter, download.Stats, error) {
 
 	opts := s.downloadOptions
+
+	// The per-source strip-splitting override (PLAN §12.3). An unparseable
+	// value cannot reach here — Registry.Validate refuses it when the source is
+	// added or imported — so a bad one falls back to the default rather than
+	// failing a download the user has already confirmed.
+	if mode, err := imageproc.ParseSplitMode(src.SplitStrips); err != nil {
+		s.log.Warn("ignoring an invalid splitStrips value", "source", src.ID, "value", src.SplitStrips)
+	} else {
+		opts.SplitStrips = mode
+	}
+	opts.OnSplit = func(url string, pages int) {
+		s.log.Info("split a vertical-scroll strip", "source", src.ID, "url", url, "pages", pages)
+	}
+
 	opts.OnProgress = func(pr download.Progress) {
 		p.Phase = phaseFetching
 		p.PagesDone, p.PagesTotal = pr.PagesDone, pr.PagesTotal
