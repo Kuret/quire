@@ -69,13 +69,12 @@ Window {
     property int deleteConfirms: 0
     property string deleteConfirmedAbout: ""
 
-    // What a selection asked to queue (PLAN §12.1). Counters again: the point
-    // of the confirmation is that picking rows queues nothing until it is
-    // answered, which is only observable as a count that did not move.
-    property int queueAsks: 0
+    // What a selection queued (PLAN §12.1). Counters, because the properties
+    // worth holding are all about how *many* times something happened: picking
+    // rows queues nothing, and the footer queues once.
     property int queueConfirms: 0
-    property var queueAskedFor: []
-    property bool queueAskedForVolumes: false
+    property var queueSent: []
+    property bool queueSentVolumes: false
 
     property int failures: 0
     function want(label, got, expected) {
@@ -156,14 +155,10 @@ Window {
                       win.volumeAsks++
                       win.volumeAskedFor = chapterId
                   }
-                  onQueueRequested: {
-                      win.queueAsks++
-                      win.queueAskedFor = chapterIds
-                      win.queueAskedForVolumes = volumes
-                  }
                   onQueueConfirmed: {
                       win.queueConfirms++
-                      win.queueAskedFor = chapterIds
+                      win.queueSent = chapterIds
+                      win.queueSentVolumes = volumes
                   }
                   onDeleteRequested: {
                       win.deleteAsks++
@@ -768,7 +763,7 @@ Window {
         chapterList.toggleSelected("c2", "", "")
         win.want("two rows are selected", chapterList.selectedCount, 2)
         win.want("the count says so", win.findChild(chapterList, "selectionCount").text, "2 selected")
-        win.want("picking rows queues nothing", win.queueAsks, 0)
+        win.want("picking rows queues nothing", win.queueConfirms, 0)
 
         chapterList.toggleSelected("c2", "", "")
         win.want("tapping a selected row takes it off", chapterList.selectedCount, 1)
@@ -778,36 +773,31 @@ Window {
         chapterList.toggleSelected("c3", "", "doc-read")
         win.want("a finished row cannot be selected", chapterList.selectedCount, 1)
 
-        // The footer asks; it does not queue.
+        // The footer queues, immediately: no question, no strip. Picking the
+        // rows was the deliberate step, and the user asked for the second one
+        // to go.
         win.findChild(chapterList, "queueSelectionArea").clicked(null)
-        win.want("the footer asks once", win.queueAsks, 1)
-        win.want("and asks about the selected row", win.queueAskedFor.length, 1)
-        win.want("asking queues nothing", win.queueConfirms, 0)
-
-        // The backend's sentence, as Main.qml applies it.
-        chapterList.confirmingKind = "queue"
-        chapterList.confirmingId = "selection"
-        chapterList.confirmingMessage = "Download 1 chapter?"
-        var strip = win.findChild(chapterList, "confirmStrip")
-        win.want("the question is on screen", strip.visible, true)
-        win.want("and the bar gives way to it", bar.visible, false)
-        win.want("and offers a way out", win.findChild(chapterList, "cancelQueueButton").visible, true)
-
-        // "Not yet" keeps the selection: the usual reason for it is to take a
-        // row back off before saying yes.
-        win.findChild(chapterList, "cancelQueueArea").clicked(null)
-        win.want("backing out closes the question", strip.visible, false)
-        win.want("and keeps the selection", chapterList.selectedCount, 1)
-        win.want("and leaves the mode on", chapterList.selecting, true)
-
-        // Confirming queues once and spends the selection.
-        chapterList.confirmingKind = "queue"
-        chapterList.confirmingId = "selection"
-        chapterList.confirmingMessage = "Download 1 chapter?"
-        win.findChild(chapterList, "confirmDownloadButton").children[1].clicked(null)
-        win.want("confirming queues once", win.queueConfirms, 1)
-        win.want("confirming leaves the mode", chapterList.selecting, false)
+        win.want("the footer queues once", win.queueConfirms, 1)
+        win.want("it queues exactly the rows picked", win.queueSent.length, 1)
+        win.want("and the row it queues is the one picked", win.queueSent[0], "c0")
+        win.want("it says which list they came from", win.queueSentVolumes, false)
+        win.want("queueing leaves the mode", chapterList.selecting, false)
         win.want("and clears the selection", chapterList.selectedCount, 0)
+
+        // Nothing is asked on the way: the strip stays where it was, which is
+        // away.
+        var strip = win.findChild(chapterList, "confirmStrip")
+        win.want("no question is put in front of it", strip.visible, false)
+        win.want("and the strip is not left in a queue mode",
+                 chapterList.confirmingKind, "download")
+
+        // An empty selection has nothing to queue, and the footer says no by
+        // doing nothing rather than by sending an empty message.
+        win.findChild(chapterList, "selectArea").clicked(null)
+        win.findChild(chapterList, "queueSelectionArea").clicked(null)
+        win.want("an empty selection queues nothing", win.queueConfirms, 1)
+        win.want("and stays in the mode", chapterList.selecting, true)
+        win.findChild(chapterList, "cancelSelectionArea").clicked(null)
 
         // Leaving by the footer selects nothing, and turning a page forgets
         // what was picked on the page before it.

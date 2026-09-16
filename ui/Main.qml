@@ -232,19 +232,13 @@ Rectangle {
             root.applyDownloadProgress(msg)
             return
 
-        case Msg.QueueConfirm:
-            // The backend's question about the selection, put where questions
-            // are asked. The strip does not need the ids: the selection is the
-            // screen's, and it is still standing behind the strip.
-            chapterListScreen.confirmingKind = "queue"
-            chapterListScreen.confirmingId = "selection"
-            chapterListScreen.confirmingMessage = msg && msg.message ? msg.message : ""
-            return
-
         case Msg.QueueResult:
             // Only says anything when something did not fit. Every row that did
             // says "Queued." for itself, and a summary of what the list already
             // shows is a sentence that teaches people to skip sentences.
+            //
+            // With nothing asked before a selection is queued, this is the only
+            // place the user hears about a selection the queue could not take.
             if (msg && msg.message)
                 root.lastError = msg.message
             return
@@ -271,8 +265,7 @@ Rectangle {
             // A delete question left open over an answer that went wrong would
             // invite tapping it again. Only that one: a download confirmation
             // is about a different row and is not what failed.
-            if (chapterListScreen.confirmingKind === "delete"
-                || chapterListScreen.confirmingKind === "queue")
+            if (chapterListScreen.confirmingKind === "delete")
                 chapterListScreen.closeConfirm()
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
@@ -738,16 +731,12 @@ Rectangle {
             onDeleteRequested: root.send(Msg.DeleteDownload, {"documentUuid": documentUuid})
             onDeleteConfirmed: root.deleteDownload(documentUuid)
 
-            // A selection of rows, asked about once and queued once. The
-            // grouping rides on it exactly as it does on a single download,
-            // because the two lists hold different things.
-            onQueueRequested: root.send(Msg.EnqueueDownloads, {
-                "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
+            // A selection of rows, queued in one message and without a
+            // question. The grouping rides on it exactly as it does on a single
+            // download, because the two lists hold different things.
             onQueueConfirmed: root.send(Msg.EnqueueDownloads, {
                 "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter",
-                "confirmed": true})
+                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
         }
 
         Settings {

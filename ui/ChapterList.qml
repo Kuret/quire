@@ -100,11 +100,10 @@ Item {
     signal deleteRequested(string documentUuid)
     signal deleteConfirmed(string documentUuid)
 
-    // Queueing a selection (PLAN §12.1). Two signals for the same two steps as
-    // a delete: the first asks the backend for the question, the second is the
-    // answer. The ids travel with both, because the selection is the view's and
-    // the sentence about it is the backend's.
-    signal queueRequested(var chapterIds, bool volumes)
+    // Queueing a selection (PLAN §12.1). One signal, because there is one step:
+    // the footer queues what was picked, immediately. Picking the rows is
+    // itself the deliberate act, and a question behind a deliberate act is a
+    // tap people learn to make without reading it.
     signal queueConfirmed(var chapterIds, bool volumes)
 
     signal watchRequested()
@@ -131,12 +130,13 @@ Item {
     property string confirmingId: ""
     property string confirmingMessage: ""
 
-    // Which question the strip is asking. "download" is the volume-download
-    // confirmation the strip was built for, "delete" is PLAN §12.4's, and
-    // "queue" is a selection of rows. One property rather than a third strip:
-    // there is one place at the foot of the list for a question, and two
-    // strips fighting over it is two ways to answer the one you were not
-    // looking at.
+    // Which question the strip is asking: "download" is the volume-download
+    // confirmation the strip was built for, "delete" is PLAN §12.4's. One
+    // property rather than a strip each, because there is one place at the foot
+    // of the list for a question and two strips fighting over it is two ways to
+    // answer the one you were not looking at.
+    //
+    // A selection is not one of them any more: it queues without asking.
     property string confirmingKind: "download"
 
     // ---- selecting several rows --------------------------------------------
@@ -235,16 +235,21 @@ Item {
         screen.clearSelection()
     }
 
-    // askToQueue opens the question for the selection. The sentence is the
-    // backend's: it is the one that knows what a queue of this size costs, and
-    // PLAN §2 keeps every sentence there.
-    function askToQueue() {
+    // queueSelection queues what was picked and leaves the mode.
+    //
+    // The ids are taken before the selection is cleared: leaveSelection assigns
+    // a fresh empty array rather than emptying this one, so what was picked
+    // travels on intact.
+    //
+    // What the queue could not take is the backend's to say, once, when it has
+    // tried — see MessageQueueResult. Nothing is guessed at here.
+    function queueSelection() {
         if (screen.selectedCount === 0)
             return
-        screen.confirmingId = ""
-        screen.confirmingMessage = ""
-        screen.confirmingKind = "queue"
-        screen.queueRequested(screen.selectedIds, screen.showingVolumes)
+        var ids = screen.selectedIds
+        var volumes = screen.showingVolumes
+        screen.leaveSelection()
+        screen.queueConfirmed(ids, volumes)
     }
 
     // askToDelete opens the delete question for a row. The sentence itself
@@ -945,7 +950,7 @@ Item {
                     objectName: "queueSelectionArea"
                     anchors.fill: parent
                     enabled: screen.selectedCount > 0
-                    onClicked: screen.askToQueue()
+                    onClicked: screen.queueSelection()
                 }
             }
         }
@@ -960,8 +965,10 @@ Item {
     // send the question — so this strip belongs to the volume view in practice,
     // and confirming from it confirms a volume.
     //
-    // A selection of rows asks here too, for the same reason and through the
-    // same strip: "queue" is the third thing confirmingKind can be.
+    // A *selection* of rows does not ask, here or anywhere: the footer queues
+    // what was picked. That leaves the asymmetry of one volume selected queuing
+    // straight away while that same volume's own Download button still asks —
+    // deliberate, and the user's own call.
     Rectangle {
         id: confirmStrip
         objectName: "confirmStrip"
@@ -990,37 +997,6 @@ Item {
             color: Style.muted
         }
 
-        // The way back out of the queue question. It closes the question and
-        // leaves the selection exactly as it was, because "not yet" after
-        // reading how many rows it is usually means "let me take one off".
-        Rectangle {
-            id: cancelQueueButton
-            objectName: "cancelQueueButton"
-            visible: screen.confirmingKind === "queue"
-            anchors { right: confirmButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
-            width: 160
-            height: Style.buttonHeight
-            color: cancelQueueArea.pressed ? Style.pressed : Style.paper
-            border.width: 2
-            border.color: Style.ink
-            radius: 6
-
-            Text {
-                anchors.centerIn: parent
-                text: "Not yet"
-                font.pointSize: Style.smallSize
-                color: Style.ink
-            }
-
-            MouseArea {
-                id: cancelQueueArea
-                objectName: "cancelQueueArea"
-                anchors.fill: parent
-                enabled: cancelQueueButton.visible
-                onClicked: screen.closeConfirm()
-            }
-        }
-
         Rectangle {
             id: confirmButton
             objectName: "confirmDownloadButton"
@@ -1035,7 +1011,7 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: screen.confirmingKind === "queue" ? "Download them" : "Download all"
+                text: "Download all"
                 font.pointSize: Style.smallSize
                 color: Style.ink
             }
@@ -1046,17 +1022,7 @@ Item {
                 onClicked: {
                     var id = screen.confirmingId
                     var volume = screen.showingVolumes
-                    var queueing = screen.confirmingKind === "queue"
-                    var ids = screen.selectedIds
-
-                    // Both doors close before anything is sent: the question is
-                    // answered, and the selection it was about has been spent.
                     screen.closeConfirm()
-                    if (queueing) {
-                        screen.leaveSelection()
-                        screen.queueConfirmed(ids, volume)
-                        return
-                    }
                     if (volume)
                         screen.volumeDownloadConfirmed(id)
                     else
