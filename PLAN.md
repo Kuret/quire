@@ -651,8 +651,36 @@ message naming what was tried.
      PDF; pdfcpu holds the whole document in memory). The device has ~2 GB
      *shared with xochitl*. If this bites, the answers are smaller volumes or a
      streaming writer.
-- **One PDF per volume, not per chapter.** Chapter PDFs clutter the library and
-  make reading position meaningless. Quire maps chapters → (volume PDF, page
+- ~~**One PDF per volume, not per chapter.**~~ **REVERSED 2026-09-16, after
+  using it: one PDF per chapter, by default, even when the source publishes
+  volume labels.**
+
+  *The original reasoning was that chapter PDFs clutter the library and make
+  reading position meaningless.* Clutter is real — xochitl has no folder-create
+  API (§6 M5), so a 200-chapter series is 200 flat entries. But "reading
+  position meaningless" was overstated: position simply becomes per-chapter,
+  which is how a great many people read anyway.
+
+  **What the original reasoning missed entirely is sampling.** The plan assumed
+  the user had already decided to read something. In practice the first thing
+  you do with an unfamiliar series is read a few pages to find out whether you
+  want the rest — and a 7–10 minute wait before *anything* is readable makes
+  that impossible. Per chapter, the first file arrives in about a minute.
+
+  Two further gains the original weighing did not include: **a failure costs one
+  chapter rather than ten**, which matters because downloads do fail; and
+  cancelling costs less.
+
+  Grouping remains available as a per-source setting (volume labels, or a fixed
+  count) for anyone who wants it. **Volume labels no longer win by default** —
+  the source's structure is information, not an instruction.
+
+  Consequences: M6's chapter→(PDF, page offset) map becomes trivial (offset 0),
+  which is a simplification rather than a risk; the §6 M4 confirm step becomes
+  unnecessary for a single chapter and should not appear (a prompt that always
+  says the same thing is one people learn to tap through); and **existing
+  volume PDFs already in a user's library must keep resolving for "Read"** —
+  changing the default must not orphan what is already downloaded. Quire maps chapters → (volume PDF, page
   offset). Where a source has no volume structure, group by a configurable
   chapter count (default 10).
   **Grouping precedence (settled after §7.2's ordering contract):**
