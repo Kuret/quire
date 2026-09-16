@@ -14,6 +14,7 @@ import (
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/weebcentral"
 )
 
 // This file is the cross-theme half of PLAN §7.5 stage 4: it is not enough
@@ -62,12 +63,20 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(mangakakalot.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// weebcentral is neither WordPress nor an API, and its pages carry almost
+	// no class names to collide on — which makes the interesting risk the
+	// other direction: its signals are endpoint *paths*, and a path like
+	// /series/ or /chapters/ is exactly the kind of thing another family
+	// happens to use. It scores on every page below like the rest.
+	if err := reg.Register(weebcentral.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 4
+const scorers = 5
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -128,6 +137,26 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a mangakakalot reader page",
 			file:       "mangakakalot/testdata/reader.html",
 			wantWinner: mangakakalot.ID,
+		},
+		{
+			name:       "a weebcentral home page",
+			file:       "weebcentral/testdata/home.html",
+			wantWinner: weebcentral.ID,
+		},
+		{
+			name:       "a weebcentral series page",
+			file:       "weebcentral/testdata/series.html",
+			wantWinner: weebcentral.ID,
+		},
+		{
+			name:       "a weebcentral chapter-list fragment",
+			file:       "weebcentral/testdata/chapters.html",
+			wantWinner: weebcentral.ID,
+		},
+		{
+			name:       "a weebcentral reader fragment",
+			file:       "weebcentral/testdata/reader.html",
+			wantWinner: weebcentral.ID,
 		},
 		{
 			// The deliberate near-miss: WordPress, comic-shaped, and neither
