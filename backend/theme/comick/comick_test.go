@@ -401,7 +401,7 @@ func TestDiscoveryOnlyIsAvailable(t *testing.T) {
 
 func TestFingerprintClearsTheThresholdOnEveryFixture(t *testing.T) {
 	const confident = 60
-	for _, file := range []string{"series.html", "reader.html", "search.json"} {
+	for _, file := range []string{"home.html", "series.html", "reader.html"} {
 		t.Run(file, func(t *testing.T) {
 			score := comick.New(nil).Fingerprint(pageFromFile(t, file))
 			if score < confident {
@@ -412,11 +412,42 @@ func TestFingerprintClearsTheThresholdOnEveryFixture(t *testing.T) {
 	}
 }
 
+// A bare API response is **not** a page the probe judges, and this records what
+// it actually scores rather than pretending otherwise.
+//
+// PLAN §7.5 stage 2 fetches the root the user pasted; nothing in the probe ever
+// lands on /api/search. So the shell signals — which are what carry every real
+// rendering — cannot fire here, and what is left is the envelope and one
+// identifier key: 50, under the threshold of 60.
+//
+// That is the honest number and it is deliberately not inflated. §9's rule is
+// to fingerprint the page the probe judges, and the corollary is that padding
+// weights to make a body the probe never sees clear the bar would be tuning
+// against a fixture rather than a site — the exact mistake that put this
+// theme's home-page score at 25.
+//
+// It is pinned so that a later change has to look at it. The fixture's score
+// and the live response's agreed exactly when measured on 2026-09-16, which is
+// the property that matters: an earlier version of the fixture scored 65 here
+// and 50 on the wire, because it wrote unescaped slashes the server escapes.
+func TestABareAPIResponseScoresBelowTheThresholdAndThatIsCorrect(t *testing.T) {
+	const measured = 50
+	got := comick.New(nil).Fingerprint(pageFromFile(t, "search.json"))
+	if got != measured {
+		t.Errorf("score = %d, want %d — the number measured against the live response on "+
+			"2026-09-16. If the fingerprint changed, re-measure rather than editing this.", got, measured)
+	}
+	if got >= 60 {
+		t.Errorf("score = %d: a body the probe never fetches now clears the threshold, "+
+			"which means weights were tuned for something other than a real landing page", got)
+	}
+}
+
 func TestFingerprintIsZeroedByAnotherThemesMarker(t *testing.T) {
 	th := comick.New(nil)
-	base := pageFromFile(t, "series.html")
+	base := pageFromFile(t, "home.html")
 	if th.Fingerprint(base) < 60 {
-		t.Fatal("the unmodified series page does not score; the rest of this test proves nothing")
+		t.Fatal("the unmodified home page does not score; the rest of this test proves nothing")
 	}
 	for _, marker := range []string{
 		`<link rel="stylesheet" href="/wp-content/plugins/madara/css/style.css">`,

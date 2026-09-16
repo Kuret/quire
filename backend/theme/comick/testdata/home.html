@@ -1,0 +1,130 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape this software's **root** serves, and it exists because
+  the absence of one cost a working site a verdict. PLAN §9: a fingerprint must
+  be measured against the page the probe actually judges, and that page is the
+  one the user pastes — the root. The first version of this theme had fixtures
+  only for the pages it *reads*, scored 100 against them, and scored **25**
+  against the real root, so the prober answered "unrecognised" for a site whose
+  API worked perfectly.
+
+  What the real root is, measured 2026-09-16: for a logged-out visitor it is
+  **almost entirely a marketing landing page**. No comic grid, no #comic-data,
+  no API envelope, no JSON. Every piece of evidence the old fingerprint looked
+  for was simply not there.
+
+  So this fixture reproduces what *is* there, which is the application shell:
+
+    - a Laravel/Vite build, whose entry chunks are named after this
+      application's own modules (settings-sync, owl-carousel, header, ...)
+    - an Alpine component vocabulary with a namespace of its own —
+      Utils.loadTheme() on <html> and Header.loadDataHeader() on the header
+    - the site header's navigation, including two listing paths particular to
+      this software
+    - a features section that is copy rather than content
+
+  All of those were present on all four live renderings measured (root, search,
+  series, chapter), which is what makes them worth scoring.
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing a real
+  aggregator's domain or content, and §1.4 forbids copying anyone's expression.
+  The shell's *shape* is an observable fact about the software; the words, the
+  build hashes and the host are ours. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en" x-data="Utils.loadTheme()">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="origin">
+
+  <title>Example Comics - Read Comics Online</title>
+
+  <link rel="preconnect" href="https://fonts.example.invalid">
+  <link rel="stylesheet" href="/build/assets/app-BqR2vN1a.css">
+
+  <script type="module" src="/build/assets/app-Ci31YMOj.js"></script>
+  <script type="module" src="/build/assets/auth-BJ5b3CSS.js"></script>
+  <script type="module" src="/build/assets/home-CuwydLan.js"></script>
+  <script type="module" src="/build/assets/utils-BhNZlY5s.js"></script>
+  <script type="module" src="/build/assets/search-EyXSzVzj.js"></script>
+  <script type="module" src="/build/assets/popular-CPEhQamf.js"></script>
+  <script type="module" src="/build/assets/header-IrjfPRfj.js"></script>
+  <script type="module" src="/build/assets/user-dropdown-DlZ6qaqD.js"></script>
+  <script type="module" src="/build/assets/settings-sync-DkEAqJg5.js"></script>
+  <script type="module" src="/build/assets/owl-carousel-DCrA3J-z.js"></script>
+  <script type="module" src="/build/assets/alpine-Duq4ovsg.js"></script>
+</head>
+<body class="font-sans antialiased transition-colors duration-200 min-h-screen flex flex-col" :class="darkMode">
+
+<header class="relative z-100" x-data="Header.loadDataHeader()">
+  <div class="padding-safe-top w-full top-0 sticky"
+       x-data="{ isSearchDialogVisible: false, currentUser: getCurrentUser() }">
+    <div class="flex w-full text-center items-center z-10 lg:hidden" id="navbar">
+      <a class="flex-1 border-b-2 py-2 justify-center flex flex-col text-xs" href="/">Home</a>
+      <a class="flex-1 border-b-2 py-2 justify-center flex flex-col text-xs" href="/search">Search</a>
+      <a class="flex-1 border-b-2 py-2 justify-center flex flex-col text-xs" href="/activity">Activity</a>
+    </div>
+
+    <div class="hidden lg:flex items-center gap-4">
+      <a class="flex items-center flex-none cursor-pointer group" aria-label="Landing Page" href="/">
+        <img src="/images/logo.webp" alt="" aria-hidden="true">
+      </a>
+      <div class="dropdown" x-data="{ isDropdownOpen: false }">
+        <a class="block p-2 hover:text-blue-500" href="/categories">Browse Comics by Category</a>
+        <a class="block p-2 hover:text-blue-500" href="/genres">Browse Comics by Genre</a>
+        <a class="block p-2 hover:text-blue-500" href="/publisher/popular">Popular Publishers</a>
+        <a class="block p-2 hover:text-blue-500" href="/group/popular">Popular Groups</a>
+      </div>
+      <a class="font-semibold link hidden lg:block" href="/search">Search</a>
+      <a class="font-semibold link hidden lg:block" href="/languages">Languages</a>
+      <a class="font-semibold link hidden lg:block" href="/settings">Settings</a>
+    </div>
+
+    <div class="search"
+         x-data="{ searchQuery: '', searchResults: [], isSearching: false }"
+         x-init="$watch('searchQuery', () => fetch('/api/search?q=' + searchQuery))">
+      <label id="autocomplete-1-label" class="sr-only">Search</label>
+      <input type="search" autocomplete="off" x-model="searchQuery">
+    </div>
+  </div>
+</header>
+
+<main class="flex-1">
+  <section class="hero px-1">
+    <div class="container m-auto">
+      <h1 class="font-display text-4xl tracking-tight sm:text-6xl">Read comics, free and ad-light.</h1>
+      <p class="mt-6 text-lg">Thousands of series, updated as they are released.</p>
+      <a class="btn" href="/search">Start reading</a>
+    </div>
+  </section>
+
+  <section id="features" class="relative overflow-hidden pb-28 pt-20 sm:py-28 px-1"
+           x-data="{ activeTab: 0, orientation: window.innerWidth >= 1024 ? 'vertical' : 'horizontal' }">
+    <div class="container m-auto">
+      <div class="max-w-2xl md:mx-auto md:text-center xl:max-w-none">
+        <h2 class="font-display text-3xl tracking-tight sm:text-4xl md:text-5xl">The smarter way to keep up</h2>
+        <p class="mt-6 text-lg">Follow a series once and every new chapter finds you.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="secondary-features" class="pb-14 pt-20 sm:pb-20 sm:pt-32">
+    <div class="container m-auto">
+      <h2 class="font-display text-3xl tracking-tight">Everything you need</h2>
+      <p class="mt-6 text-lg">Reading history, language preferences and group filters, all in one place.</p>
+      <p class="mt-2 text-sm">Browse the <a class="link" href="/comic/the-lantern-keeper">most followed series</a>.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="mt-auto">
+  <div class="container m-auto py-8 text-sm">
+    <a class="link" href="/genres">Genres</a>
+    <a class="link" href="/languages">Languages</a>
+  </div>
+</footer>
+
+</body>
+</html>

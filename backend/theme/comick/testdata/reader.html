@@ -16,17 +16,36 @@
       §7.6
     - one entry in the payload has an empty URL and must be skipped
 
+
+  **Updated 2026-09-16 to carry the application shell.** The first version of
+  this fixture had only the payload and the markup around it, which is what the
+  theme reads — and a fingerprint tuned against it scored 25 on the real root.
+  Every live rendering carries the Laravel/Vite build tags and the Alpine
+  namespace, so a fixture without them does not resemble the page it stands
+  for. See testdata/home.html and PLAN §9.
+
   Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606).
 -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" x-data="Utils.loadTheme()">
 <head>
   <meta charset="utf-8">
   <title>The Lantern Keeper Chapter 7 - Example</title>
+  <link rel="stylesheet" href="/build/assets/app-BqR2vN1a.css">
+  <script type="module" src="/build/assets/app-Ci31YMOj.js"></script>
+  <script type="module" src="/build/assets/utils-BhNZlY5s.js"></script>
+  <script type="module" src="/build/assets/header-IrjfPRfj.js"></script>
+  <script type="module" src="/build/assets/settings-sync-DkEAqJg5.js"></script>
+  <script type="module" src="/build/assets/owl-carousel-DCrA3J-z.js"></script>
+  <script type="module" src="/build/assets/alpine-Duq4ovsg.js"></script>
 </head>
 <body>
 
 <script async data-cfasync="false" data-id="dl-banner-728x90" src="https://ads.example.invalid/b.js"></script>
+
+<header class="relative z-100">
+  <a class="block p-2" href="/comic/the-lantern-keeper">The Lantern Keeper</a>
+</header>
 
 <div id="reader-root"></div>
 

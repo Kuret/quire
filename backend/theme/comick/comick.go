@@ -200,9 +200,25 @@ var disqualifyingSelectors = []string{
 
 // Fingerprint scores a page for "is this the shape this theme reads?".
 //
-// The signals are the two embedded payloads and the API's own envelope, which
-// is as structural as PLAN §7.5 asks for: they are element IDs and JSON keys,
-// not class names that a reskin would change.
+// # Rebuilt 2026-09-16, against the page the probe actually judges
+//
+// The first version of this scored the two embedded payloads and the API
+// envelope, and **25 against a real home page** under a threshold of 60 — so
+// the real prober called a working site "unrecognised". PLAN §9's note names
+// the mistake: the fixtures were written from the pages this theme *reads*,
+// and the page stage 4 *judges* is the one the user pastes, which is the root.
+//
+// A logged-out root here is almost entirely a marketing landing page. There is
+// no comic grid on it, no #comic-data, no API envelope and no JSON at all —
+// the whole of the old fingerprint's evidence was absent, and the 25 it did
+// score came from the two weakest signals it had.
+//
+// What is on it, and on every other rendering measured, is **the application
+// shell**: a Laravel/Vite build whose entry chunks are named, and an Alpine
+// component vocabulary with a namespace of its own. Those are the signals now,
+// weighted so the shell alone clears the threshold with margin and the
+// payloads are confirmation rather than the whole case. Root, search, series
+// and chapter each measured 100 on 2026-09-16.
 //
 // There is deliberately **no host signal**, unlike mangadex's — which gates on
 // its one hostname and scores 0 for everything else. That works there because
@@ -233,22 +249,40 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 
 	// The two embedded payloads. Each is one element ID, and between them they
 	// cover the series page and the reader.
+	// The application shell, present on **every** rendering measured — root,
+	// search, series and chapter alike. This is the half the old fingerprint
+	// lacked, and it is what makes a bare landing page recognisable.
+	//
+	// The two Alpine entry points are namespaced helpers this application
+	// defines, and nothing else emits them. The build-asset chunks are next
+	// best: the directory is a Vite convention and common, so it is weighted
+	// low, while the individual chunk names are this application's own modules.
+	add(p.Contains("Utils.loadTheme("), 30)
+	add(p.Contains("Header.loadDataHeader("), 25)
+	add(p.Contains("/build/assets/settings-sync-"), 15)
+	add(p.Contains("/build/assets/owl-carousel-"), 10)
+	add(p.Contains("/build/assets/"), 10)
+
+	// Navigation, wherever the site header is rendered.
+	add(p.Contains("/group/popular"), 10)
+	add(p.Contains("/publisher/popular"), 10)
+
+	// The embedded payloads. Confirmation now rather than the whole case, and
+	// each still decisive on the page that carries it.
 	add(p.Has("#"+comicDataID), 45)
 	add(p.Has("#"+readerDataID), 45)
 
-	// The search API's envelope, for a probe that lands on it.
+	// A probe that landed on the API rather than on a page. None of the shell
+	// signals can fire on a JSON body, so these carry it alone.
 	add(p.Contains(`"next_cursor"`) && p.Contains(`"data"`), 35)
-
-	// The site's own link shapes and API paths, in markup or in payload.
-	add(p.Contains("/api/comics/"), 25)
-	add(p.Contains("/chapter-list"), 20)
-	add(p.Contains(searchPath), 15)
-	add(p.Contains("/"+comicSegment+"/"), 10)
-
-	// Identifier vocabulary the payloads share. Weak individually — plenty of
-	// JSON has a "slug" — and only useful alongside the rest.
 	add(p.Contains(`"hid"`), 15)
 	add(p.Contains(`"chap"`), 10)
+
+	// Paths, in markup or in payload.
+	add(p.Contains("/api/comics/"), 20)
+	add(p.Contains("/chapter-list"), 15)
+	add(p.Contains(searchPath), 15)
+	add(p.Contains("/"+comicSegment+"/"), 10)
 
 	if score > 100 {
 		score = 100

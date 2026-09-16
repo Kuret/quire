@@ -18,6 +18,13 @@
     "    that resolves to the listing root",
     "  - one title is padded by the serialiser",
 
+    "**Slashes are escaped, and that is the point.** The server's JSON encoder",
+    "escapes forward slashes, so the bytes on the wire read `api\\/search`, not",
+    "`api/search`. The first version of this fixture wrote them unescaped — an",
+    "invented form that then confirmed itself, exactly as PLAN §9 describes: a",
+    "path signal scored 15 here and 0 on the real response. Corrected and",
+    "measured 2026-09-16.",
+
     "Why synthetic: PLAN §1.3 forbids this repository from containing a real",
     "aggregator's domain or content, and §1.4 forbids copying anyone's",
     "expression. The response *shape* is an observable fact; the words, the",
@@ -31,7 +38,7 @@
       "slug": "the-lantern-keeper",
       "hid": "I1ImYpV",
       "content_rating": "safe",
-      "default_thumbnail": "https://pages.example.invalid/the-lantern-keeper/covers/8edfff1d.jpg",
+      "default_thumbnail": "https:\/\/pages.example.invalid\/the-lantern-keeper\/covers\/8edfff1d.jpg",
       "last_chapter": 7,
       "chapter_count": 7
     },
@@ -42,7 +49,7 @@
       "slug": "salt-and-cinder",
       "hid": "J2JnZqW",
       "content_rating": "suggestive",
-      "default_thumbnail": "https://pages.example.invalid/salt-and-cinder/covers/1a2b3c4d.jpg",
+      "default_thumbnail": "https:\/\/pages.example.invalid\/salt-and-cinder\/covers\/1a2b3c4d.jpg",
       "last_chapter": 12,
       "chapter_count": 12
     },
@@ -53,7 +60,7 @@
       "slug": "paper-boats",
       "hid": "K3KoArX",
       "content_rating": "erotica",
-      "default_thumbnail": "https://pages.example.invalid/paper-boats/covers/5e6f7a8b.jpg",
+      "default_thumbnail": "https:\/\/pages.example.invalid\/paper-boats\/covers\/5e6f7a8b.jpg",
       "last_chapter": 3,
       "chapter_count": 3
     },
@@ -64,7 +71,7 @@
       "slug": "the-harbour-road",
       "hid": "L4LpBsY",
       "content_rating": "",
-      "default_thumbnail": "https://pages.example.invalid/the-harbour-road/covers/9c0d1e2f.jpg",
+      "default_thumbnail": "https:\/\/pages.example.invalid\/the-harbour-road\/covers\/9c0d1e2f.jpg",
       "last_chapter": 1,
       "chapter_count": 1
     },
@@ -78,9 +85,9 @@
       "default_thumbnail": ""
     }
   ],
-  "path": "https://example.invalid/api/search",
+  "path": "https:\/\/example.invalid\/api\/search",
   "per_page": 25,
   "next_cursor": 25,
-  "next_page_url": "https://example.invalid/api/search?q=lantern&type=comic&page=2",
+  "next_page_url": "https:\/\/example.invalid\/api\/search?q=lantern&type=comic&page=2",
   "prev_cursor": null
 }
