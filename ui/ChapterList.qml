@@ -239,8 +239,17 @@ Item {
                         // adding a row: the backend already sends a finished sentence,
                         // and the state the user is waiting on should be the line they
                         // read first.
+                        //
+                        // It wraps. A progress line is short, but a failure is a whole
+                        // plain-language sentence (PLAN §6 M3) and eliding it at one
+                        // line cut the answer off mid-word — the reason the download
+                        // stopped was the part that went missing. The row affords two
+                        // small lines under the title, which is the rest of the
+                        // sentence.
                         Text {
                             width: parent.width
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
                             elide: Text.ElideRight
                             text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
                                   ? model.downloadMessage
