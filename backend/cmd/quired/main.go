@@ -36,6 +36,7 @@ import (
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/weebcentral"
 )
 
 // logDir is where the rotating log lives, once it is known. Empty means
@@ -434,6 +435,7 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	reg.MustRegister(mangathemesia.New(client))
 	reg.MustRegister(mangakakalot.New(client))
 	reg.MustRegister(mangadex.New(client))
+	reg.MustRegister(weebcentral.New(client))
 	reg.MustRegister(generic.New(client))
 
 	store, err := state.Open(stateDir, reg)
