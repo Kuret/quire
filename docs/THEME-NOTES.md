@@ -298,7 +298,7 @@ in a `data-num` attribute that no caller can see.
 
 | Field | Why |
 |---|---|
-| `Volume string` | The source's own volume label, `""` when it publishes none. A *label*, not a number, because that is what sites give ("3", "Vol. 3", "TBD"). §6 M4's "runs of ten" grouping is the fallback for sources with no volume structure; this field is what tells it which case it is in. |
+| `Volume string` | The source's own volume label, `""` when it publishes none. A *label*, not a number, because that is what sites give ("3", "Vol. 3", "TBD"). Since §6 M4's revision of 2026-09-16 this field decides an affordance: a chapter screen offers a **volume view** alongside chapters only when the source publishes at least one real label here (and the reading order is known). A theme that leaves it empty gives its sources chapters and nothing else — an empty tab is a worse answer than no tab — so filling it in where the site has volumes is worth doing. "Runs of ten" survives only *inside* a labelled series, for the recent chapters no print edition has reached yet. |
 | `OrderUnknown bool` | Quire could not establish a reading order for the list this chapter came from. Set on **every** chapter of such a list, because it describes the list; `theme.OrderIsKnown(chs)` reads it back at that level. |
 
 `OrderUnknown` lives on the element only because `Theme.Chapters` returns a
