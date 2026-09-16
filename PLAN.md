@@ -1366,6 +1366,36 @@ WebView. The Paper Pro has no browser engine available to us, so there is no
 honest implementation even if we wanted one. The design reason: a challenge is a
 site operator saying no, and we take the answer.
 
+**DECIDED 2026-09-16 — a truthful `Referer` is permitted. It is not pretence.**
+Three sites (`webtoons`, `fanfox`, `comick`) parse perfectly to page URLs and
+then answer **403 on the image host with no `Referer`, 200 with one**. So the
+question had to be settled rather than dodged.
+
+**The test this section actually applies is "are we pretending to be something
+we are not?"** Every item in the forbidden list below fails it: a spoofed
+`User-Agent` claims to be a browser we are not, a forged TLS fingerprint claims
+a client we are not, a replayed clearance cookie claims a challenge we did not
+pass. Each is a lie told to a server.
+
+A `Referer` naming **the page the image URL was actually extracted from** is not
+a lie. It is a true statement about our request, in the header designed to carry
+exactly that fact. Hotlink protection asks "did this request come from our
+page?" — and our honest answer is *yes*, because we fetched that chapter page
+and took the URL from it. We satisfy the check by **telling the truth**, which
+is the opposite of circumventing it. Compare a challenge, which asks "are you a
+browser?", where the only way through is to lie; that stays refused and stays
+terminal. Quire already sends an honest `Referer` to xochitl's own upload
+endpoint (`backend/library`), for the same reason.
+
+**Constraints, and they are what keep this honest:**
+- **Per-request, and it must be the real URL** the link was extracted from. The
+  theme passes it because only the theme knows it.
+- **Never a constant, never fabricated, never guessed.** A `Referer` naming a
+  page we did not fetch *is* a lie, and is forbidden by this section like the
+  rest. If a theme does not know the referring page, it sends **no** header.
+- It changes nothing else. A challenge is still `blocked_challenge` and still
+  terminal, and the list below is unchanged.
+
 Concretely, **do not**: rotate or spoof `User-Agent` strings, impersonate
 browser TLS fingerprints, integrate a CAPTCHA-solving service, proxy through a
 third-party scraping API, or replay clearance cookies harvested elsewhere. If a
