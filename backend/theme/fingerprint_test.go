@@ -227,12 +227,19 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			wantWinner: comick.ID,
 		},
 		{
-			// A JSON body rather than a page, and the case that makes the two
-			// API themes worth testing against each other: "answered JSON" is
-			// not a fingerprint.
-			name:       "a comick search response",
-			file:       "comick/testdata/search.json",
+			name:       "a comick home page",
+			file:       "comick/testdata/home.html",
 			wantWinner: comick.ID,
+		},
+		{
+			// A bare API body, which the probe never fetches — stage 2 gets
+			// the root the user pasted. Measured at 50 against the live
+			// response, so **nobody** may claim it confidently, and the
+			// assertion here is that nobody does. See comick's own
+			// TestABareAPIResponseScoresBelowTheThresholdAndThatIsCorrect.
+			name:       "a JSON API response no probe fetches",
+			file:       "comick/testdata/search.json",
+			wantWinner: "",
 		},
 		{
 			// The deliberate near-miss: WordPress, comic-shaped, and neither

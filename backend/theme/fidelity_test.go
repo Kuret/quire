@@ -39,9 +39,15 @@ import (
 //
 // Ten, and the number is measured rather than chosen: scored against live home
 // pages on 2026-09-16, madara came to 100 (clamped, 111 raw), mangathemesia 85,
-// mangakakalot 70, weebcentral 95, webtoons 90 and fanfox 70. The weakest real
-// landing page of any family we ship is 70, so ten points is what the evidence
-// supports. Raising it would be a number nobody had measured; dropping it would
+// mangakakalot 70, weebcentral 95, webtoons 90, fanfox 70 and comick 100. The
+// weakest real landing page of any family we ship is 70, so ten points is what
+// the evidence supports.
+//
+// comick is in that list only after a repair: it measured **25** on its real
+// root on the same day, because its fingerprint had been built from the pages
+// the theme reads rather than the page the probe judges. Re-measured at 100
+// after the rebuild. That is the second time this exact mistake has been found
+// by running the real prober, which is why §9 now requires the measurement. Raising it would be a number nobody had measured; dropping it would
 // re-admit the state madara was in, where one renamed class name was the
 // difference between "recognised" and "unrecognised".
 const margin = 10
@@ -80,6 +86,27 @@ func TestFingerprintsClearTheThresholdWithMargin(t *testing.T) {
 			"mangakakalot/testdata/home.html",
 			"mangakakalot/testdata/browse.html",
 			"mangakakalot/testdata/series.html",
+		}},
+		// The four added on 2026-09-16, each measured against its real root on
+		// the same day: weebcentral 95, webtoons 90, fanfox 70, comick 100.
+		{"weebcentral", []string{
+			"weebcentral/testdata/home.html",
+			"weebcentral/testdata/series.html",
+		}},
+		{"webtoons", []string{
+			"webtoons/testdata/home.html",
+			"webtoons/testdata/search.html",
+			"webtoons/testdata/series.html",
+		}},
+		{"fanfox", []string{
+			"fanfox/testdata/home.html",
+			"fanfox/testdata/search.html",
+			"fanfox/testdata/series.html",
+			"fanfox/testdata/directory.html",
+		}},
+		{"comick", []string{
+			"comick/testdata/home.html",
+			"comick/testdata/series.html",
 		}},
 	}
 
@@ -121,6 +148,13 @@ func TestUnverifiedRenderingsAtLeastClearTheThreshold(t *testing.T) {
 	reg := newRegistry(t)
 	cases := map[string]string{
 		"mangakakalot": "mangakakalot/testdata/search.html",
+		// An htmx *fragment*, not a page: this site's search box swaps rows
+		// into the page it is already on, and a probe lands on /search, which
+		// is a full document and measured 75 live on 2026-09-16. The fragment
+		// carries no header and no chrome, so holding it to a landing page's
+		// margin would mean inflating weights for a rendering no probe sees —
+		// the mistake this file exists to catch, pointed the other way.
+		"weebcentral": "weebcentral/testdata/search.html",
 	}
 	for id, f := range cases {
 		t.Run(id+"/"+filepath.Base(f), func(t *testing.T) {
@@ -140,6 +174,12 @@ func TestHomePagesAreRecognisedOnTheirOwn(t *testing.T) {
 	cases := map[string]string{
 		"madara":       "../probe/prober/testdata/home-madara.html",
 		"mangakakalot": "mangakakalot/testdata/home.html",
+		"weebcentral":  "weebcentral/testdata/home.html",
+		"webtoons":     "webtoons/testdata/home.html",
+		"fanfox":       "fanfox/testdata/home.html",
+		// comick's is the one that was missing entirely, which is how its
+		// fingerprint came to score 25 on the real thing.
+		"comick": "comick/testdata/home.html",
 	}
 	for id, f := range cases {
 		t.Run(id, func(t *testing.T) {
