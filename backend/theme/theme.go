@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -319,6 +320,16 @@ type Source struct {
 	// RateLimit narrows the global politeness caps; it can never widen them.
 	RateLimit *fetch.RateLimit `json:"rateLimit,omitempty"`
 
+	// SplitStrips overrides vertical-scroll strip detection (PLAN §12.3):
+	// "auto", "never" or "always". Empty means the schema default, "auto".
+	//
+	// It is a string rather than an imageproc.SplitMode so this package need
+	// not depend on the image pipeline for an enum. The three spellings live in
+	// exactly one place — imageproc.ParseSplitMode — and
+	// TestSplitStripsEnumAgreesEverywhere holds the schema, this field's
+	// validation and that function to the same list.
+	SplitStrips string `json:"splitStrips,omitempty"`
+
 	// Enabled is the per-source toggle. A nil pointer means the schema default
 	// of true; it is a pointer so "absent" and "false" stay distinguishable
 	// across an export/import round trip.
@@ -361,6 +372,18 @@ const (
 
 // IsEnabled applies the schema's default of true.
 func (s *Source) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
+
+// SplitStripsValues are the accepted spellings of Source.SplitStrips, in the
+// schema's order. Empty is also accepted and means the default, "auto".
+var SplitStripsValues = []string{"auto", "never", "always"}
+
+// validSplitStrips reports whether v is one of SplitStripsValues, or empty.
+func validSplitStrips(v string) bool {
+	if v == "" {
+		return true
+	}
+	return slices.Contains(SplitStripsValues, v)
+}
 
 // Policy is the fetch-layer view of this source.
 func (s *Source) Policy() (*fetch.Policy, error) {

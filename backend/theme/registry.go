@@ -181,6 +181,11 @@ func (r *Registry) Validate(s *Source) error {
 		}
 	}
 
+	if !validSplitStrips(s.SplitStrips) {
+		return fmt.Errorf("theme: source %q: splitStrips must be one of %s, got %q",
+			s.ID, strings.Join(SplitStripsValues, ", "), s.SplitStrips)
+	}
+
 	if v, ok := t.(OverrideValidator); ok {
 		if err := v.ValidateOverrides(s.Overrides); err != nil {
 			return fmt.Errorf("theme: source %q: %w", s.ID, err)
