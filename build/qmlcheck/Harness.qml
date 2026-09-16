@@ -43,6 +43,10 @@ Window {
         onWatchPhraseChanged: summaryTarget.phraseWrites++
     }
 
+    property int robotsWrites: 0
+    property int robotsAsks: 0
+    property bool robotsAskedFor: false
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -71,7 +75,20 @@ Window {
     SeriesGrid  { id: seriesGrid;  objectName: "seriesGrid";  anchors.fill: parent; model: seriesModel }
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
                   synopsis: "A long description that runs on and on. " }
-    Settings    { id: settings;    objectName: "settings";    anchors.fill: parent; logShown: true }
+    Settings {
+        id: settings
+        objectName: "settings"
+        anchors.fill: parent
+        logShown: true
+        // Counters, so "did this repaint?" is observable: a QML property
+        // emits no change signal when assigned the value it already holds,
+        // so a count that does not move is a toggle that did not redraw.
+        onConsultRobotsChanged: win.robotsWrites++
+        onConsultRobotsRequested: {
+            win.robotsAsks++
+            win.robotsAskedFor = on
+        }
+    }
     WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
     PagerBar    { id: lonePager;   width: 1620 }
 
@@ -271,6 +288,44 @@ Window {
         watchList.phrase = "3 series have new chapters"
         win.want("the phrase is drawn as it arrived", wph.text, "3 series have new chapters")
         win.want("the phrase line is there when there is news", wph.visible, true)
+
+        // ---- PLAN §7.4: the global robots.txt switch -------------------
+        //
+        // The value is pushed on the status, which arrives on attach and on
+        // every ping. Binding to a plain bool rather than to the status object
+        // is what keeps an identical push from repainting the toggle.
+        var robotsState = win.findChild(settings, "robotsToggleState")
+        var robotsWhy = win.findChild(settings, "robotsExplanation")
+
+        // Off by default, and the copy says what that means rather than
+        // hiding behind a label — including the claim the log viewer on this
+        // same screen makes checkable.
+        win.want("the toggle is off by default", settings.consultRobots, false)
+        win.want("off reads as Off", robotsState.text, "Off")
+        win.want("off says what it does", robotsWhy.text,
+                 "Off: Quire fetches pages a site\u2019s robots.txt asks crawlers not to. " +
+                 "Every such fetch is logged.")
+
+        settings.consultRobots = true
+        var writesAfterOn = win.robotsWrites
+        win.want("the toggle follows the pushed value", robotsState.text, "On")
+
+        // An identical status push writes nothing and so repaints nothing.
+        settings.consultRobots = true
+        win.want("an identical push does not repaint the toggle",
+                 win.robotsWrites, writesAfterOn)
+
+        // Flipping asks once, for the opposite of what is stored — and does
+        // not flip locally, because the store is what the switch must show.
+        var asksBefore = win.robotsAsks
+        settings.toggleRobots()
+        win.want("flipping asks exactly once", win.robotsAsks, asksBefore + 1)
+        win.want("flipping asks for the opposite", win.robotsAskedFor, false)
+        win.want("flipping does not change the toggle on its own",
+                 settings.consultRobots, true)
+
+        settings.consultRobots = false
+        win.want("the toggle follows the push back", robotsState.text, "Off")
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12
