@@ -105,6 +105,12 @@ Rectangle {
     ListModel { id: sourcesModel }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
+
+    // The volume view's rows (PLAN §6 M4, revised 2026-09-16). It is empty
+    // whenever the backend sent no volumes, which is how the chapter screen
+    // knows there is no second view to offer.
+    ListModel { id: volumesModel }
+
     ListModel { id: watchedModel }
 
     // ---- transport ---------------------------------------------------------
@@ -278,6 +284,23 @@ Rectangle {
                 "documentUuid": list[i].documentUuid ? list[i].documentUuid : ""
             })
         }
+        volumesModel.clear()
+        var vols = msg && msg.volumes ? msg.volumes : []
+        for (var v = 0; v < vols.length; ++v) {
+            volumesModel.append({
+                // chapterId, not volumeId: a download request names the chapter
+                // the user tapped and the backend works out the volume around
+                // it. The row carries the first chapter of its volume.
+                "chapterId": vols[v].id,
+                "title": vols[v].title,
+                "detail": vols[v].detail ? vols[v].detail : "",
+                "chapterCount": vols[v].chapterCount,
+                "downloadState": vols[v].documentUuid ? "done" : "",
+                "downloadMessage": "",
+                "documentUuid": vols[v].documentUuid ? vols[v].documentUuid : ""
+            })
+        }
+
         chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
         chapterListScreen.synopsis = msg && msg.series && msg.series.description
             ? msg.series.description : ""
@@ -318,29 +341,38 @@ Rectangle {
     function applyDownloadProgress(msg) {
         if (!msg || !msg.volumeId)
             return
-        for (var i = 0; i < chaptersModel.count; ++i) {
-            if (chaptersModel.get(i).chapterId !== msg.volumeId)
+
+        // Which view asked. A volume's id is its first chapter's, so the same
+        // id appears in both models and the backend says which it meant. An
+        // absent grouping is a chapter, the default (PLAN §6 M4).
+        var target = msg.grouping === "volume" ? volumesModel : chaptersModel
+        applyProgressToModel(target, msg)
+
+        // The confirm phase is a question, and the strip is where it is
+        // asked. Any other phase is an answer, so the strip closes. The
+        // question travels with the id because the strip is drawn over the
+        // foot of the list rather than inside the row (PLAN §12.1).
+        if (msg.phase === "confirm") {
+            chapterListScreen.confirmingId = msg.volumeId
+            chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
+        } else if (chapterListScreen.confirmingId === msg.volumeId) {
+            chapterListScreen.confirmingId = ""
+            chapterListScreen.confirmingMessage = ""
+        }
+    }
+
+    function applyProgressToModel(rows, msg) {
+        for (var i = 0; i < rows.count; ++i) {
+            if (rows.get(i).chapterId !== msg.volumeId)
                 continue
-            chaptersModel.setProperty(i, "downloadState", msg.phase ? msg.phase : "")
+            rows.setProperty(i, "downloadState", msg.phase ? msg.phase : "")
             // A stopped download returns the row to where it started: the
             // message would otherwise sit there looking like progress that has
             // frozen (PLAN §7.1).
-            chaptersModel.setProperty(i, "downloadMessage",
-                                      msg.phase === "cancelled" ? "" : (msg.message ? msg.message : ""))
+            rows.setProperty(i, "downloadMessage",
+                             msg.phase === "cancelled" ? "" : (msg.message ? msg.message : ""))
             if (msg.documentUuid)
-                chaptersModel.setProperty(i, "documentUuid", msg.documentUuid)
-
-            // The confirm phase is a question, and the strip is where it is
-            // asked. Any other phase is an answer, so the strip closes. The
-            // question travels with the id because the strip is drawn over the
-            // foot of the list rather than inside the row (PLAN §12.1).
-            if (msg.phase === "confirm") {
-                chapterListScreen.confirmingId = msg.volumeId
-                chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
-            } else if (chapterListScreen.confirmingId === msg.volumeId) {
-                chapterListScreen.confirmingId = ""
-                chapterListScreen.confirmingMessage = ""
-            }
+                rows.setProperty(i, "documentUuid", msg.documentUuid)
             return
         }
     }
@@ -380,6 +412,10 @@ Rectangle {
         root.seriesCameFrom = root.screen === "watching" ? "watching" : "browse"
         root.screen = "series"
         chaptersModel.clear()
+        // Emptied before the new series' detail arrives, so the previous
+        // series' volume view is never on screen over this one's chapters.
+        volumesModel.clear()
+        chapterListScreen.view = "chapters"
         chapterListScreen.seriesTitle = title
         chapterListScreen.synopsis = ""
         chapterListScreen.page = 1
@@ -581,6 +617,7 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "series"
             model: chaptersModel
+            volumeModel: volumesModel
             onWatchRequested: root.send(Msg.WatchSeries,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "title": chapterListScreen.seriesTitle})
@@ -594,6 +631,20 @@ Rectangle {
             onDownloadConfirmed: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "volumeId": chapterId, "confirmed": true})
+
+            // The volume view's three. The grouping rides on the request
+            // because it is situational — whether the user is about to be
+            // without a connection — and not a property of the source.
+            onVolumeDownloadRequested: root.send(Msg.EnqueueDownload,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId, "grouping": "volume"})
+            onVolumeDownloadCancelled: root.send(Msg.CancelDownload,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId, "grouping": "volume"})
+            onVolumeDownloadConfirmed: root.send(Msg.EnqueueDownload,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId, "grouping": "volume", "confirmed": true})
+
             onReadRequested: root.openInReader(documentUuid)
         }
 

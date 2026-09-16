@@ -30,6 +30,42 @@ Item {
     property string synopsis: ""
     property bool busy: false
 
+    // The volume view (PLAN §6 M4, revised 2026-09-16). Chapters are the
+    // default and are always here; volumes are a second view of the same
+    // series, offered only when the backend sent rows for one.
+    //
+    // Whether volumes exist is not decided here. The backend sends the rows or
+    // sends none, because the rule is about the data — the source's own labels,
+    // and whether the reading order is known at all — and an empty tab is a
+    // worse answer than no tab.
+    property alias volumeModel: volumeList.model
+
+    readonly property bool hasVolumes: screen.volumeModel ? screen.volumeModel.count > 0 : false
+
+    // Which view is on screen. It is never "volumes" without rows to show: a
+    // series that loses its volumes on a refresh must not leave the screen
+    // looking at nothing.
+    property string view: "chapters"
+    readonly property bool showingVolumes: screen.view === "volumes" && screen.hasVolumes
+
+    onHasVolumesChanged: {
+        if (!screen.hasVolumes && screen.view !== "chapters")
+            screen.view = "chapters"
+    }
+
+    // A view holds a different number of rows, so the page starts again. Guarded
+    // so setting the view to what it already is repaints nothing.
+    onViewChanged: {
+        screen.page = 1
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+    }
+
+    function showView(which) {
+        if (screen.view !== which)
+            screen.view = which
+    }
+
     // Whether this series is watched (PLAN §12.2). It is set from the watched
     // list the backend pushes, never toggled locally: a tap sends the message
     // and the answer comes back, so the button cannot end up disagreeing with
@@ -39,6 +75,14 @@ Item {
     signal downloadRequested(string chapterId)
     signal downloadConfirmed(string chapterId)
     signal downloadCancelled(string chapterId)
+
+    // The same three for a row in the volume view. Separate signals rather than
+    // a grouping argument, so the one place that composes the message cannot
+    // forget to say which it meant.
+    signal volumeDownloadRequested(string chapterId)
+    signal volumeDownloadConfirmed(string chapterId)
+    signal volumeDownloadCancelled(string chapterId)
+
     signal readRequested(string documentUuid)
     signal watchRequested()
     signal unwatchRequested()
@@ -47,8 +91,11 @@ Item {
     // known and the label can always say "of".
     property int page: 1
     // From the model, not the view: a ListView updates its own count during a
-    // layout pass, so a page count taken from it lags by a frame.
-    readonly property int rowCount: screen.model ? screen.model.count : 0
+    // layout pass, so a page count taken from it lags by a frame. It follows
+    // whichever view is showing, so the pager counts the rows on screen.
+    readonly property int rowCount: screen.showingVolumes
+                                    ? (screen.volumeModel ? screen.volumeModel.count : 0)
+                                    : (screen.model ? screen.model.count : 0)
     readonly property int pageSize: Paging.rowsPerPage(viewport.height, Style.rowHeight)
     readonly property int totalPages: Paging.pageCount(screen.rowCount, screen.pageSize)
 
@@ -103,6 +150,29 @@ Item {
             return
         default:
             screen.downloadCancelled(chapterId)
+        }
+    }
+
+    // The volume view's tap. Identical shape, different message: this one asks
+    // for the whole volume as one file.
+    function volumeTapped(chapterId, state, documentUuid) {
+        if (documentUuid) {
+            screen.readRequested(documentUuid)
+            return
+        }
+        switch (state) {
+        case "confirm":
+            screen.confirmingId = ""
+            screen.confirmingMessage = ""
+            return
+        case "":
+        case "failed":
+        case "cancelled":
+        case "done":
+            screen.volumeDownloadRequested(chapterId)
+            return
+        default:
+            screen.volumeDownloadCancelled(chapterId)
         }
     }
 
@@ -186,22 +256,84 @@ Item {
         }
     }
 
+    // ---- the view switch ---------------------------------------------------
+    //
+    // Two words, not a tab bar, and nothing at all when there is one view. It
+    // collapses to zero height in that case so a source with no volumes gets
+    // exactly the screen it had before — including the same number of rows to a
+    // page, since the viewport is what decides that.
+    Item {
+        id: viewSwitch
+        objectName: "viewSwitch"
+        anchors { top: synopsisBand.bottom; left: parent.left; right: parent.right }
+        visible: screen.hasVolumes
+        height: visible ? Style.buttonHeight + Style.margin : 0
+
+        Row {
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: Style.gap
+
+            Repeater {
+                model: [{"key": "chapters", "label": "Chapters"},
+                        {"key": "volumes", "label": "Volumes"}]
+
+                Rectangle {
+                    objectName: "viewButton-" + modelData.key
+                    width: 220
+                    height: Style.buttonHeight
+                    // The view you are looking at is filled, the other is not:
+                    // on e-ink a border alone is too quiet to answer "which am
+                    // I on?" at a glance.
+                    color: switchArea.pressed ? Style.pressed
+                                              : (screen.view === modelData.key ? Style.rule : Style.paper)
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData.label
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: switchArea
+                        anchors.fill: parent
+                        onClicked: screen.showView(modelData.key)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     // ---- the chapters ------------------------------------------------------
 
     Item {
         id: viewport
         anchors {
-            top: synopsisBand.bottom
+            top: viewSwitch.bottom
             left: parent.left; right: parent.right
             bottom: pagerBar.top
         }
 
         ListView {
             id: list
+            objectName: "chapterRows"
             anchors { top: parent.top; left: parent.left; right: parent.right }
             // Whole rows only; the remainder is blank rather than a half row.
             height: Paging.rowsPerPage(viewport.height, Style.rowHeight) * Style.rowHeight
             clip: true
+            visible: !screen.showingVolumes
 
             // Nothing flicks. The page is set outright, which is one settled
             // full refresh instead of a stream of partial ones.
@@ -294,6 +426,102 @@ Item {
             }
         }
 
+        // ---- the volumes ---------------------------------------------------
+        //
+        // The same row shape, paged the same way, over the same viewport — so
+        // switching views changes what is listed and nothing else about the
+        // screen.
+        ListView {
+            id: volumeList
+            objectName: "volumeRows"
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: Paging.rowsPerPage(viewport.height, Style.rowHeight) * Style.rowHeight
+            clip: true
+            visible: screen.showingVolumes
+
+            interactive: false
+            cacheBuffer: 0
+            contentY: Paging.firstIndex(screen.page, screen.pageSize) * Style.rowHeight
+
+            delegate: Item {
+                width: volumeList.width
+                height: Style.rowHeight
+
+                Item {
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
+                    height: Style.rowHeight
+
+                    Column {
+                        anchors {
+                            left: parent.left; leftMargin: Style.margin
+                            right: volumeButton.left; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
+
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: model.title
+                            font.pointSize: Style.bodySize
+                            color: Style.ink
+                        }
+
+                        // What the volume holds, which is the whole reason this
+                        // view is worth having: a volume that is seven chapters
+                        // says so, because that is what tells you whether it is
+                        // worth taking before a journey. The sentence is the
+                        // backend's (PLAN §2); a download in flight replaces it
+                        // with the backend's own progress line, exactly as a
+                        // chapter row does.
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
+                                  ? model.downloadMessage
+                                  : model.detail
+                            font.pointSize: Style.smallSize
+                            color: Style.muted
+                        }
+                    }
+
+                    Rectangle {
+                        id: volumeButton
+                        anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                        width: 180
+                        height: Style.buttonHeight
+                        color: volumeArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: screen.buttonLabel(model.downloadState, model.documentUuid)
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: volumeArea
+                            anchors.fill: parent
+                            enabled: screen.canTap(model.downloadState, model.documentUuid)
+                            onClicked: screen.volumeTapped(model.chapterId, model.downloadState,
+                                                           model.documentUuid)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: Style.hairline
+                    color: Style.rule
+                }
+            }
+        }
+
         Text {
             anchors.centerIn: parent
             text: screen.busy ? "Fetching…" : "No chapters listed."
@@ -305,10 +533,12 @@ Item {
 
     // ---- the confirm strip -------------------------------------------------
     //
-    // A tap on Download queues a whole volume — up to ten chapters and a few
-    // hundred megabytes — so PLAN §6 M3's "say what you are doing" means asking
+    // A tap on Download in the volume view queues up to ten chapters and a few
+    // hundred megabytes, so PLAN §6 M3's "say what you are doing" means asking
     // first. One step, and the question itself is the backend's sentence, not
-    // this file's.
+    // this file's. A single chapter is never asked about — the backend does not
+    // send the question — so this strip belongs to the volume view in practice,
+    // and confirming from it confirms a volume.
     Rectangle {
         id: confirmStrip
         objectName: "confirmStrip"
@@ -360,9 +590,13 @@ Item {
                 anchors.fill: parent
                 onClicked: {
                     var id = screen.confirmingId
+                    var volume = screen.showingVolumes
                     screen.confirmingId = ""
                     screen.confirmingMessage = ""
-                    screen.downloadConfirmed(id)
+                    if (volume)
+                        screen.volumeDownloadConfirmed(id)
+                    else
+                        screen.downloadConfirmed(id)
                 }
             }
         }

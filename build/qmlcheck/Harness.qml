@@ -30,6 +30,8 @@ Window {
     }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
+    ListModel { id: volumesModel }
+    ListModel { id: emptyVolumesModel }
     ListModel { id: watchedModel }
 
     // Stands in for Main.qml's root, which the harness cannot load (it imports
@@ -51,6 +53,9 @@ Window {
     property int splitAsks: 0
     property string splitAskedFor: ""
     property string splitAskedAbout: ""
+
+    property int volumeAsks: 0
+    property string volumeAskedFor: ""
 
     property int robotsWrites: 0
     property int robotsAsks: 0
@@ -130,7 +135,18 @@ Window {
     AddSource   { id: addSource;   objectName: "addSource";   anchors.fill: parent }
     SeriesGrid  { id: seriesGrid;  objectName: "seriesGrid";  anchors.fill: parent; model: seriesModel }
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
+                  volumeModel: volumesModel
+                  onVolumeDownloadRequested: {
+                      win.volumeAsks++
+                      win.volumeAskedFor = chapterId
+                  }
                   synopsis: "A long description that runs on and on. " }
+
+    // A second chapter screen with no volumes at all, which is what a source
+    // that publishes no labels looks like. The affordance has to be absent
+    // there, not empty: PLAN §6 M4, revised 2026-09-16.
+    ChapterList { id: plainChapterList; objectName: "plainChapterList"; anchors.fill: parent
+                  model: chaptersModel; volumeModel: emptyVolumesModel }
     Settings {
         id: settings
         objectName: "settings"
@@ -178,6 +194,12 @@ Window {
                 "sourceId": "src", "seriesId": "w" + w, "sourceName": "Example Reader",
                 "title": "Watched " + w, "newChapters": 0,
                 "state": "ok", "status": "Up to date", "checkedAt": "2026-09-16T00:00:00Z"}))
+
+        for (var v = 0; v < 3; ++v)
+            volumesModel.append({"chapterId": "c" + (v * 7), "title": "Volume " + (v + 1),
+                                 "detail": "7 chapters, Chapter 1 to Chapter 7",
+                                 "chapterCount": 7,
+                                 "downloadState": "", "downloadMessage": "", "documentUuid": ""})
 
         var log = []
         for (var k = 0; k < 300; ++k)
@@ -509,6 +531,53 @@ Window {
         // button, so reaching past it would be testing nothing.
         win.findChild(sourceList, "splitDoneArea").clicked(null)
         win.want("done closes the panel", splitPanel.visible, false)
+
+        // ---- the volume view (PLAN §6 M4, revised 2026-09-16) --------------
+
+        // Absent, not empty, for a source with no volume labels.
+        win.want("no volumes means no view switch",
+                 win.findChild(plainChapterList, "viewSwitch").visible, false)
+        win.want("and no height taken from the list",
+                 win.findChild(plainChapterList, "viewSwitch").height, 0)
+        win.want("chapters are still shown",
+                 win.findChild(plainChapterList, "chapterRows").visible, true)
+
+        // Offered when there are volumes, and chapters are what it opens on.
+        var vs = win.findChild(chapterList, "viewSwitch")
+        win.want("volumes mean a view switch", vs.visible, true)
+        win.want("the screen opens on chapters", chapterList.view, "chapters")
+        win.want("the chapter rows are the ones shown",
+                 win.findChild(chapterList, "chapterRows").visible, true)
+        win.want("the volume rows are not", win.findChild(chapterList, "volumeRows").visible, false)
+
+        // Switching views swaps the list and starts the paging again, because
+        // three volumes and fifty-five chapters are not the same number of
+        // pages.
+        chapterList.page = 2
+        win.findChild(chapterList, "viewButton-volumes").children[1].clicked(null)
+        win.want("the volume rows are shown", win.findChild(chapterList, "volumeRows").visible, true)
+        win.want("the chapter rows are not", win.findChild(chapterList, "chapterRows").visible, false)
+        win.want("the page starts again", chapterList.page, 1)
+        win.want("the pager counts volumes, not chapters", chapterList.totalPages, 1)
+
+        // Tapping a volume row asks for a volume, not a chapter.
+        win.volumeAsks = 0
+        chapterList.volumeTapped("c7", "", "")
+        win.want("a volume row asks once", win.volumeAsks, 1)
+        win.want("and names its first chapter", win.volumeAskedFor, "c7")
+
+        // Re-choosing the view already on screen repaints nothing.
+        chapterList.page = 1
+        win.findChild(chapterList, "viewButton-volumes").children[1].clicked(null)
+        win.want("re-choosing the current view does not reset anything", chapterList.page, 1)
+
+        // Back to chapters, and the volume view empties away cleanly.
+        chapterList.showView("chapters")
+        win.want("switching back shows chapters",
+                 win.findChild(chapterList, "chapterRows").visible, true)
+        volumesModel.clear()
+        win.want("a series that loses its volumes loses the switch", vs.visible, false)
+        win.want("and is left looking at chapters", chapterList.view, "chapters")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
