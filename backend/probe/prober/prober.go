@@ -610,6 +610,19 @@ func allowedHosts(th theme.Theme) []string {
 func (r *run) stageAccept(draft *theme.Source, themeID string, cap capability) Result {
 	var res Result
 	switch {
+	case cap.Challenge != nil:
+		// PLAN §7.6, reached from stage 5 rather than stage 3: the site said no
+		// somewhere other than its front door. It is refused on the same terms
+		// — no degraded add, no retry prompt, no workaround — and the sentence
+		// says *where*, because a challenge reported after a search that
+		// worked is otherwise baffling.
+		where := "the image host it serves its pages from"
+		if cap.ImageHost != "" {
+			where = cap.ImageHost + ", where it serves its pages from,"
+		}
+		res = r.result(theme.VerdictBlockedChallenge,
+			"Quire could search this site, but "+where+" requires a browser challenge Quire can't pass ("+
+				cap.Challenge.Detail+"). Quire doesn't work around challenges, so this site can't be added.")
 	case cap.ok():
 		res = r.result(theme.VerdictOK, fmt.Sprintf("Quire read this site as a %s site and searched it successfully.", themeID))
 		res.Addable = true
