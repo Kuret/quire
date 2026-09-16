@@ -93,6 +93,10 @@ type Service struct {
 
 	previousSessionCrashed bool
 
+	// bg owns every goroutine the service starts, so that Close can wait for
+	// them. See background.go for why nothing here uses a bare `go`.
+	bg *background
+
 	// reprobes rate-limits the automatic re-probe; see maybeReprobe.
 	reprobes reprobeState
 
@@ -156,6 +160,7 @@ func New(opts Options) *Service {
 		now:    opts.Now,
 		guard:  opts.ProbeGuard,
 		drafts: map[string]*theme.Source{},
+		bg:     newBackground(),
 
 		library:         opts.Library,
 		libStore:        opts.LibraryStore,
@@ -193,7 +198,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		go s.runProbe(ctx, out, req.URL)
+		s.goBackground(ctx, func(ctx context.Context) { s.runProbe(ctx, out, req.URL) })
 		return true, nil
 
 	case appload.MessageProbeAnswer:
@@ -266,7 +271,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		go s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize)
+		s.goBackground(ctx, func(ctx context.Context) {
+			s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize)
+		})
 		return true, nil
 
 	case appload.MessageBrowse:
@@ -281,7 +288,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		// Browse is search with no query: on every theme we have, that is the
 		// site's own recent/popular listing, which is also what PLAN §7.5 stage
 		// 5 falls back to.
-		go s.runSearch(ctx, out, req.SourceID, "", req.Page, req.PageSize)
+		s.goBackground(ctx, func(ctx context.Context) {
+			s.runSearch(ctx, out, req.SourceID, "", req.Page, req.PageSize)
+		})
 		return true, nil
 
 	case appload.MessageSeriesDetail:
@@ -292,7 +301,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		go s.runSeriesDetail(ctx, out, req.SourceID, req.SeriesID)
+		s.goBackground(ctx, func(ctx context.Context) { s.runSeriesDetail(ctx, out, req.SourceID, req.SeriesID) })
 		return true, nil
 
 	case appload.MessageRequestCover:
@@ -724,7 +733,7 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 	// An *empty listing* is evidence the site changed; an empty search is not.
 	// See maybeReprobe for why that distinction is the whole trigger.
 	if len(rows) == 0 && err == nil && strings.TrimSpace(query) == "" && page == 1 {
-		go s.maybeReprobe(ctx, out, src, reasonEmptyListing)
+		s.goBackground(ctx, func(ctx context.Context) { s.maybeReprobe(ctx, out, src, reasonEmptyListing) })
 	}
 
 	_ = send(out, appload.MessageSearchResults, map[string]any{
@@ -791,7 +800,7 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 	// The series page resolved and yielded no chapters at all: that is a parse
 	// that no longer matches the page, not a series with nothing in it.
 	if len(chapters) == 0 {
-		go s.maybeReprobe(ctx, out, src, reasonEmptyChapters)
+		s.goBackground(ctx, func(ctx context.Context) { s.maybeReprobe(ctx, out, src, reasonEmptyChapters) })
 	}
 
 	// The volume view, when there is one to show (PLAN §6 M4, revised

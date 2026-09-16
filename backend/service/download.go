@@ -246,13 +246,13 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 	if !req.Confirmed {
 		// Read-only, and off the download queue on purpose: asking what a
 		// volume covers must not wait behind somebody else's download.
-		go s.askToConfirm(ctx, out, req)
+		s.goBackground(ctx, func(ctx context.Context) { s.askToConfirm(ctx, out, req) })
 		return nil
 	}
 
 	s.dlOnce.Do(func() {
 		s.dlQueue = make(chan downloadJob, downloadQueueDepth)
-		go s.downloadWorker(ctx)
+		s.goBackground(ctx, s.downloadWorker)
 	})
 
 	select {
@@ -308,7 +308,12 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 
 	if len(vol.Chapters) <= 1 {
 		req.Confirmed = true
-		if err := s.enqueueDownload(ctx, out, req); err != nil {
+		// Detached from *this* goroutine's context on purpose: the queue and
+		// the download outlive the question that decided not to ask. Tying
+		// them to the confirm step would cancel the download the moment the
+		// check that started it returned. Close still stops them — the tracked
+		// worker's context is a child of the service's (background.go).
+		if err := s.enqueueDownload(context.WithoutCancel(ctx), out, req); err != nil {
 			s.log.Warn("could not enqueue a single-chapter volume", "err", err)
 		}
 		return

@@ -89,7 +89,7 @@ func (s *Service) runCoverBatch(ctx context.Context, out Sender, sourceID string
 		if w.SeriesID == "" || w.URL == "" {
 			continue
 		}
-		go s.runCover(batchCtx, out, sourceID, w.SeriesID, w.URL)
+		s.goBackground(batchCtx, func(ctx context.Context) { s.runCover(ctx, out, sourceID, w.SeriesID, w.URL) })
 	}
 }
 

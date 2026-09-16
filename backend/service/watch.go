@@ -348,15 +348,32 @@ func (s *Service) startWatchCheck(out Sender, force bool, only *watchKey) {
 	s.watchRunning, s.watchCancel = true, cancel
 	s.watchMu.Unlock()
 
-	go func() {
+	// Tracked, not a bare `go`: the round streams its results in one at a time
+	// and does not block the caller, so without an owner it can still be
+	// writing check results into the store after whoever started it has gone.
+	// See background.go. The context is detached from the caller's on purpose —
+	// a check outlives the message that asked for it — but not from the
+	// service's, so Close stops it.
+	started := s.bg.start(context.Background(), func(bgCtx context.Context) {
 		defer func() {
 			s.watchMu.Lock()
 			s.watchRunning, s.watchCancel = false, nil
 			s.watchMu.Unlock()
 			cancel()
 		}()
+		// Either the service closing or stopWatchCheck ends the round.
+		stop := context.AfterFunc(bgCtx, cancel)
+		defer stop()
 		s.checkWatched(ctx, out, force, only)
-	}()
+	})
+	if !started {
+		// The service is closing. Undo the claim so the state is not left
+		// saying a check is running when none is.
+		s.watchMu.Lock()
+		s.watchRunning, s.watchCancel = false, nil
+		s.watchMu.Unlock()
+		cancel()
+	}
 }
 
 // stopWatchCheck cancels a run in progress. Called when the frontend goes away:
