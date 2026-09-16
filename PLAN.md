@@ -2084,3 +2084,51 @@ Two consequences for the code:
 `selectionMoveToTrash()` on a UUID that no longer existed and `selection.size`
 stayed **1** instead of dropping to 0. That is why the frontend treats a
 non-zero size after the move as a failure rather than as defensive decoration.
+
+#### What a delete reclaims — and why re-downloads used to be instant
+
+Deleting the document was not the whole of deleting. Measured on the device
+2026-09-16: a chapter deleted and downloaded again came back in **25 seconds for
+64 pages**, without touching the network. The document really had been
+destroyed; what survived was the page cache under
+`~/.local/share/quire/downloads/<source>/<series>/<chapter-slug>/`, which the
+re-download found and skipped straight past. That cache had reached **636 MB**,
+42.7 MB of it for one series.
+
+The cache exists on purpose — §6 M4's resume works by skipping page files that
+are already there, so a cancel at page 300 of 325 costs 25 pages rather than
+325 — but it outlived the document it was fetched for. Asked, the user chose:
+**a delete clears the cached pages too**, accepting that a re-download refetches.
+
+So a successful delete now removes, and reports the bytes freed in the log:
+
+- the assembled PDF and its `.quire.json` manifest sidecar;
+- each chapter directory the record listed;
+- the series directory, and then the source directory, once empty.
+
+Four rules, each of which is a way to get this wrong:
+
+1. **The directory name is never recomputed.** `download.ChapterDir` is exported
+   for exactly this, because the slug is 48 readable characters plus 8 hex of
+   the sha256 of the *untruncated, unsanitised* id. A second implementation
+   removes nothing, or removes another chapter's pages, and only one of those is
+   loud.
+2. **A chapter can belong to more than one record** — a volume document and a
+   per-chapter one over the same ground, or two parts of a split. The check runs
+   against the records that *remain* after this one is dropped, so it has to
+   happen after the store removal, not before.
+3. **Nothing outside the downloads root is removed.** Every path is resolved and
+   checked against the root before anything is deleted, including the PDF taken
+   straight from the record. Chapter ids and titles are the source's to choose,
+   and "inside the downloads directory" is the property that has to survive
+   whatever it chose.
+4. **A running download keeps its pages.** The service tracks the chapter ids the
+   download in flight is writing, and a delete skips those; removing them
+   mid-write would leave a volume assembled out of whatever survived. A *queued*
+   download is not protected and does not need to be — it has written nothing,
+   and finding its pages gone costs it the fetch it would have skipped.
+
+The confirmation wording is unchanged. It already says the download goes for
+good; that a later re-download has to fetch the pages again is what "deleted"
+means everywhere else, and a second clause for it would lengthen an already long
+sentence to say something nobody is surprised by.
