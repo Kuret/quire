@@ -686,16 +686,31 @@ message naming what was tried.
   the offset is 0, which must stay a *real* recorded offset rather than an
   assumed one — §6 M6's "Read" resolves through it.
 
-  **Grouping, as it now stands.** A per-source `grouping` setting, default
-  `chapter`:
-  1. **`chapter` (default)** — one PDF per chapter, **even when the source
-     publishes volume labels**. Labels are information, not an instruction.
-  2. `volume` — the source's own labels, falling back to runs of `groupSize`
-     where a source has none. This is the pre-2026-09-16 behaviour, kept for
-     anyone who wants it.
-  3. `count` — fixed runs of `groupSize` (default 10), labels ignored.
-  **An unknowable reading order overrides all three** (§7.2's contract): a list
-  we could not order is never assembled into a multi-chapter PDF.
+  **Grouping is a choice at download time, not a setting (revised
+  2026-09-16).** The per-source `grouping` / `groupSize` settings are **removed**
+  — a preference buried in a source's config was the wrong shape, because the
+  question it answers is *situational*: "am I about to be without a connection?"
+  is not a property of a website.
+
+  Instead:
+  1. **Chapters are the default and always available.** One PDF per chapter.
+  2. **When a source publishes real volume labels, offer volumes alongside**
+     — a separate view in the chapter screen — so the user can take a whole
+     volume on the spot when they want one.
+  3. **Show the volume affordance only when volumes genuinely exist.** A source
+     with no labels shows chapters and nothing else; an empty tab is a worse
+     answer than no tab.
+  4. `count` (fixed runs of N, labels ignored) is **dropped entirely**. It only
+     ever applied to sources with no labels — exactly the sources that now have
+     nothing to group by and no volume view to show.
+
+  **An unknowable reading order still overrides everything** (§7.2's contract):
+  a list we could not order is never assembled into a multi-chapter PDF, so the
+  volume view must not be offered for it either.
+
+  The two groupings remain internally — the *download request* says which it
+  wants. In particular `storedVolumes` must keep re-deriving legacy records as
+  volumes, or Read silently stops working on anything downloaded before this.
   4. **A hard byte budget, which overrides everything above.** Measured on the device
      2026-09-15: **xochitl's `/upload` rejects any multipart body of
      100,000,000 bytes or more** — a decimal 100 MB cap on the *body*, not the
