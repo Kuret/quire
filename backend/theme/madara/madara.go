@@ -119,6 +119,20 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// DiscoveryOnly implements theme.DiscoveryClassifier: a copy of this theme
+// whose every request is classified as discovery (PLAN §7.4), for the unattended
+// watched-series check of PLAN §12.2.
+//
+// madara makes no retrieval-classified request today, so this changes nothing
+// about what it sends. It is implemented anyway because the interface is how a
+// caller *knows* that, and because a future call site that reaches for
+// GetRetrieval must not silently escape the downgrade.
+func (t *Theme) DiscoveryOnly() theme.Theme {
+	c := *t
+	c.f = theme.DiscoveryFetcher(t.f)
+	return &c
+}
+
 // SuggestedName implements theme.Theme.
 //
 // Empty: madara is a plugin running on hundreds of independently branded

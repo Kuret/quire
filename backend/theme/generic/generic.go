@@ -121,6 +121,16 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// DiscoveryOnly implements theme.DiscoveryClassifier: a copy of this theme
+// whose every request is classified as discovery (PLAN §7.4), for the unattended
+// watched-series check of PLAN §12.2. The escape hatch issues no retrieval-
+// classified request today; see madara's for why it implements this regardless.
+func (t *Theme) DiscoveryOnly() theme.Theme {
+	c := *t
+	c.f = theme.DiscoveryFetcher(t.f)
+	return &c
+}
+
 // SuggestedName implements theme.Theme.
 //
 // Empty. The escape hatch is pointed at a site nobody has written a theme for,

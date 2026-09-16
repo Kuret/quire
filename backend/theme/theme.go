@@ -151,6 +151,55 @@ type Fetcher interface {
 	PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error)
 }
 
+// DiscoveryClassifier is implemented by a theme that can hand back a copy of
+// itself whose every request is classified as discovery (PLAN §7.4).
+//
+// It exists for PLAN §12.2's watched-series check. That check asks a theme for
+// a chapter list, which for a series the *user tapped* is retrieval — one named
+// resource they asked for. Automatically, on every app open, for forty series
+// at once, it is not: it is repeated and unattended, which is the behaviour
+// §7.4's exception was written to exclude. The exception was granted on the
+// condition that it stay narrow, and "the user watched this series once" is
+// exactly the reasoning that would swallow it.
+//
+// Classification is Quire's own and is made per request-kind inside the fetch
+// layer (§7.4), never inferred from the URL — so downgrading it has to happen
+// where the request kind is chosen, which is the theme's fetcher. Hence a copy
+// of the theme rather than a flag on the call.
+//
+// A caller that needs the guarantee should *require* this interface rather than
+// falling back to the theme as it stands. A theme that does not implement it is
+// a theme that has not answered the question, and taking silence for "it never
+// retrieves anything" is how the exception stops being narrow.
+type DiscoveryClassifier interface {
+	// DiscoveryOnly returns an equivalent theme that never issues a retrieval-
+	// classified request. The receiver is left alone.
+	DiscoveryOnly() Theme
+}
+
+// DiscoveryFetcher wraps f so that retrieval requests are made as discovery
+// instead. It is what a theme's DiscoveryOnly is expected to be built from.
+//
+// Nothing else changes: rate limits, the honest User-Agent, Retry-After, the
+// size cap and the SSRF guard are all in the fetch layer and apply to both
+// kinds identically. The only difference is that robots.txt now gates every
+// request — which is the stricter direction, and the point.
+func DiscoveryFetcher(f Fetcher) Fetcher {
+	if f == nil {
+		return nil
+	}
+	if d, ok := f.(discoveryFetcher); ok {
+		return d // already downgraded; wrapping twice buys nothing
+	}
+	return discoveryFetcher{Fetcher: f}
+}
+
+type discoveryFetcher struct{ Fetcher }
+
+func (d discoveryFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
+	return d.Fetcher.Get(ctx, p, rawurl)
+}
+
 // Source is a configured source, stored on device and validated against
 // schema/source.schema.json. The JSON tags and the schema are kept in step by
 // TestSourceRoundTripsAgainstSchema.

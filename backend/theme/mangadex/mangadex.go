@@ -137,6 +137,21 @@ func NewWithClock(f theme.Fetcher, now func() time.Time) *Theme {
 	return &Theme{f: f, now: now}
 }
 
+// DiscoveryOnly implements theme.DiscoveryClassifier: a copy of this theme
+// whose every request is classified as discovery (PLAN §7.4), for the unattended
+// watched-series check of PLAN §12.2.
+//
+// This is the theme the interface exists for. mangadex is the one theme that
+// asks for anything as retrieval — /at-home/server/{id}, which robots.txt
+// disallows and which serves the page images of a chapter the user queued. A
+// watch check never reaches that call, but "never reaches it today" is not a
+// property worth betting the exception's narrowness on.
+func (t *Theme) DiscoveryOnly() theme.Theme {
+	c := *t
+	c.f = theme.DiscoveryFetcher(t.f)
+	return &c
+}
+
 // ID implements theme.Theme.
 func (t *Theme) ID() string { return ID }
 
