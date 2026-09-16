@@ -142,9 +142,29 @@ func (r *run) stageChallenge() (Result, bool) {
 	return Result{}, false
 }
 
-// challengeSignal reports the first signal that fires, if any.
+// challengeSignal reports the first signal that fires on the probed home page.
 func (r *run) challengeSignal() (challengeSignal, bool) {
-	p := r.page
+	return r.challengeSignalFor(r.page, true)
+}
+
+// challengeSignalFor reports the first signal that fires on p.
+//
+// The page is a parameter because stage 5 asks the same question of a second
+// response — the page image it fetches, which may come from an image host that
+// challenges even though the site itself did not (PLAN §7.5 stage 5, corrected
+// 2026-09-16). The signals are the site's, not the page's: a vendor's own
+// interstitial markup, its mitigation header, a refusal from a managed edge, a
+// challenge redirect, a clearance cookie.
+//
+// genericGate is false for anything but the home page. The generic JS-gate
+// signal asks "200, tiny, no theme recognises it, and a client-side render
+// placeholder" — a question that only makes sense about a *document*. Asking it
+// of an image response would make every small non-image body a challenge, which
+// is exactly the false terminal verdict §7.6 must not produce.
+func (r *run) challengeSignalFor(p *probe.Page, genericGate bool) (challengeSignal, bool) {
+	if p == nil {
+		return challengeSignal{}, false
+	}
 	title := strings.ToLower(theme.Collapse(p.Title()))
 	refusal := p.Status == http.StatusForbidden || p.Status == http.StatusServiceUnavailable ||
 		p.Status == http.StatusTooManyRequests
@@ -163,7 +183,7 @@ func (r *run) challengeSignal() (challengeSignal, bool) {
 		return challengeSignal{Name: "cf-mitigated", Detail: "a Cloudflare browser challenge"}, true
 	}
 
-	vendor, edge := r.edgeVendor()
+	vendor, edge := edgeVendor(p)
 
 	// 3. A refusal status from a CDN-managed edge, with an interstitial title.
 	//    Either half alone is ordinary; together they are the classic shape.
@@ -189,7 +209,7 @@ func (r *run) challengeSignal() (challengeSignal, bool) {
 	}
 
 	// 5. A clearance cookie being issued where we can see no content.
-	if refusal || r.noRecognisableContent() {
+	if refusal || (genericGate && r.noRecognisableContent()) {
 		for _, c := range setCookieNames(p.Header) {
 			for _, want := range challengeCookies {
 				if strings.HasPrefix(c, want.name) {
@@ -204,7 +224,7 @@ func (r *run) challengeSignal() (challengeSignal, bool) {
 	//    should be. This is the signal that catches a vendor we have never
 	//    heard of, at the cost of being the least certain — which is why it
 	//    needs all four halves.
-	if p.Status == http.StatusOK && len(p.Body) < genericGateMaxBody && r.noThemeMatch() {
+	if genericGate && p.Status == http.StatusOK && len(p.Body) < genericGateMaxBody && r.noThemeMatch() {
 		if why, ok := clientSideOnly(p); ok {
 			return challengeSignal{Name: "js-gate", Detail: "a page that only renders in a browser — " + why}, true
 		}
@@ -215,9 +235,9 @@ func (r *run) challengeSignal() (challengeSignal, bool) {
 
 // edgeVendor reports whether the response came through a CDN-managed edge, and
 // which one.
-func (r *run) edgeVendor() (string, bool) {
+func edgeVendor(p *probe.Page) (string, bool) {
 	for _, h := range edgeHeaders {
-		v := strings.ToLower(r.page.Header.Get(h.name))
+		v := strings.ToLower(p.Header.Get(h.name))
 		if v == "" {
 			continue
 		}
