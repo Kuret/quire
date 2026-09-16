@@ -1372,6 +1372,24 @@ third-party scraping API, or replay clearance cookies harvested elsewhere. If a
 future contributor proposes any of these, the answer is no, and this section is
 why.
 
+**OPEN QUESTION, raised 2026-09-16 by live reconnaissance — a `Referer` header
+is not on that list, and three candidate sites now turn on it.** Three sites
+taken end to end passed search, series, chapters and page extraction and then
+answered **403 on their image host with no `Referer` and 200 with one** — one
+Akamai `Referral Denied`, two Cloudflare. `backend/fetch` sends no `Referer`, so
+all three produce a `partial` verdict at §7.5 stage 5 and no theme was written
+for any of them. The measurements are in `docs/THEME-NOTES.md`, "The `Referer`
+wall".
+
+The question is whether sending one is permitted here. It is arguably the
+opposite of everything the list above forbids: those are ways of pretending to
+be something you are not, while a `Referer` naming the page the image URL was
+actually extracted from is telling the server the truth about where the request
+came from. `backend/library` already sends one to the device's own web
+interface. But it changes every request the project makes and the honest form is
+per-request rather than a constant, so it is **a decision for the human, not for
+an implementing agent**, and until it is made those sites stay unimplemented.
+
 ### 7.7 Document metadata
 
 **To be filled in during M5 from direct observation.** Create a folder and a PDF

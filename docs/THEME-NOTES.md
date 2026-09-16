@@ -1111,6 +1111,65 @@ qualifier.
 
 ---
 
+## The `Referer` wall — three sites that fail stage 5 for one reason
+
+Recorded 2026-09-16, from live reconnaissance done while looking for themes to
+add. It is here rather than in a per-theme section because **no theme was
+written for any of these**, and the next person to consider them should find out
+why in five minutes rather than in an afternoon.
+
+Three otherwise-clean candidates were taken end to end: search → series →
+chapters → page URLs → fetch one image. All three passed every step **except the
+last**, and all three failed it the same way:
+
+| Candidate | Everything up to page URLs | Image host, no `Referer` | Image host, with `Referer` |
+|---|---|---|---|
+| A vertical-scroll publisher platform | **200** throughout; chapter list is a clean JSON API | **403**, Akamai `Referral Denied` | **200**, `image/jpeg` |
+| An older PHP reader family | **200** throughout; mobile reader ships every page URL eagerly | **403**, Cloudflare `Attention Required!` | **200**, `image/jpeg` |
+| A JSON-API aggregator | **200** throughout on one mirror; reader page embeds the page list as JSON | **403**, Cloudflare `Attention Required!` | **200**, `image/webp` |
+
+`backend/fetch` sends no `Referer` on any request, so under the client as it
+stands all three produce a **`partial`** verdict from §7.5 stage 5, naming page
+fetching as the failing step. Building a theme for any of them would ship a
+theme that cannot download, which is what stage 5 was rewritten to prevent.
+
+**This is a question for a human, and it is not §7.6.** §7.6 forbids rotating or
+spoofing a `User-Agent`, impersonating browser TLS, solving CAPTCHAs, proxying
+through a scraping service, and replaying clearance cookies — all of which are
+ways of *pretending to be something you are not*. Sending a `Referer` naming the
+page the image URL was actually extracted from is the opposite: it is telling
+the server the truth about where the request came from, and the truth happens to
+satisfy the check. `backend/library` already does exactly this against the
+device's own web interface, for the same reason and with the same reasoning.
+
+Whether to do it in `backend/fetch` is nonetheless an architecture decision and
+not a detail, because it changes what every request in the project looks like.
+Until it is decided, these three stay unimplemented. Two further notes for
+whoever picks it up:
+
+- **The `Referer` would have to be real, not constant.** A fixed string is a
+  spoof by another name. The honest form is the URL of the page the theme
+  extracted the image from, which means the fetch layer needs to be told it —
+  a signature change, not a header constant.
+- **One of the three is a mirror set where the mirrors disagree.** Its
+  best-known host answers **403 with a challenge interstitial** on the same API
+  path a sibling host answers **200 JSON** on. Under §7.6 the challenged host is
+  terminal; the unchallenged one works today. "Works today, on one mirror,"
+  is not the same claim as "clean", and treating it as such is how a theme
+  becomes someone's maintenance problem.
+
+**The vertical-scroll platform has a second, independent problem**, which is
+worth recording even though the `Referer` wall stops it first. Its pages are
+webtoon *strips*: single images several thousand pixels tall. PLAN §6 M4 fits a
+page image into a 3:4 PDF page, so a strip becomes a small centred sliver with
+white space either side — technically correct output that is unreadable. M4's
+memory guard bounds the damage but does not change the result. Making that
+platform useful needs real strip-splitting (cutting a tall image into
+screen-shaped pages at sensible boundaries), which is its own design decision
+and **not** something to bolt on while writing a theme.
+
+---
+
 ### `generic` — the escape hatch
 
 Implemented in `backend/theme/generic/`. PLAN §6 M2: "escape hatch, not the
