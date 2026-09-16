@@ -54,15 +54,21 @@ QtObject {
         return true
     }
 
-    // trash moves a document to xochitl's own Trash — recoverable by the user,
-    // and what the stock UI's own delete does. PLAN §12.4 proved the route on
-    // hardware.
+    // trash deletes a document: into xochitl's Trash, and then the Trash is
+    // emptied. PLAN §12.4 proved both calls on hardware.
     //
-    // It answers with a word rather than a flag, because the three outcomes
-    // want three different things from the caller: "ok" means tell the backend
-    // to forget the record, "gone" means the document was already not there and
-    // the M6 missing-document path already has the right answer for that, and
-    // "failed" means change nothing at all.
+    // **Emptying destroys.** removeAllTrashed() does not hide the document, it
+    // removes it: the probe watched a document's .metadata and content replaced
+    // by a tombstone stamped with the second of the call, and nothing else in
+    // the xochitl directory touched. It is what the user asked for — "just
+    // empty the trash after a deletion, i don't really mind if my whole trash
+    // is emptied" — and it is why the confirmation says so before it happens.
+    //
+    // It answers with a word rather than a flag, because the outcomes want
+    // different things from the caller: "ok" is deleted and the Trash emptied,
+    // "kept" is deleted but the Trash still holding it, "gone" means the
+    // document was already not there and the M6 missing-document path already
+    // has the right answer for that, and "failed" means change nothing at all.
     //
     // **There are two selections and only one of them is safe to write.**
     // `explorer.selection` is what selectionMoveToTrash() acts on.
@@ -101,7 +107,29 @@ QtObject {
             // user (PLAN §12.4's implementation notes).
             ex.selection.clear()
 
-            return left === 0 ? "ok" : "failed"
+            if (left !== 0) {
+                // The move did not take. The probe hit exactly this by trashing
+                // a UUID that no longer existed, so it is a real state and not
+                // a defensive flourish.
+                return "failed"
+            }
+
+            // The Trash is emptied second, and only ever after a move that
+            // worked. It lives on the explorer and nowhere else: the probe
+            // found emptyTrash undefined and no removeAllTrashed on Library or
+            // LibraryController (OS 3.25.1.1, 2026-09-16).
+            if (typeof ex.removeAllTrashed !== "function")
+                return "kept"
+            try {
+                ex.removeAllTrashed()
+            } catch (emptyFailed) {
+                // The document is in the Trash, which is still a delete. Only
+                // the emptying did not happen, and saying otherwise would tell
+                // the user their download survived when it did not.
+                console.log("[quire] the Trash could not be emptied: " + emptyFailed)
+                return "kept"
+            }
+            return "ok"
         } catch (e) {
             // Every early return above clears the selection before it leaves,
             // and a throw must not be the one path that does not: a half-made

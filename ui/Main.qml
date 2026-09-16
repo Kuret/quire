@@ -109,8 +109,15 @@ Rectangle {
             root.forgetDocument(documentUuid)
             return
         }
-        root.send(Msg.DeleteDownload,
-            {"documentUuid": documentUuid, "confirmed": true, "trashed": result === "ok"})
+        // "kept" is a delete that happened with a Trash that did not empty, so
+        // it is reported as trashed — the download really is gone — with the
+        // emptying reported separately. Calling it a failure would tell the
+        // user their download survived when it did not.
+        root.send(Msg.DeleteDownload, {
+            "documentUuid": documentUuid,
+            "confirmed": true,
+            "trashed": result === "ok" || result === "kept",
+            "emptied": result === "ok"})
     }
 
     // forgetDocument clears a dead UUID off every row that carried it, so the

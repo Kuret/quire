@@ -40,7 +40,7 @@ func TestTrashingADocumentForgetsItAndReclaimsThePDF(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"emptied":true}`)
 
 	var reply struct {
 		DocumentUUID string `json:"documentUuid"`
@@ -126,7 +126,7 @@ func TestDeletingOnePartLeavesTheOtherParts(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+victim.DocumentUUID+`","confirmed":true,"trashed":true}`)
+		`{"documentUuid":"`+victim.DocumentUUID+`","confirmed":true,"trashed":true,"emptied":true}`)
 	fresh.wait(t, appload.MessageDownloadDeleted)
 
 	after := libStore.List()
@@ -146,7 +146,7 @@ func TestDeletingNothingIsRefused(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
 	addSource(t, store)
 
-	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","confirmed":true,"trashed":true}`)
+	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","confirmed":true,"trashed":true,"emptied":true}`)
 
 	var e struct {
 		Code string `json:"code"`
@@ -191,7 +191,13 @@ func TestDeletingAsksFirstAndNamesTheDocument(t *testing.T) {
 		t.Errorf("question %q does not name %q", q.Message, name)
 	}
 	if !strings.Contains(q.Message, "Trash") {
-		t.Errorf("question %q does not say where the document goes", q.Message)
+		t.Errorf("question %q does not say the Trash is emptied", q.Message)
+	}
+	if !strings.Contains(q.Message, "for good") {
+		t.Errorf("question %q does not say the delete is permanent", q.Message)
+	}
+	if !strings.Contains(q.Message, "anything else") {
+		t.Errorf("question %q does not warn that the rest of the Trash goes too", q.Message)
 	}
 	if n := len(libStore.List()); n != 1 {
 		t.Errorf("%d records; asking must not delete anything", n)
@@ -214,5 +220,48 @@ func TestAskingAboutAnUnknownDocumentSaysSo(t *testing.T) {
 	}
 	if e.Code != "not_found" {
 		t.Errorf("code %q", e.Code)
+	}
+}
+
+// A Trash that would not empty is still a delete. The download is out of the
+// library and the record is gone, so reporting a failure would tell the user
+// their download survived when it did not — but the confirmation promised an
+// empty Trash, so the note corrects that much.
+func TestATrashThatWillNotEmptyIsStillADelete(t *testing.T) {
+	svc, store, libStore, _, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	done := waitForPhase(t, rec, "done")
+	uuid, _ := done["documentUuid"].(string)
+
+	fresh := &recorder{}
+	handle(t, svc, fresh, appload.MessageDeleteDownload,
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"emptied":false}`)
+
+	// The row is put right first: the delete happened.
+	fresh.wait(t, appload.MessageDownloadDeleted)
+	if n := len(libStore.List()); n != 0 {
+		t.Errorf("%d records left; the document was deleted", n)
+	}
+
+	var e struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(fresh.wait(t, appload.MessageError), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "trash_not_emptied" {
+		t.Errorf("code %q", e.Code)
+	}
+	if !strings.Contains(e.Message, "deleted") {
+		t.Errorf("note %q does not say the download went", e.Message)
+	}
+	if strings.Contains(e.Message, "still there") {
+		t.Errorf("note %q reads like a failed delete", e.Message)
 	}
 }

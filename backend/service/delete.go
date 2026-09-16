@@ -28,6 +28,13 @@ type deleteRequest struct {
 	// Trashed is what the frontend observed, not what it intended. False means
 	// the document is still on the tablet.
 	Trashed bool `json:"trashed,omitempty"`
+
+	// Emptied says the Trash was emptied afterwards, which is what makes the
+	// delete permanent (PLAN §12.4). It is reported separately from Trashed
+	// because the two fail separately: a document in the Trash is deleted as
+	// far as the user's library is concerned, whether or not the emptying that
+	// should have followed it worked.
+	Emptied bool `json:"emptied,omitempty"`
 }
 
 // DeleteFailedRemedy is what the user is told when the trash call did not take.
@@ -56,6 +63,17 @@ const DeleteNotForgottenRemedy = "That document is in your reMarkable's Trash, b
 const DeleteUnknownRemedy = "Quire has no record of that download any more, so there is nothing for it " +
 	"to delete."
 
+// DeleteNotEmptiedNote is said when the document went to the Trash but the
+// Trash would not empty.
+//
+// It is not phrased as a failure, because the delete was not one: the download
+// is out of the library and the record is gone. What it corrects is the promise
+// the confirmation made — the user agreed to their Trash being emptied and it
+// was not, so they are told rather than left to find a Trash they thought was
+// empty.
+const DeleteNotEmptiedNote = "That download is deleted and now sits in your reMarkable’s Trash, but Quire " +
+	"could not empty the Trash afterwards, so it is still holding what was in it."
+
 // deleteQuestion is the sentence the confirm strip asks.
 //
 // It names the document exactly as the tablet does, which is the whole point:
@@ -63,18 +81,22 @@ const DeleteUnknownRemedy = "Quire has no record of that download any more, so t
 // and the *document* is "… (part 2 of 3)". Naming the file is what makes it
 // legible that one part is going and the others are staying.
 //
-// It says Trash, not deleted, because Trash is where the document goes (PLAN
-// §12.4 — the metadata reads "parent": "trash" afterwards). Copy that claimed
-// otherwise would be a lie the user finds out about later, with a full Trash.
+// **It says "for good", and it says the whole Trash goes.** Deleting empties
+// the Trash straight afterwards (PLAN §12.4), and the probe watched that call
+// replace a document's metadata and content with a tombstone — so this is
+// destruction, not the recoverable Trash the earlier wording promised. The
+// user asked for the emptying and accepted losing the rest of the Trash with
+// it; they are still owed the sentence at the moment they confirm, because the
+// thing being destroyed may be something of theirs that Quire never put there.
 func deleteQuestion(name string) string {
 	if name == "" {
 		// A record from before names were kept. "That download" is vague, but
 		// it is not wrong, and inventing a name would be.
-		return "Move that download to your reMarkable’s Trash? It stays in the Trash until you empty it, " +
-			"and Quire will offer the download again."
+		return "Delete that download from your reMarkable for good, and empty the Trash — including anything " +
+			"else already in it — at the same time?"
 	}
-	return "Move “" + name + "” to your reMarkable’s Trash? It stays in the Trash until you empty it, " +
-		"and Quire will offer the download again."
+	return "Delete “" + name + "” from your reMarkable for good, and empty the Trash — including anything " +
+		"else already in it — at the same time?"
 }
 
 // deleteDownload forgets a document the frontend has moved to xochitl's Trash,
@@ -135,15 +157,27 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 			s.log.Error("could not forget a trashed volume", "uuid", req.DocumentUUID, "err", err)
 			return s.sendError(out, "not_forgotten", DeleteNotForgottenRemedy)
 		}
-		s.log.Info("a downloaded volume was moved to the reMarkable's Trash",
-			"document", req.DocumentUUID, "name", rec.VisibleName)
+		s.log.Info("a downloaded volume was deleted from the reMarkable",
+			"document", req.DocumentUUID, "name", rec.VisibleName, "trashEmptied", req.Emptied)
 		break
 	}
 
 	// Sent even when no record matched: the frontend asked for a row to stop
-	// saying "Read", the document really is in the Trash, and a silent reply
-	// would leave the row offering to open something that is not there.
-	return send(out, appload.MessageDownloadDeleted, map[string]any{"documentUuid": req.DocumentUUID})
+	// saying "Read", the document really is gone, and a silent reply would
+	// leave the row offering to open something that is not there.
+	if err := send(out, appload.MessageDownloadDeleted,
+		map[string]any{"documentUuid": req.DocumentUUID}); err != nil {
+		return err
+	}
+
+	if !req.Emptied {
+		// The delete stands; only the promise about the Trash did not. Said
+		// after the row has already been put right, so the screen shows a
+		// finished delete with a note about it rather than a failure.
+		s.log.Warn("the Trash was not emptied after a delete", "document", req.DocumentUUID)
+		return s.sendError(out, "trash_not_emptied", DeleteNotEmptiedNote)
+	}
+	return nil
 }
 
 // recordFor finds the stored record for a document UUID.
