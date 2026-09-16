@@ -250,6 +250,22 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 		return nil
 	}
 
+	if s.offerToQueue(ctx, out, req) {
+		return nil
+	}
+	return s.sendError(out, "busy",
+		"Quire is already busy with as many downloads as it will queue. Try again when one has finished.")
+}
+
+// offerToQueue puts one confirmed request on the queue and reports whether it
+// fitted, telling the row it is queued when it did.
+//
+// It is separate from enqueueDownload's refusal because a *selection* refuses
+// differently: one tap that does not fit is worth a sentence, but a selection
+// of thirty against a queue of sixteen would send that same sentence fourteen
+// times. The caller decides how to say no; this only decides whether there was
+// room. See enqueueMany.
+func (s *Service) offerToQueue(ctx context.Context, out Sender, req downloadRequest) bool {
 	s.dlOnce.Do(func() {
 		s.dlQueue = make(chan downloadJob, downloadQueueDepth)
 		s.goBackground(ctx, s.downloadWorker)
@@ -257,15 +273,15 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 
 	select {
 	case s.dlQueue <- downloadJob{out: out, req: req}:
-		return send(out, appload.MessageDownloadProgress, downloadProgress{
+		_ = send(out, appload.MessageDownloadProgress, downloadProgress{
 			SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
 			Grouping: req.grouping(),
 			Phase:    phaseQueued,
 			Message:  "Queued.",
 		})
+		return true
 	default:
-		return s.sendError(out, "busy",
-			"Quire is already busy with as many downloads as it will queue. Try again when one has finished.")
+		return false
 	}
 }
 
