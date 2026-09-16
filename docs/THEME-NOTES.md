@@ -1353,6 +1353,68 @@ chapter's referrer. A test pins that each page carries **its own** chapter's.
 A theme that does not implement `PageReferrer` yields the zero value and
 therefore **no header**, asserted by absence rather than by empty string.
 
+### How the cover referrer travels (2026-09-16)
+
+Cover thumbnails hit the same wall. `comick`'s CDN answers **403** to a cover
+fetched with no `Referer` and **200 `image/webp`** with one, across `cdn1` and
+`cdn2`. `backend/covers` was fetching with a plain `Get`, so the grid was a
+field of blank tiles.
+
+The rule is §7.6's unchanged: the referrer is **the page the cover URL was
+genuinely extracted from** — the listing or the series page, never a constant,
+never guessed. What differs from page images is *how it reaches the fetch*.
+
+- A chapter's page referrer is **asked for**: `PageReferer(s, chapterID)` is a
+  pure function, so the value can be recomputed whenever it is needed.
+- A cover has no such handle. The same URL can be reached from a listing or
+  from a series page, so there is nothing to recompute it from. It therefore
+  **travels on the data**: `theme.SeriesStub.CoverReferrer` and
+  `theme.Series.CoverReferrer`, set by the theme to the URL it actually
+  fetched, alongside the `CoverURL` it parsed out of that response.
+
+`theme.CoverRefererFrom(raw)` is the resolver, the shape of `PageRefererFor`:
+`""` yields the zero `fetch.Referrer` and therefore **no header**, and a
+non-empty value `fetch.PageReferrer` refuses yields the zero one plus an error,
+because a theme naming a page it cannot have fetched is a bug and not a reason
+to invent a replacement. `covers.Cache.Path` takes a `fetch.Referrer` as a
+parameter for the same reason `fetch.Referrer` is not a client-wide setting:
+the cache holds a URL and nothing else, so it is the one component that
+*cannot* know, and giving it a default would make a liar of it.
+
+**One link in the chain is not a Go call.** The grid asks for the tiles it has
+on screen, by URL, so the cover URL round-trips through the frontend and the
+response it was parsed from is long gone by the time the request comes back.
+`Service.rememberCoverReferrer` notes the page beside the URL at the moment the
+theme hands it over, keyed per source, and `coverReferrerFor` looks it up. That
+is remembering, not reconstructing: a URL with no note yields `""` and no
+header, which §7.6 says is the correct answer when we do not know. The memo is
+bounded and dropped wholesale when full — the cost of forgetting is one cover
+fetched without a header, and the listing that names it again is a page turn
+away.
+
+`mangadex` is untouched, and it is the test of whether this stayed honest: its
+cover host asks for nothing, it sets no `CoverReferrer`, and its covers are
+fetched with **no header at all**. Verified live on 2026-09-16 along with
+`weebcentral`.
+
+### Could series with no chapters be filtered out of search results?
+
+Asked 2026-09-16, and the answer is **no, not cheaply** — so it is written down
+here rather than re-litigated.
+
+A search result carries no trustworthy chapter count. Finding out means a
+chapter-list request **per series**, and at 20+ results per page that is a
+burst of twenty-odd requests through a limiter deliberately serialised for
+politeness (PLAN §7.4) — before the user has shown interest in any of them.
+That is a real cost in traffic and in time-to-first-tile, for a cosmetic gain.
+
+It is also worth recording what prompted the question: **the series were not
+empty.** They were unparseable — the `md_titles` bug above — and the screen
+that said "no chapters" was reporting a parse failure it had no vocabulary for.
+A filter would have hidden the symptom of a real bug. If genuinely empty series
+turn out to be common enough to be worth solving, the honest fix is a count the
+listing already carries, not a request per tile.
+
 ### The strip problem, which is separate and not solved
 
 `webtoons` pages are strips: single images several thousand pixels tall. PLAN
@@ -1749,6 +1811,71 @@ chapter with neither is called "Oneshot".
 | **A second mirror, same `/api/search`** | **403**, challenge interstitial — terminal under §7.6 |
 | **Page image, no `Referer`** | **403**, Cloudflare `Attention Required!` |
 | **Page image, `Referer` = the chapter page** | **200**, `image/webp` |
+
+#### The payload does not keep its own shapes — fixed 2026-09-16
+
+Reported from the device as a series screen that showed **no chapters at all**,
+on many series:
+
+```
+level=WARN code=series_failed
+message="cannot unmarshal object into Go struct field comicData.md_titles of type []comick.altTitle"
+```
+
+`Chapters()` was fine throughout — fetched directly it returned 18, 51, 10 and
+1 for four sampled series. The whole outage was one field of `Series()`: the
+screen errors as a unit, so a payload it could not parse took the chapter list
+down with it.
+
+**What the endpoint actually does.** `md_titles` is an array when it is empty
+and an **object keyed by position** when it is not:
+
+```
+"md_titles": []                                              # 57 of 60 series
+"md_titles": {"1": {"id": 462545, "comic_id": 142241, …}}    # the rest
+```
+
+Measured against 60 live series on 2026-09-16. This is what a PHP collection
+serialises to once its keys are not a 0-based run, so **every to-many relation
+here can do it** — and the same reasoning says a to-one relation can arrive
+wrapped in an array.
+
+**The shape of the fix** is `backend/theme/comick/shapes.go`: `list[T]` for
+to-many (array, keyed object, bare object, or null) and `one[T]` for to-one
+(object, or array taking the first). Applied to `authors`, `artists`,
+`md_titles`, `md_comic_md_genres`, `md_genres`, `group_name`, the `chapter`
+object in the reader payload, its `images`, and both envelopes' `data`. `chap`
+and `vol` are `flexString`, because they are numbers written as text and are
+the two fields an API of this kind emits unquoted sooner or later.
+
+**Reading the keyed object as a single row would have been worse than the
+crash.** `{"1": {…}}` decoded as one `altTitle` yields an `altTitle` with no
+title in it: every alternate title silently gone, nothing red anywhere. The
+first version of this fix did exactly that and a live run caught it — the
+series that had failed came back with `titles=0`. `list[T]` therefore decodes
+the object's *values*, in document order, and only falls back to "the object is
+one row" when the values do not fit.
+
+**Where the tolerance deliberately stops.** Scalars that can only sensibly be
+one thing — `title`, `slug`, `desc`, `default_thumbnail`, `hid`, `lang`,
+`created_at`, `status` — keep their plain types, so `encoding/json` refuses
+them and **names the field**, exactly as the message above did. That message
+was the useful part of the bug and it is pinned by a test.
+
+**PLAN §9 again, and the durable half of the fix.** The fixture had `md_titles`
+as an array, so the parser was only ever checked against a shape the API does
+not always send: a closed loop, the third in this repository. The fixtures now
+come in pairs — `series.html` / `series-single.html`, `search.json` /
+`search-single.json`, `chapter-list.json` / `chapter-list-single.json` — and
+deleting `shapes.go`'s tolerance turns the suite red.
+
+#### Covers need a `Referer` too — fixed 2026-09-16
+
+Measured: `https://cdn1.comicknew.pictures/…/covers/….webp` answers **403** with
+no `Referer` and **200 `image/webp`, 65,734 bytes** with one. The same wall as
+page images, one layer up, and the same answer — see "The `Referer` wall"
+above for the decision and "How the cover referrer travels" below for the
+mechanism.
 
 ---
 
