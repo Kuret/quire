@@ -226,19 +226,24 @@ func (s *Service) beginDownload(ctx context.Context, key downloadKey) (context.C
 	}
 }
 
-// claimChapters marks the chapters a running download is writing, and returns
-// the release.
+// claimChapters marks the page directories a running download is writing, and
+// returns the release.
 //
-// Only a *running* download claims. A queued one has written nothing yet, so a
-// delete that removes its pages first costs it a refetch and nothing else —
-// resume simply finds them absent (PLAN §6 M4). A running one is the case that
-// matters: removing the directory underneath it leaves a writer holding files
-// that are no longer anywhere, and a volume assembled from what survived.
+// Only a *running* download claims. A queued one has written nothing yet, so
+// removing its pages first costs it a refetch and nothing else — resume simply
+// finds them absent (PLAN §6 M4). A running one is the case that matters:
+// taking the directory out from under a writer leaves it filling files that are
+// no longer anywhere, and a volume assembled from whatever survived.
+//
+// **Claimed by directory, not by chapter id.** Deleting a download knows the
+// chapter ids it is about; clearing the whole cache knows only what is on disk,
+// and a slug cannot be turned back into the id it came from. The directory is
+// the thing both of them can compare, so it is the thing that is claimed.
 //
 // Counted rather than flagged, because the same chapter can be claimed by the
 // volume that contains it and by itself in the same session.
-func (s *Service) claimChapters(chapters []download.Chapter) func() {
-	ids := make([]string, 0, len(chapters))
+func (s *Service) claimChapters(seriesDir string, chapters []download.Chapter) func() {
+	dirs := make([]string, 0, len(chapters))
 	s.dlMu.Lock()
 	if s.dlChapters == nil {
 		s.dlChapters = map[string]int{}
@@ -247,30 +252,40 @@ func (s *Service) claimChapters(chapters []download.Chapter) func() {
 		if ch.ID == "" {
 			continue
 		}
-		s.dlChapters[ch.ID]++
-		ids = append(ids, ch.ID)
+		dir := claimKey(download.ChapterDir(seriesDir, ch.ID))
+		s.dlChapters[dir]++
+		dirs = append(dirs, dir)
 	}
 	s.dlMu.Unlock()
 
 	return func() {
 		s.dlMu.Lock()
 		defer s.dlMu.Unlock()
-		for _, id := range ids {
-			if s.dlChapters[id] <= 1 {
-				delete(s.dlChapters, id)
+		for _, dir := range dirs {
+			if s.dlChapters[dir] <= 1 {
+				delete(s.dlChapters, dir)
 				continue
 			}
-			s.dlChapters[id]--
+			s.dlChapters[dir]--
 		}
 	}
 }
 
-// chapterIsDownloading reports whether a download is writing this chapter's
-// pages right now.
-func (s *Service) chapterIsDownloading(chapterID string) bool {
+// chapterDirIsClaimed reports whether a download is writing into this directory
+// right now.
+func (s *Service) chapterDirIsClaimed(dir string) bool {
 	s.dlMu.Lock()
 	defer s.dlMu.Unlock()
-	return s.dlChapters[chapterID] > 0
+	return s.dlChapters[claimKey(dir)] > 0
+}
+
+// claimKey is the comparable form of a path: absolute where it can be, cleaned
+// either way, so two spellings of one directory are one claim.
+func claimKey(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
 }
 
 // enqueueDownload accepts a request and returns immediately.
@@ -575,9 +590,9 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 
 	dir := filepath.Join(s.downloadDir, safeSegment(src.ID), safeSegment(req.SeriesID))
 
-	// Held for the rest of the run, so a delete landing mid-download reclaims
-	// the pages of other chapters and leaves these alone.
-	defer s.claimChapters(chs)()
+	// Held for the rest of the run, so a delete or a cache clear landing
+	// mid-download leaves these pages alone and takes the rest.
+	defer s.claimChapters(dir, chs)()
 
 	// The pages already on disk are left exactly where they are. Resume works
 	// by skipping files that exist (PLAN §6 M4), so cancelling at page 300 of

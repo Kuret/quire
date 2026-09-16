@@ -42,7 +42,7 @@ func TestReclaimLeavesPagesADownloadIsWriting(t *testing.T) {
 		Chapters: []string{busy, idle},
 	}
 
-	release := s.claimChapters([]download.Chapter{{ID: busy}})
+	release := s.claimChapters(seriesDir, []download.Chapter{{ID: busy}})
 
 	freed := s.reclaimPages(rec, nil)
 	if _, err := os.Stat(busyDir); err != nil {
@@ -57,7 +57,7 @@ func TestReclaimLeavesPagesADownloadIsWriting(t *testing.T) {
 
 	// Once the download is done, the same delete reclaims the rest.
 	release()
-	if s.chapterIsDownloading(busy) {
+	if s.chapterDirIsClaimed(busyDir) {
 		t.Fatal("the claim outlived the download")
 	}
 	if freed := s.reclaimPages(rec, nil); freed == 0 {
@@ -73,17 +73,19 @@ func TestReclaimLeavesPagesADownloadIsWriting(t *testing.T) {
 // pages the second download is still writing.
 func TestChapterClaimsAreCounted(t *testing.T) {
 	s := New(Options{})
+	seriesDir := t.TempDir()
 	id := "/manga/the-lantern-keeper/chapter-1/"
+	dir := download.ChapterDir(seriesDir, id)
 
-	first := s.claimChapters([]download.Chapter{{ID: id}})
-	second := s.claimChapters([]download.Chapter{{ID: id}})
+	first := s.claimChapters(seriesDir, []download.Chapter{{ID: id}})
+	second := s.claimChapters(seriesDir, []download.Chapter{{ID: id}})
 
 	first()
-	if !s.chapterIsDownloading(id) {
+	if !s.chapterDirIsClaimed(dir) {
 		t.Fatal("one release freed a chapter two downloads had claimed")
 	}
 	second()
-	if s.chapterIsDownloading(id) {
+	if s.chapterDirIsClaimed(dir) {
 		t.Fatal("the chapter stayed claimed after both releases")
 	}
 }

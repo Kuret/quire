@@ -74,7 +74,8 @@ func (s *Service) reclaimPages(rec library.Record, remaining []library.Record) i
 				"source", rec.Source, "chapter", id)
 			continue
 		}
-		if s.chapterIsDownloading(id) {
+		dir := download.ChapterDir(seriesDir, id)
+		if s.chapterDirIsClaimed(dir) {
 			// A running download is writing into this directory. Taking it away
 			// mid-write leaves that download assembling a volume out of the
 			// pages that happened to survive, which is a worse outcome than the
@@ -84,7 +85,6 @@ func (s *Service) reclaimPages(rec library.Record, remaining []library.Record) i
 			continue
 		}
 
-		dir := download.ChapterDir(seriesDir, id)
 		freed += s.removeUnderRoot(root, dir)
 	}
 

@@ -138,10 +138,10 @@ type Service struct {
 	// the download currently running; dlCancelled remembers a Stop that
 	// arrived while the request was still queued.
 	//
-	// dlChapters is the set of chapter ids the running download is writing page
-	// files for. Deleting a download reclaims those files (PLAN §12.4), and the
-	// one thing it must not do is take them out from under a writer — see
-	// claimChapters.
+	// dlChapters counts the page directories the running download is writing
+	// into. Deleting a download reclaims those files, and clearing the cache
+	// reclaims all of them (PLAN §12.4); the one thing neither may do is take
+	// them out from under a writer — see claimChapters.
 	dlMu        sync.Mutex
 	dlActive    map[downloadKey]context.CancelFunc
 	dlCancelled map[downloadKey]bool
