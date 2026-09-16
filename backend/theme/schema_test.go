@@ -12,6 +12,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/rickl/quire/backend/fetch"
+	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/theme"
 )
 
@@ -106,6 +107,7 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 				Overrides:    map[string]any{"seriesSubPath": "series"},
 				AllowedHosts: []string{"cdn.example.invalid"},
 				RateLimit:    &fetch.RateLimit{RequestsPerMinute: 6, Concurrency: 1},
+				SplitStrips:  "never",
 				Enabled:      &enabled,
 				AddedAt:      at,
 				LastProbe: &theme.ProbeResult{
@@ -171,6 +173,12 @@ func TestSchemaRejectsWhatGoValidationRejects(t *testing.T) {
 			       "baseUrl":"file:///etc/passwd","addedAt":"2026-09-15T00:00:00Z"}`,
 		},
 		{
+			name: "a splitStrips value outside the PLAN §12.3 enum",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"https://example.invalid","addedAt":"2026-09-15T00:00:00Z",
+			       "splitStrips":"sometimes"}`,
+		},
+		{
 			name: "a verdict outside the PLAN §7.5 enum",
 			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
 			       "baseUrl":"https://example.invalid","addedAt":"2026-09-15T00:00:00Z",
@@ -207,7 +215,7 @@ func TestSourceOmitsEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "enabled", "lastProbe"} {
+	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe"} {
 		if strings.Contains(string(b), `"`+unwanted+`"`) {
 			t.Errorf("a bare source exported %q; it should be omitted:\n%s", unwanted, b)
 		}
@@ -270,4 +278,84 @@ func TestSchemaAcceptsWhatThemesDeclare(t *testing.T) {
 			t.Errorf("allowedHosts entry %q was accepted by the schema", bad)
 		}
 	}
+}
+
+// TestSplitStripsEnumAgreesEverywhere pins the three places the PLAN §12.3
+// override is spelled out: the committed schema, Source's own validation, and
+// imageproc.ParseSplitMode, which is where the value is finally turned into
+// behaviour.
+//
+// The reason this test exists rather than an import: making backend/theme
+// depend on the image pipeline for an enum would be the wrong edge, but the
+// alternative — three hand-copied lists — is exactly the drift §9 warns about,
+// and a schema field whose value is silently ignored is the specific failure
+// worth pinning. So the schema is read as data and both implementations are
+// held to whatever it says.
+func TestSplitStripsEnumAgreesEverywhere(t *testing.T) {
+	values := schemaEnum(t, "splitStrips")
+	if len(values) == 0 {
+		t.Fatal("the schema declares no splitStrips enum; this test is checking nothing")
+	}
+
+	s := loadSchema(t)
+	reg := theme.NewRegistry()
+	reg.MustRegister(&fake{id: "madara"})
+
+	for _, v := range values {
+		t.Run(v, func(t *testing.T) {
+			if _, err := imageproc.ParseSplitMode(v); err != nil {
+				t.Errorf("the schema offers %q but imageproc cannot parse it: %v", v, err)
+			}
+			src := theme.Source{
+				ID: "a", Name: "A", Lang: "en", Theme: "madara",
+				BaseURL: "https://example.invalid", AddedAt: time.Now().UTC(),
+				SplitStrips: v,
+			}
+			if err := validate(t, s, src); err != nil {
+				t.Errorf("the schema rejects its own enum value %q: %v", v, err)
+			}
+			if err := reg.Validate(&src); err != nil {
+				t.Errorf("Registry.Validate rejects the schema's enum value %q: %v", v, err)
+			}
+		})
+	}
+
+	// The empty string is the stored form of "unset" and must mean the default
+	// everywhere, not "invalid".
+	if mode, err := imageproc.ParseSplitMode(""); err != nil || mode != imageproc.SplitAuto {
+		t.Errorf(`ParseSplitMode("") = %v, %v; want the default, auto`, mode, err)
+	}
+
+	// And a value none of them offers is refused by both, so a hand-edited
+	// source cannot smuggle one past the Go side.
+	bad := theme.Source{
+		ID: "a", Name: "A", Lang: "en", Theme: "madara",
+		BaseURL: "https://example.invalid", AddedAt: time.Now().UTC(),
+		SplitStrips: "sometimes",
+	}
+	if err := reg.Validate(&bad); err == nil {
+		t.Error("Registry.Validate accepted splitStrips=sometimes")
+	}
+	if _, err := imageproc.ParseSplitMode("sometimes"); err == nil {
+		t.Error("imageproc parsed splitStrips=sometimes")
+	}
+}
+
+// schemaEnum reads one property's enum straight out of the committed schema, so
+// the test is driven by the document rather than by a copy of it.
+func schemaEnum(t *testing.T, property string) []string {
+	t.Helper()
+	b, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Properties[property].Enum
 }
