@@ -2132,3 +2132,48 @@ The confirmation wording is unchanged. It already says the download goes for
 good; that a later re-download has to fetch the pages again is what "deleted"
 means everywhere else, and a second clause for it would lengthen an already long
 sentence to say something nobody is surprised by.
+
+#### Clearing the cache — Settings, one button, no schedule
+
+Reclaiming on delete does not reach everything, and what it misses is orphaned
+**permanently**. Two ways in:
+
+- **Pages a delete had to skip.** Rule 4 above leaves a running download's pages
+  alone — and by then `libStore.Remove` has run, so no future delete will ever
+  name those chapters again.
+- **Pages no record ever pointed at.** A download that failed, or was cancelled
+  before its document existed, leaves what it had already fetched.
+
+The user spotted this from the delete work — *"will these files just stay in
+limbo indefinitely? Maybe we can add a clear cache option in the main menu?"* —
+and it is a control on the Settings screen, beside the robots toggle and the
+log.
+
+**It shows the size first.** A button to clear something whose size you cannot
+see is a button nobody dares press, and the figure is also how the user confirms
+it worked. The size and every sentence about it are composed in the backend
+(PLAN §2); the view never formats a size, so "636 MB" is spelled one way in the
+application.
+
+**It clears everything not being written**, not only the orphans. "Clear cache"
+should mean what it says, and a rule the user can predict beats a clever one
+that reclaims slightly more. It is safe in a way worth stating: the documents
+live on the tablet, in xochitl's library, wholly independent of these pages, so
+the cost is a refetch and only if the user deletes a download and wants it back.
+
+The same four rules as reclaiming apply, plus:
+
+- **A running download keeps its pages, and the sentence says so.** The claim is
+  keyed by *directory* rather than chapter id, because clearing sees only what
+  is on disk and a slug cannot be turned back into the id it came from. What was
+  kept is counted and reported — "Cleared 592 MB. 44 MB was left, because a
+  download is still using it" — since a figure that silently omits 40 MB is the
+  small lie that becomes a bug report.
+- **It asks first**, like a delete, and for the same reason: hundreds of
+  megabytes, and the only way back is to fetch them again.
+- **Nothing else is touched.** Not `library.json`, not the source list, not the
+  logs, not the covers.
+
+**No automatic clearing, and no timer.** The user asked for a control, not a
+policy. A cache that empties itself is a download that vanished the night before
+a flight.
