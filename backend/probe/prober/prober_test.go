@@ -89,7 +89,35 @@ func madaraRoutes() map[string]themetest.Route {
 		"GET /manga/the-lantern-keeper/":                {File: "series.html"},
 		"POST /manga/the-lantern-keeper/ajax/chapters/": {File: "chapters-ajax.html"},
 		"GET /manga/the-lantern-keeper/chapter-4/":      {File: "reader.html"},
+		// PLAN §7.5 stage 5 fetches one page image rather than only extracting
+		// its URL (corrected 2026-09-16), so the happy path has one more route
+		// than it used to. It is a route like any other: no test here reaches
+		// the network, and an unrouted image is a failing test rather than a
+		// quiet call out.
+		"GET /pages/lantern-keeper/4/001.jpg": imageRoute(),
 	}
+}
+
+// imageRoute is a one-pixel response that looks like what an image host sends:
+// a declared image content type and bytes that sniff as one.
+func imageRoute() themetest.Route {
+	return themetest.Route{
+		Body:   string(onePixelPNG),
+		Header: http.Header{"Content-Type": []string{"image/png"}},
+	}
+}
+
+// onePixelPNG is the smallest real PNG: signature, IHDR, IDAT, IEND. Written
+// out rather than base64-decoded so that what it is stays visible.
+var onePixelPNG = []byte{
+	0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
+	0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0a, 'I', 'D', 'A', 'T',
+	0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05,
+	0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00,
+	0x00, 0x00, 'I', 'E', 'N', 'D', 0xae, 0x42, 0x60, 0x82,
 }
 
 func run(t *testing.T, routes map[string]themetest.Route, ui prober.UI, opts ...func(*prober.Options)) prober.Result {
@@ -511,6 +539,7 @@ func TestRedirectOffDomainAsksFirst(t *testing.T) {
 			"GET /manga/salt-and-cedar/":                 {File: "series.html"},
 			"POST /manga/salt-and-cedar/ajax/chapters/":  {File: "chapters-ajax.html"},
 			"GET /manga/the-lantern-keeper/chapter-3-5/": {File: "reader.html"},
+			"GET /pages/lantern-keeper/4/001.jpg":        imageRoute(),
 		}
 		ui := &recordUI{answers: []string{"continue"}}
 		res := run(t, routes, ui)
@@ -538,4 +567,27 @@ func (f errFetcher) GetRetrieval(context.Context, *fetch.Policy, string) (*fetch
 
 func (f errFetcher) PostForm(context.Context, *fetch.Policy, string, url.Values) (*fetch.Response, error) {
 	return nil, f.err
+}
+
+// runWithTheme is run() with a specific theme registered instead of the
+// production fan-out, for the stage-5 image tests: they need a theme whose
+// search, series and chapters are canned so that the only thing under test is
+// what happens to the page image.
+func runWithTheme(t *testing.T, routes map[string]themetest.Route, th theme.Theme) prober.Result {
+	t.Helper()
+	return runWithFetcher(t, themetest.New(t, routes), th)
+}
+
+func runWithFetcher(t *testing.T, f *themetest.Fetcher, th theme.Theme) prober.Result {
+	t.Helper()
+	reg := theme.NewRegistry()
+	reg.MustRegister(th)
+	res, err := prober.New(prober.Options{
+		Fetcher: f, Registry: reg, Guard: allowGuard{}, Now: clock,
+		NewID: func() string { return "src-test" },
+	}).Run(context.Background(), "https://example.invalid", &recordUI{answers: []string{"continue", "continue"}})
+	if err != nil {
+		t.Fatalf("probe returned an error: %v", err)
+	}
+	return res
 }

@@ -20,6 +20,10 @@ type stubTheme struct {
 	score         int
 	allowedHosts  []string
 	suggestedName string
+	// pageURL overrides the single page image this theme claims to have found.
+	// Empty keeps the default, so every existing test is unaffected; the
+	// stage-5 image tests use it to point the fetch somewhere specific.
+	pageURL string
 }
 
 func (s stubTheme) ID() string                  { return s.id }
@@ -46,6 +50,9 @@ func (s stubTheme) Chapters(context.Context, *theme.Source, string) ([]theme.Cha
 }
 
 func (s stubTheme) Pages(context.Context, *theme.Source, string) ([]string, error) {
+	if s.pageURL != "" {
+		return []string{s.pageURL}, nil
+	}
 	return []string{"https://example.invalid/p/1.jpg"}, nil
 }
 
@@ -54,7 +61,8 @@ func (s stubTheme) Pages(context.Context, *theme.Source, string) ([]string, erro
 func TestNearTieAsksTheUser(t *testing.T) {
 	newProber := func(t *testing.T) (*prober.Prober, *themetest.Fetcher) {
 		f := themetest.New(t, map[string]themetest.Route{
-			"GET /": {File: "home-unrecognised.html"},
+			"GET /":        {File: "home-unrecognised.html"},
+			"GET /p/1.jpg": imageRoute(),
 		})
 		reg := theme.NewRegistry()
 		reg.MustRegister(stubTheme{id: "alpha", score: 72})
@@ -99,7 +107,8 @@ func TestNearTieAsksTheUser(t *testing.T) {
 // A clear winner is not a question: only near-ties are.
 func TestClearWinnerIsNotAQuestion(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
-		"GET /": {File: "home-unrecognised.html"},
+		"GET /":        {File: "home-unrecognised.html"},
+		"GET /p/1.jpg": imageRoute(),
 	})
 	reg := theme.NewRegistry()
 	reg.MustRegister(stubTheme{id: "alpha", score: 90})
@@ -205,7 +214,8 @@ func TestOrdinarySiteBehindACDNIsNotRefused(t *testing.T) {
 func TestDraftSeedsAllowedHostsFromTheTheme(t *testing.T) {
 	newProber := func(t *testing.T, th theme.Theme) *prober.Prober {
 		f := themetest.New(t, map[string]themetest.Route{
-			"GET /": {File: "home-unrecognised.html"},
+			"GET /":        {File: "home-unrecognised.html"},
+			"GET /p/1.jpg": imageRoute(),
 		})
 		reg := theme.NewRegistry()
 		reg.MustRegister(th)
@@ -262,7 +272,8 @@ func TestDraftNamePrefersTheThemeSuggestion(t *testing.T) {
 	run := func(t *testing.T, th theme.Theme) *theme.Source {
 		t.Helper()
 		f := themetest.New(t, map[string]themetest.Route{
-			"GET /": {File: "home-unrecognised.html"},
+			"GET /":        {File: "home-unrecognised.html"},
+			"GET /p/1.jpg": imageRoute(),
 		})
 		reg := theme.NewRegistry()
 		reg.MustRegister(th)

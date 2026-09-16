@@ -109,6 +109,14 @@ func routes() map[string]themetest.Route {
 		"POST /manga/the-lantern-keeper/ajax/chapters/": {File: "chapters-ajax.html"},
 		"GET /manga/the-lantern-keeper/chapter-4/":      {File: "reader.html"},
 
+		// PLAN §7.5 stage 5 fetches one page image rather than only extracting
+		// its URL (corrected 2026-09-16), so a probe run through the service
+		// needs the image routed too.
+		"GET /pages/lantern-keeper/4/001.jpg": {
+			Body:   "\x89PNG\r\n\x1a\n fake image bytes",
+			Header: map[string][]string{"Content-Type": {"image/png"}},
+		},
+
 		// Source page 2 of each listing, empty. PLAN §12.1's pager reads one item
 		// past the display page so that "Next" is never offered into nothing,
 		// which means the fake site has to be able to say "no more". A site that
