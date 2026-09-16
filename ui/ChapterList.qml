@@ -518,7 +518,8 @@ Item {
                     Column {
                         anchors {
                             left: parent.left; leftMargin: Style.margin
-                            right: volumeButton.left; rightMargin: Style.gap
+                            right: volumeDeleteButton.visible ? volumeDeleteButton.left : volumeButton.left
+                            rightMargin: Style.gap
                             verticalCenter: parent.verticalCenter
                         }
                         spacing: 4
@@ -548,6 +549,38 @@ Item {
                                   : model.detail
                             font.pointSize: Style.smallSize
                             color: Style.muted
+                        }
+                    }
+
+                    // The same affordance as a chapter row, for the same
+                    // reason: this row offers Read on a document, so it offers
+                    // the way to get rid of it. One document, whichever view
+                    // the user happens to be looking at it from.
+                    Rectangle {
+                        id: volumeDeleteButton
+                        objectName: "volumeDeleteButton"
+                        anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                        width: 140
+                        height: Style.buttonHeight
+                        visible: model.documentUuid ? true : false
+                        color: volumeDeleteArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Delete"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: volumeDeleteArea
+                            objectName: "volumeDeleteArea"
+                            anchors.fill: parent
+                            enabled: volumeDeleteButton.visible
+                            onClicked: screen.askToDelete(model.documentUuid)
                         }
                     }
 

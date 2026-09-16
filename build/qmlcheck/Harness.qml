@@ -604,11 +604,11 @@ Window {
         chapterList.showView("chapters")
         chapterList.closeConfirm()
 
-        var deletes = win.findChildren(chapterList, "deleteButton", [])
         var visibleDeletes = function () {
+            var found = win.findChildren(chapterList, "deleteButton", [])
             var n = 0
-            for (var i = 0; i < deletes.length; ++i)
-                if (deletes[i].visible)
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
                     n++
             return n
         }
@@ -662,6 +662,47 @@ Window {
         // row it did not ask for.
         chaptersModel.setProperty(0, "documentUuid", "")
         win.want("clearing the UUID takes the Delete button with it", visibleDeletes(), 0)
+
+        // The volume view offers it on the same terms. A row that offers Read
+        // offers Delete, whichever view the document is being looked at from.
+        //
+        // The volumes are put back first: the block above this one emptied the
+        // model to prove a series that loses its volumes loses the switch.
+        volumesModel.append({"chapterId": "c0", "title": "Volume 1",
+                             "detail": "7 chapters, Chapter 1 to Chapter 7", "chapterCount": 7,
+                             "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+        chapterList.showView("volumes")
+        // Collected fresh each time: a ListView destroys and rebuilds its
+        // delegates when the model changes, so a list held from before an
+        // append is a list of objects that no longer exist.
+        var visibleVolumeDeletes = function () {
+            var found = win.findChildren(chapterList, "volumeDeleteButton", [])
+            var n = 0
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
+                    n++
+            return n
+        }
+        win.want("a volume with nothing downloaded offers no Delete", visibleVolumeDeletes(), 0)
+
+        volumesModel.setProperty(0, "documentUuid", "doc-vol")
+        // The list is laid out before it is inspected: the block above emptied
+        // this model, and a ListView keeps the delegates of a model it no
+        // longer has until it is asked to lay out again. Without this the
+        // assertion below reads three dead rows instead of the live one.
+        win.findChild(chapterList, "volumeRows").forceLayout()
+        win.want("a downloaded volume row offers Delete", visibleVolumeDeletes(), 1)
+
+        var asksBeforeVolume = win.deleteAsks
+        win.findChild(chapterList, "volumeDeleteArea").clicked(null)
+        win.want("the volume row asks once", win.deleteAsks, asksBeforeVolume + 1)
+        win.want("and asks about the volume's document", win.deleteAskedAbout, "doc-vol")
+        win.want("asking from the volume view deletes nothing", win.deleteConfirms, 1)
+
+        chapterList.closeConfirm()
+        volumesModel.setProperty(0, "documentUuid", "")
+        win.want("clearing it takes the volume Delete button too", visibleVolumeDeletes(), 0)
+        chapterList.showView("chapters")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
