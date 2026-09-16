@@ -67,6 +67,15 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 //
 // Records written before chapter IDs were kept fall back to redoing the
 // grouping, which is right for them because nothing was ever split back then.
+//
+// **That fallback redoes it the way it was done then, not the way it is done
+// now.** PLAN §6 M4 was reversed on 2026-09-16 and one PDF per chapter became
+// the default, but a record already in the user's library was written when the
+// source's volume labels decided the grouping — so re-deriving it with today's
+// default would look for "Vol 3" among volumes labelled "12", "12.5", "13",
+// find nothing, and quietly stop offering Read on a volume that is sitting on
+// the tablet. Changing a default must not orphan what is already downloaded,
+// and this is the one place where it silently could.
 func (s *Service) storedVolumes(sourceID, seriesID, seriesTitle string,
 	chapters []theme.Chapter) map[string]library.Record {
 
@@ -99,7 +108,7 @@ func (s *Service) storedVolumes(sourceID, seriesID, seriesTitle string,
 		for _, rec := range legacy {
 			byLabel[rec.Volume] = rec
 		}
-		for _, vol := range groupVolumes(seriesTitle, chapters) {
+		for _, vol := range groupVolumes(seriesTitle, chapters, theme.GroupingVolume, theme.DefaultGroupSize) {
 			rec, ok := byLabel[vol.Label]
 			if !ok {
 				continue
