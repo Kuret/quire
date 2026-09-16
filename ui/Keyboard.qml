@@ -160,6 +160,8 @@ Item {
             }
 
             Rectangle {
+                id: backKey
+                objectName: "keyboardBackspace"
                 width: 150
                 height: 84
                 color: backArea.pressed ? Style.pressed : Style.paper
@@ -167,11 +169,64 @@ Item {
                 border.color: Style.rule
                 radius: 4
 
-                Text {
+                // Drawn, not typed.
+                //
+                // This key used to be U+232B ERASE TO THE LEFT and rendered as
+                // a tofu box on the device. The reMarkable ships Noto Sans,
+                // Noto Serif, NotoSansUI and Noto Mono and nothing else, and
+                // U+232B is in Noto Sans *Symbols*, which is not installed —
+                // verified against the cmaps of the fonts actually on the
+                // device, not inferred. The same hole swallows U+21E7 ⇧,
+                // U+23CE ⏎, U+2423 ␣ and U+2326 ⌦, so reaching for another
+                // symbol would have been the same bug with a different
+                // codepoint.
+                //
+                // A drawing has no font dependency to get wrong, and scales
+                // with the key. It repaints only when the key resizes, which
+                // on a fixed panel is never.
+                Canvas {
+                    id: backGlyph
                     anchors.centerIn: parent
-                    text: "⌫"
-                    font.pointSize: Style.bodySize
-                    color: Style.ink
+                    width: 52
+                    height: 34
+                    onWidthChanged: backGlyph.requestPaint()
+                    onHeightChanged: backGlyph.requestPaint()
+
+                    onPaint: {
+                        var ctx = backGlyph.getContext("2d")
+                        ctx.reset()
+                        ctx.strokeStyle = Style.ink
+                        ctx.lineWidth = 3
+                        ctx.lineJoin = "round"
+                        ctx.lineCap = "round"
+
+                        var w = backGlyph.width
+                        var h = backGlyph.height
+                        var mid = h / 2
+                        var tip = h * 0.55   // where the arrowhead meets the body
+
+                        // The outline: a rectangle with a point on its left.
+                        ctx.beginPath()
+                        ctx.moveTo(2, mid)
+                        ctx.lineTo(tip, 2)
+                        ctx.lineTo(w - 2, 2)
+                        ctx.lineTo(w - 2, h - 2)
+                        ctx.lineTo(tip, h - 2)
+                        ctx.closePath()
+                        ctx.stroke()
+
+                        // The cross inside it.
+                        var x0 = tip + 9
+                        var x1 = w - 9
+                        var y0 = mid - 6
+                        var y1 = mid + 6
+                        ctx.beginPath()
+                        ctx.moveTo(x0, y0)
+                        ctx.lineTo(x1, y1)
+                        ctx.moveTo(x1, y0)
+                        ctx.lineTo(x0, y1)
+                        ctx.stroke()
+                    }
                 }
 
                 MouseArea {
