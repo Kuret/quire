@@ -157,35 +157,6 @@ func TestVolumePageCount(t *testing.T) {
 	}
 }
 
-// GroupIntoRuns is the "count" grouping mode. It ignores volume labels on
-// purpose: a reader asking for runs of N has looked at the source's own
-// volumes and decided against them.
-func TestGroupIntoRunsIgnoresLabels(t *testing.T) {
-	chs := chapters(7, func(i int) string { return "1" })
-	vols := assemble.GroupIntoRuns("Series", chs, 3)
-	if len(vols) != 3 {
-		t.Fatalf("%d runs, want 3 (3+3+1)", len(vols))
-	}
-	for i, want := range []int{3, 3, 1} {
-		if len(vols[i].Chapters) != want {
-			t.Errorf("run %d holds %d chapters, want %d", i+1, len(vols[i].Chapters), want)
-		}
-		if vols[i].Label != strconv.Itoa(i+1) {
-			t.Errorf("run %d is labelled %q", i+1, vols[i].Label)
-		}
-	}
-}
-
-func TestGroupIntoRunsDefaultsToTen(t *testing.T) {
-	vols := assemble.GroupIntoRuns("Series", chapters(12, nil), 0)
-	if len(vols) != 2 {
-		t.Fatalf("%d runs, want 2", len(vols))
-	}
-	if len(vols[0].Chapters) != assemble.DefaultChaptersPerVolume {
-		t.Errorf("first run holds %d chapters", len(vols[0].Chapters))
-	}
-}
-
 // Naming, PLAN §6 M5's flat Comics folder: one PDF per chapter puts ten times
 // as many documents in one folder sorted by name, and chapter numbers are not
 // always integers.

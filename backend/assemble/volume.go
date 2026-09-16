@@ -145,37 +145,9 @@ func GroupIntoVolumes(series string, chapters []Chapter, chaptersPerVolume int) 
 	return vols
 }
 
-// GroupIntoRuns splits chapters, in the order given, into fixed runs of
-// chaptersPerVolume, ignoring any volume labels the source publishes.
-//
-// It is the "count" grouping mode. Ignoring the labels is the whole point of
-// asking for it: a source whose volumes are 40 chapters long, or whose labels
-// are unreliable, is exactly the case where a reader wants runs of a size they
-// chose. The run is titled after the chapters in it for the same reason the
-// unlabelled case is — "Volume 2" is meaningless when the number is ours.
-//
-// chaptersPerVolume <= 0 means DefaultChaptersPerVolume.
-func GroupIntoRuns(series string, chapters []Chapter, chaptersPerVolume int) []Volume {
-	if chaptersPerVolume <= 0 {
-		chaptersPerVolume = DefaultChaptersPerVolume
-	}
-
-	var vols []Volume
-	for i := 0; i < len(chapters); i += chaptersPerVolume {
-		j := min(i+chaptersPerVolume, len(chapters))
-		vols = append(vols, Volume{
-			Series:   series,
-			Label:    fmt.Sprintf("%d", len(vols)+1),
-			Title:    volumeTitleForRange(series, chapters[i:j]),
-			Chapters: chapters[i:j:j],
-		})
-	}
-	return vols
-}
-
-// volumeTitleForRange names a count-grouped volume after the chapters in it,
-// because "Volume 2" is meaningless when the source has no volumes — the
-// reader is looking for a chapter number.
+// volumeTitleForRange names a counted run after the chapters in it, because
+// "Volume 2" is meaningless when the number is one Quire arrived at by counting
+// — the reader is looking for a chapter number.
 func volumeTitleForRange(series string, chs []Chapter) string {
 	if len(chs) == 0 {
 		return series
