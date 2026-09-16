@@ -904,13 +904,6 @@ type volumeRow struct {
 	// chapters are on the tablet as separate per-chapter files is *not* that
 	// document, and the row goes on offering the volume.
 	DocumentUUID string `json:"documentUuid,omitempty"`
-
-	// DocumentName is what that document is called on the tablet, so a delete
-	// can name what it is about to remove (PLAN §12.4). It is the stored
-	// VisibleName rather than the row's own title because those differ for a
-	// split volume — "… (part 2 of 3)" is the document the row points at, and
-	// the part number is the whole reason the confirmation is legible.
-	DocumentName string `json:"documentName,omitempty"`
 }
 
 // volumeRows is the chapter screen's second view, or nil when there is none.
@@ -953,7 +946,7 @@ func volumeRows(seriesTitle string, chapters []theme.Chapter,
 		default:
 			r.Detail = fmt.Sprintf("%d chapters, %s to %s", n, first, last)
 		}
-		r.DocumentUUID, r.DocumentName = volumeDocument(p, stored)
+		r.DocumentUUID = volumeDocument(p, stored)
 		rows = append(rows, r)
 	}
 	return rows
@@ -971,24 +964,25 @@ func volumeRows(seriesTitle string, chapters []theme.Chapter,
 // and its rows keep offering the download. The download itself is close to free
 // in that case: §6 M4's resume skips page files already on disk, so the pages
 // are not fetched twice.
-func volumeDocument(p volumePlan, stored map[string]library.Record) (uuid, name string) {
+func volumeDocument(p volumePlan, stored map[string]library.Record) string {
 	if len(stored) == 0 {
-		return "", ""
+		return ""
 	}
+	uuid := ""
 	for _, c := range p.Chapters {
 		rec, ok := stored[c.ID]
 		if !ok || rec.DocumentUUID == "" {
-			return "", ""
+			return ""
 		}
 		if uuid == "" {
-			uuid, name = rec.DocumentUUID, rec.VisibleName
+			uuid = rec.DocumentUUID
 			continue
 		}
 		if rec.DocumentUUID != uuid {
-			return "", ""
+			return ""
 		}
 	}
-	return uuid, name
+	return uuid
 }
 
 // legacyGrouping redoes the grouping **the way it was done before 2026-09-16**,
