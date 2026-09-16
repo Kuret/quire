@@ -35,6 +35,11 @@ Item {
 
     signal addRequested()
     signal watchingRequested()
+
+    // PLAN §12.2's "short" summary, composed in the backend. Empty means there
+    // is nothing to report, and the button says only "Watching" — a badge that
+    // is always lit is a badge nobody reads.
+    property string watchingLabel: ""
     signal openRequested(string sourceId, string name)
     signal toggleRequested(string sourceId, bool enabled)
     signal removeRequested(string sourceId)
@@ -403,8 +408,12 @@ Item {
                 radius: 6
 
                 Text {
+                    objectName: "watchingLabel"
                     anchors.centerIn: parent
-                    text: "Watching"
+                    // The backend's words after the view's own noun. Nothing
+                    // here counts, pluralises or decides what "3 new" means.
+                    text: screen.watchingLabel.length > 0
+                          ? "Watching · " + screen.watchingLabel : "Watching"
                     font.pointSize: Style.bodySize
                     color: Style.ink
                 }
