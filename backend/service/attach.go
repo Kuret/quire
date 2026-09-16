@@ -37,7 +37,24 @@ const AbnormalExitNotice = "Quire closed unexpectedly last time. Nothing was los
 // Requests still work. This is an addition, not a replacement: the UI may ask
 // again whenever it likes, and asking is still the only way to refresh.
 func (s *Service) FrontendAttached(out Sender) error {
-	return s.sendSources(out)
+	if err := s.sendSources(out); err != nil {
+		return err
+	}
+
+	// PLAN §12.2's watched series ride the same push, for the same reason: a
+	// frontend that has to ask for the list races the socket coming up, and a
+	// badge that silently never appears is worse than no badge at all.
+	if err := s.sendWatchList(out); err != nil {
+		return err
+	}
+
+	// And this is the *only* automatic trigger for a check. The app being
+	// opened is the event; there is no timer behind it, nothing runs while the
+	// frontend is away (FrontendDetached stops it), and Quire holds no wakelock
+	// (PLAN §6 M7). It is started rather than waited for: the results stream in
+	// one series at a time so the shell can draw immediately.
+	s.startWatchCheck(out, false, nil)
+	return nil
 }
 
 // StartupNotice is the one-off sentence to show a frontend on attach, or "" if
@@ -69,6 +86,11 @@ func (s *Service) FrontendDetached(log *slog.Logger) {
 	if log == nil {
 		log = s.log
 	}
+
+	// The watched-series check goes first: it is a poll for a convenience badge
+	// nobody is looking at any more, which makes it the least defensible thing
+	// on the radio once the frontend has gone.
+	s.stopWatchCheck()
 
 	s.dlMu.Lock()
 	active := make([]downloadKey, 0, len(s.dlActive))
