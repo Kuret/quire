@@ -1859,10 +1859,58 @@ real. Cut it, and let the overlap carry the loss.
 
 **Constraints:**
 
-- **Only engage for strips.** Gate on source aspect: a page whose height:width
-  ratio is far from the panel's must not be touched. **An ordinary manga page
-  must never be split**, and a test must pin that — this is the regression that
-  would ruin every existing source.
+- **Only engage for strips, detected per *image*, never per source.**
+  A single index hosts both formats, and so does a single series, so a
+  per-source flag or a hardcoded list is the wrong unit and will be wrong
+  immediately.
+
+  **The asymmetry decides the design.** Failing to split a strip leaves the user
+  exactly where they are today — a sliver, bad but survivable. *Wrongly* splitting
+  a manga page mangles content that was fine, across a whole volume, silently.
+  So detection is biased hard toward **doing nothing**, and every ambiguous case
+  resolves to "leave it alone". This is the same rule as §7.5's challenge tiers,
+  for the same reason.
+
+  **Primary signal: aspect ratio, with a deliberately huge dead zone.** Real
+  values, measured:
+
+  | content | h:w |
+  |---|---|
+  | double-page spread (3200×2200) | **0.69** |
+  | A4 scan (2480×3508) | 1.41 |
+  | typical page (1200×1700) | 1.42 |
+  | two pages stacked vertically | ~2.8 |
+  | *nothing legitimate lives here* | 3 – 5 |
+  | short webtoon strip (800×4000) | 5.0 |
+  | webtoon strip (800×8000) | 10.0 |
+  | long strip (800×20000) | 25.0 |
+
+  The gap between ordinary content and strips spans **several multiples**, not a
+  few percent. Put the threshold in the empty middle and stay well clear of the
+  vertically-stacked-pages case at ~2.8 — that shape is rare but real, and it
+  must survive untouched.
+
+  **Corroboration, because one signal is how we got the challenge detector
+  wrong:** a tall image among ordinary pages is an *outlier* — a spread, a
+  credits page, an author's note — and outliers are the false positives we care
+  about. Require either that **most images in the chapter are also tall**, or a
+  ratio so extreme that nothing else explains it. A single tall page in an
+  otherwise normal chapter is left alone.
+
+  **An escape hatch, because detection will eventually be wrong.** A per-source
+  override (`splitStrips: auto | never | always`, default `auto`) so a user who
+  sees a bad result can stop it without waiting for us. Detection decides;
+  the user overrules.
+
+  **Make it visible.** A `Stats` counter as `PagesGuarded` and
+  `PagesRequantised` already do. Splitting that happens silently is splitting
+  nobody can report.
+
+  **Tests must include the shapes that must NOT split:** the double-page spread,
+  the A4 scan, the typical page, two pages stacked, and a single tall page
+  inside an otherwise ordinary chapter. Per §9, measure the thresholds against
+  real page geometry rather than choosing round numbers — and state the measured
+  margin, as `TestFingerprintsClearTheThresholdWithMargin` does.
 - **The chapter→(PDF, page offset) map must follow the new page count.** It is
   M6's input, and §6 M4's volume splitting already records rather than derives
   it. One source image becoming eight pages changes every downstream offset; a
