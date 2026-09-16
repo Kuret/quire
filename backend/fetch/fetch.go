@@ -311,7 +311,17 @@ func (c *Client) TotalBytes() int64 { return c.totalBytes.Load() }
 // so that a caller who has not thought about it gets the safe answer; asking
 // for the other one takes a deliberate call to GetRetrieval.
 func (c *Client) Get(ctx context.Context, p *Policy, rawurl string) (*Response, error) {
-	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, nil)
+	return c.GetFrom(ctx, p, rawurl, Referrer{})
+}
+
+// GetFrom is Get with a Referer naming the page rawurl was taken from.
+//
+// A zero Referrer sends no header, and Get above is exactly this call with one
+// — which is the point: there is no default, no fallback and nothing derived
+// from the URL being fetched. A Referer appears only because a caller had a
+// real page to name and said so.
+func (c *Client) GetFrom(ctx context.Context, p *Policy, rawurl string, from Referrer) (*Response, error) {
+	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, from.header())
 }
 
 // GetRetrieval performs a GET for one thing the user explicitly asked for: a
@@ -323,7 +333,17 @@ func (c *Client) Get(ctx context.Context, p *Policy, rawurl string) (*Response, 
 // because RFC 9309 scopes robots to crawlers and this is not crawling. See
 // Kind for why that distinction is drawn here and not at a config file.
 func (c *Client) GetRetrieval(ctx context.Context, p *Policy, rawurl string) (*Response, error) {
-	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, nil)
+	return c.GetRetrievalFrom(ctx, p, rawurl, Referrer{})
+}
+
+// GetRetrievalFrom is GetRetrieval with a Referer naming the page rawurl was
+// taken from. It is the reason Referrer exists: page images are the one thing
+// Quire fetches that hosts routinely refuse to serve unless the request says
+// which of their pages it came from.
+//
+// A zero Referrer sends no header.
+func (c *Client) GetRetrievalFrom(ctx context.Context, p *Policy, rawurl string, from Referrer) (*Response, error) {
+	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, from.header())
 }
 
 // PostForm performs a guarded POST of an application/x-www-form-urlencoded
