@@ -90,8 +90,36 @@ Rectangle {
         root.send(Msg.OpenInReader, {"documentUuid": documentUuid})
     }
 
+    // deleteDownload moves a document to xochitl's Trash and tells the backend
+    // what happened (PLAN §12.4).
+    //
+    // The three answers are three different situations and none of them may be
+    // guessed at. "ok" is the delete; "gone" means the document was already off
+    // the tablet, which is exactly the missing-document case §6 M6 already
+    // answers, wording and all; "failed" means nothing moved, and saying so is
+    // what stops the backend forgetting a record whose document is still there.
+    function deleteDownload(documentUuid) {
+        if (!documentUuid)
+            return
+        var result = readerHandoff.status === Loader.Ready && readerHandoff.item
+                     ? readerHandoff.item.trash(documentUuid)
+                     : "failed"
+        if (result === "gone") {
+            root.send(Msg.OpenInReader, {"documentUuid": documentUuid, "missing": true})
+            root.forgetDocument(documentUuid)
+            return
+        }
+        root.send(Msg.DeleteDownload,
+            {"documentUuid": documentUuid, "confirmed": true, "trashed": result === "ok"})
+    }
+
     // forgetDocument clears a dead UUID off every row that carried it, so the
     // button goes back to offering a download straight away.
+    //
+    // Both models, because both can be showing the document: a volume row
+    // offers Read on the one document holding the whole volume, and a row still
+    // offering to open something that is in the Trash is the same lie as a
+    // chapter row doing it.
     function forgetDocument(documentUuid) {
         for (var i = 0; i < chaptersModel.count; ++i) {
             if (chaptersModel.get(i).documentUuid === documentUuid) {
@@ -99,6 +127,10 @@ Rectangle {
                 chaptersModel.setProperty(i, "downloadState", "")
                 chaptersModel.setProperty(i, "downloadMessage", "")
             }
+        }
+        for (var j = 0; j < volumesModel.count; ++j) {
+            if (volumesModel.get(j).documentUuid === documentUuid)
+                volumesModel.setProperty(j, "documentUuid", "")
         }
     }
 
@@ -193,7 +225,30 @@ Rectangle {
             root.applyDownloadProgress(msg)
             return
 
+        case Msg.DeleteConfirm:
+            // The backend's question, put where questions are asked. The strip
+            // carries the document's UUID, because that is what the answer
+            // deletes (PLAN §12.4).
+            if (msg && msg.documentUuid) {
+                chapterListScreen.confirmingKind = "delete"
+                chapterListScreen.confirmingId = msg.documentUuid
+                chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
+            }
+            return
+
+        case Msg.DownloadDeleted:
+            // The backend has forgotten it, so the rows can. This is the only
+            // cue that clears them: the store deciding, not the trash call
+            // returning true.
+            root.forgetDocument(msg ? msg.documentUuid : "")
+            return
+
         case Msg.Error:
+            // A delete question left open over an answer that went wrong would
+            // invite tapping it again. Only that one: a download confirmation
+            // is about a different row and is not what failed.
+            if (chapterListScreen.confirmingKind === "delete")
+                chapterListScreen.closeConfirm()
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
             seriesGridScreen.busy = false
@@ -419,8 +474,7 @@ Rectangle {
         chapterListScreen.seriesTitle = title
         chapterListScreen.synopsis = ""
         chapterListScreen.page = 1
-        chapterListScreen.confirmingId = ""
-        chapterListScreen.confirmingMessage = ""
+        chapterListScreen.closeConfirm()
         chapterListScreen.busy = true
         root.refreshWatchedFlag()
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
@@ -646,6 +700,12 @@ Rectangle {
                  "volumeId": chapterId, "grouping": "volume", "confirmed": true})
 
             onReadRequested: root.openInReader(documentUuid)
+
+            // Step one asks the backend for the question; step two does the
+            // deleting. Both go through root so the QML that touches xochitl
+            // stays behind the one Loader.
+            onDeleteRequested: root.send(Msg.DeleteDownload, {"documentUuid": documentUuid})
+            onDeleteConfirmed: root.deleteDownload(documentUuid)
         }
 
         Settings {
