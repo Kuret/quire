@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -203,6 +204,33 @@ func (s *Store) SetEnabled(id string, on bool) error {
 		if src.ID == id {
 			v := on
 			src.Enabled = &v
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
+// ErrBadSplitStrips means the requested strip-splitting mode is not one the
+// schema offers.
+var ErrBadSplitStrips = errors.New("state: splitStrips must be auto, never or always")
+
+// SetSplitStrips changes a source's strip-splitting override (PLAN §12.3).
+//
+// The empty string is accepted and stored as empty, which is how a source that
+// has never been touched stays on the schema default rather than being pinned
+// to a value it never asked for.
+func (s *Store) SetSplitStrips(id, mode string) error {
+	if mode != "" && !slices.Contains(theme.SplitStripsValues, mode) {
+		return ErrBadSplitStrips
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			if src.SplitStrips == mode {
+				return nil
+			}
+			src.SplitStrips = mode
 			return s.save()
 		}
 	}
