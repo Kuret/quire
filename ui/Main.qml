@@ -144,6 +144,11 @@ Rectangle {
                 root.notice = msg.notice
             if (msg && msg.logTail)
                 settingsScreen.logLines = msg.logTail
+            // A plain bool, not the status object: the status is a fresh object
+            // on every Pong, so assigning that would redraw the toggle each
+            // time the settings screen pings. Assigning an identical bool emits
+            // no change signal and nothing is repainted.
+            settingsScreen.consultRobots = msg ? !!msg.consultRobots : false
             return
 
         case Msg.Sources:
@@ -599,6 +604,13 @@ Rectangle {
             // type of its own: the viewer is a panel on this screen, and this
             // screen already pings.
             onLogRequested: root.send(Msg.Ping, {"log": true})
+            // Set it, then ask for the status: the toggle draws what the store
+            // says rather than what this screen hoped, so a setting that failed
+            // to save cannot leave the switch showing the wrong thing.
+            onConsultRobotsRequested: {
+                root.send(Msg.SetConsultRobots, {"consultRobots": on})
+                root.send(Msg.Ping)
+            }
             onClearErrorRequested: root.lastError = ""
         }
     }
