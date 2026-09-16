@@ -45,6 +45,12 @@ var CancelDownload = 42
 
 var OpenInReader = 50
 
+// Deleting a download (PLAN §12.4). The trash call itself is QML's — see
+// ReaderHandoff.qml — and DeleteDownload reports what it did, so the backend
+// can forget the record only when the document really went.
+var DeleteDownload = 51
+var DownloadDeleted = 52
+
 var WatchSeries = 60
 var UnwatchSeries = 61
 var CheckWatched = 62

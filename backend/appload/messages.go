@@ -112,6 +112,29 @@ const (
 	// MessageOpenInReader is UI→BE, JSON {documentUuid}.
 	MessageOpenInReader MessageType = 50
 
+	// MessageDeleteDownload is UI→BE, JSON {documentUuid, trashed}, sent after
+	// the frontend has asked xochitl to move the document to its Trash.
+	//
+	// Like MessageOpenInReader, the act itself happens in QML: only an AppLoad
+	// app's QML can reach xochitl's own singletons, and PLAN §12.4 proved the
+	// route. The backend's half is the bookkeeping — forgetting the
+	// library.Record and reclaiming the assembled PDF.
+	//
+	// `trashed` is what the frontend saw, not what it hoped for. False means the
+	// document is still on the tablet, and the record must survive: a record
+	// dropped for a document that is still there is an orphan Quire can no
+	// longer account for, which is strictly worse than no delete button.
+	MessageDeleteDownload MessageType = 51
+
+	// MessageDownloadDeleted is BE→UI, JSON {documentUuid}. It is the backend
+	// saying it has forgotten that document, which is the frontend's cue to put
+	// every row pointing at it back to offering a download.
+	//
+	// Rows are cleared on this rather than on the QML call returning true,
+	// because the row's state must follow the store. If the store could not be
+	// updated, the row keeps saying "Read" — which is the truth.
+	MessageDownloadDeleted MessageType = 52
+
 	// The 60s are PLAN §12.2's watched series: mark a series watched, and know
 	// when it has gained chapters since you last looked.
 	//
@@ -203,6 +226,8 @@ var messageNames = map[MessageType]string{
 	MessageDownloadProgress:      "DownloadProgress",
 	MessageCancelDownload:        "CancelDownload",
 	MessageOpenInReader:          "OpenInReader",
+	MessageDeleteDownload:        "DeleteDownload",
+	MessageDownloadDeleted:       "DownloadDeleted",
 	MessageWatchSeries:           "WatchSeries",
 	MessageUnwatchSeries:         "UnwatchSeries",
 	MessageCheckWatched:          "CheckWatched",
