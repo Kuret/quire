@@ -629,9 +629,13 @@ message naming what was tried.
   frequently not 3:4. Cropping silently deletes artwork and off-centre dialogue
   and cannot be undone; stretching shows on lettering. Padding applies only
   beyond a 1% tolerance. Sources smaller than the panel are **not** upscaled.
-  **Known limitation: webtoon strips** (aspect far from 3:4) pad down to a small
-  centred image. Slicing tall strips into panel-height pages is a real feature,
-  deliberately not invented in M4 — revisit if a vertical-scroll source matters.
+  ~~**Known limitation: webtoon strips** pad down to a small centred image.~~
+  **Resolved 2026-09-16 — see §12.3.** Strips are now detected *per image* and
+  cut at authored gutters. Detection is deliberately biased against acting: an
+  ordinary page is never split, and a lone tall page in an ordinary chapter is
+  left alone. Measured on device, splitting is also **cheaper** than not
+  splitting (519 MiB peak vs 536 MiB), because cutting before the fit-and-pad
+  means each piece resamples as an ordinary page rather than the whole strip.
 - **Measured on the host (M4, 200 synthetic pages, 10 chapters):** 307 KiB/page
   stored and in the PDF; assembly 899 ms; download at concurrency 6 in 41 s.
   Read back: 200 pages, zero with a MediaBox other than 514×685.
