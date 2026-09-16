@@ -1,8 +1,21 @@
+//go:build quiretest
+
+// These tests run the **real** fetch.Guard, which is why they carry the tag:
+// backend/fetch/guard_quiretest.go exports a constructor that substitutes DNS
+// and nothing else, and it exists only under `quiretest`.
+//
+// They used to run a hand-written stand-in that answered the way the guard was
+// believed to answer. Stage 1's whole job is to hand an address to the guard,
+// so asserting that against a model of the guard proves the model, not the
+// boundary — the same trap as a fingerprint confirmed by the fixture that
+// invented it.
+
 package prober_test
 
 import (
 	"context"
 	"errors"
+	"net"
 	"net/url"
 	"strings"
 	"testing"
@@ -13,46 +26,44 @@ import (
 	"github.com/rickl/quire/backend/theme/themetest"
 )
 
-// modelGuard stands in for fetch.Guard, which cannot be built outside its own
-// package with a stub resolver. It answers the way the real guard does for the
-// three rules stage 1 depends on — scheme, address, resolvability — and records
-// the URL it was handed, so these tests can assert both what normalisation
-// produced *and* that it still reaches the guard.
+// guardResolve is the only thing these tests substitute: where DNS answers come
+// from. Every rule the guard applies is the production one.
 //
-// It exists because the new bare-domain path is exactly where the SSRF guard
-// could be lost: a normalised address that never reached CheckURL would pass a
-// test that only looked at verdicts.
-type modelGuard struct{ got *url.URL }
-
-// blockedHosts are the PLAN §7.4 refusals these tests care about, spelled as
-// the host stage 1 will have produced.
-var blockedHosts = map[string]string{
-	"localhost":       "loopback addresses are not allowed",
-	"127.0.0.1":       "loopback addresses are not allowed",
-	"[::1]":           "loopback addresses are not allowed",
-	"192.168.1.5":     "private addresses are not allowed",
-	"10.0.0.1":        "private addresses are not allowed",
-	"169.254.169.254": "link-local addresses are not allowed",
-	"0.0.0.0":         "unspecified addresses are not allowed",
+// Only names that have to resolve are listed. Anything else answers "no such
+// host", which is how a bare word like "weebcentral" is refused — by the real
+// resolver path, not by a rule invented here.
+func guardResolve(_ context.Context, host string) ([]net.IP, error) {
+	table := map[string][]string{
+		"weebcentral.com":     {"93.184.216.34"},
+		"www.weebcentral.com": {"93.184.216.34"},
+		"localhost":           {"127.0.0.1"},
+	}
+	addrs, ok := table[strings.ToLower(host)]
+	if !ok {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+	out := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, net.ParseIP(a))
+	}
+	return out, nil
 }
 
-func (g *modelGuard) CheckURL(_ context.Context, u *url.URL, _ *fetch.Policy) error {
+// spyGuard records the URL stage 1 handed over and then asks the real guard,
+// so these tests can assert what normalisation produced *and* that it still
+// reaches CheckURL. It decides nothing itself.
+//
+// The recording matters because the new bare-domain path is exactly where the
+// SSRF guard could be lost: an address that never reached the guard would pass
+// a test that only looked at verdicts.
+type spyGuard struct {
+	inner *fetch.Guard
+	got   *url.URL
+}
+
+func (g *spyGuard) CheckURL(ctx context.Context, u *url.URL, p *fetch.Policy) error {
 	g.got = u
-	if s := strings.ToLower(u.Scheme); s != "http" && s != "https" {
-		return &fetch.GuardError{URL: u.Redacted(), Reason: "only http and https are allowed, not " + s, Kind: fetch.ErrInvalidURL}
-	}
-	if u.User != nil {
-		return &fetch.GuardError{URL: u.Redacted(), Reason: "credentials in URL are not allowed", Kind: fetch.ErrInvalidURL}
-	}
-	if reason, blocked := blockedHosts[strings.ToLower(u.Host)]; blocked {
-		return &fetch.GuardError{URL: u.Redacted(), Reason: reason, Kind: fetch.ErrBlockedAddress}
-	}
-	// The real guard resolves the host. A single label with no dot is not a
-	// name that resolves anywhere, and that is how a bare word is refused.
-	if !strings.Contains(u.Hostname(), ".") {
-		return &fetch.GuardError{URL: u.Redacted(), Reason: "cannot resolve " + u.Hostname(), Kind: fetch.ErrInvalidURL}
-	}
-	return nil
+	return g.inner.CheckURL(ctx, u, p)
 }
 
 // probeInput runs a probe that stops at stage 2, so the result reflects stage 1
@@ -61,7 +72,7 @@ func (g *modelGuard) CheckURL(_ context.Context, u *url.URL, _ *fetch.Policy) er
 func probeInput(t *testing.T, raw string) (prober.Result, string) {
 	t.Helper()
 	f := themetest.New(t, nil)
-	g := &modelGuard{}
+	g := &spyGuard{inner: fetch.NewGuardForTests(guardResolve)}
 	p := prober.New(prober.Options{
 		Fetcher:  errFetcher{err: errors.New("dial tcp: no route to host")},
 		Registry: registry(f),
