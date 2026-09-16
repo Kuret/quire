@@ -32,6 +32,10 @@ var Browse = 22
 var RequestCover = 23
 var CoverReady = 24
 
+// Per-source strip splitting (PLAN §12.3). It belongs with 17-19; it is 25
+// because 20-24 were already spent.
+var SetSourceSplitStrips = 25
+
 var SeriesDetail = 30
 var SeriesDetailResult = 31
 

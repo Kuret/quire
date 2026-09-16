@@ -31,6 +31,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"Browse":                22,
 		"RequestCover":          23,
 		"CoverReady":            24,
+		"SetSourceSplitStrips":  25,
 		"SeriesDetail":          30,
 		"SeriesDetailResult":    31,
 		"EnqueueDownload":       40,

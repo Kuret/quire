@@ -82,6 +82,16 @@ const (
 	// MessageCoverReady is BE→UI, JSON {seriesId, path}.
 	MessageCoverReady MessageType = 24
 
+	// MessageSetSourceSplitStrips is UI→BE, JSON {sourceId, splitStrips}, where
+	// splitStrips is "auto", "never" or "always" (PLAN §12.3). It belongs with
+	// the per-source settings at 17–19 and takes 25 only because 20–24 were
+	// already spent on search and covers.
+	//
+	// It exists because strip detection will eventually be wrong on some image,
+	// and the user should be able to stop it without editing JSON over SSH. The
+	// reply is MessageSources, so the list redraws with the new value.
+	MessageSetSourceSplitStrips MessageType = 25
+
 	// MessageSeriesDetail is UI→BE, JSON {sourceId, seriesId}.
 	MessageSeriesDetail MessageType = 30
 	// MessageSeriesDetailResult is BE→UI, JSON.
@@ -186,6 +196,7 @@ var messageNames = map[MessageType]string{
 	MessageBrowse:                "Browse",
 	MessageRequestCover:          "RequestCover",
 	MessageCoverReady:            "CoverReady",
+	MessageSetSourceSplitStrips:  "SetSourceSplitStrips",
 	MessageSeriesDetail:          "SeriesDetail",
 	MessageSeriesDetailResult:    "SeriesDetailResult",
 	MessageEnqueueDownload:       "EnqueueDownload",
