@@ -1537,6 +1537,44 @@ to do nothing — a stale cache looks identical to a broken patch.
 
 - **Unit**: framer, each theme against recorded fixtures, probe verdicts against
   recorded fixtures, PDF dimensions, state migrations. No network.
+
+> ### ⚠️ Circular fixture validation — the failure this project actually had
+>
+> **A synthetic fixture can encode an invented fact, and then confirm it.** On
+> 2026-09-16 the `madara` fingerprint scored **43** against a real Madara site,
+> under a threshold of 60, while scoring 88 against our own fixtures. Tier 1 —
+> the largest family we support — could not recognise a genuine instance.
+>
+> The cause: **40 of the 60 points rode on `/wp-content/plugins/madara/`, a path
+> no live install serves.** Madara ships as a WordPress *theme*
+> (`/wp-content/themes/madara/`) with a companion plugin registering as
+> `madara-core`. The string was invented while writing the fixture, and every
+> test then passed because it was checked against the fixture that invented it.
+> The loop closed on itself and nothing in a green suite could see out.
+>
+> A second instance of the same error sat beside it: the *home* fixture was
+> built from *search-page* markup, so we were scoring the wrong rendering — and
+> the home page is what the probe judges.
+>
+> **This is the specific risk created by §6 M2's synthetic-but-faithful
+> fixtures.** That trade remains right — §1.3 forbids committing aggregator
+> HTML — but "faithful" is a claim, and a claim needs checking against reality
+> at least once.
+>
+> **Therefore:**
+> - **Every fingerprint must be measured against a real page at least once**, and
+>   the measurement recorded with a date. Not "does it pass", but *what score*,
+>   against *which rendering*.
+> - **Clear the threshold with margin.** `TestFingerprintsClearTheThresholdWithMargin`
+>   requires a landing page to beat 60 by 10, a number measured from the weakest
+>   real landing page we ship, not chosen. `mangathemesia` was at **65** — five
+>   points — and would have failed on a slightly different install.
+> - **Fingerprint the page the probe actually judges.** Signals that only appear
+>   on a series or reader page are worth little for a source added by its root.
+> - **When a fixture and reality disagree, the fixture is wrong.** Fix the
+>   fixture, never the threshold: 60 is load-bearing across every theme, and
+>   lowering it to accommodate one erodes the false-positive protection of all
+>   the others.
 - **Host integration**: full flow against a local fixture HTTP server via the
   AppLoad PC emulator. Should catch ~80% of bugs.
 - **Device**: manual checklist in `docs/DEVICE-CHECKLIST.md`, run before each
