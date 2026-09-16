@@ -349,6 +349,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.enqueueDownload(ctx, out, req)
 
+	case robotsMessage:
+		return s.handleRobots(out, payload)
+
 	case appload.MessageWatchSeries:
 		var req struct {
 			SourceID string `json:"sourceId"`
