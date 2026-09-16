@@ -63,6 +63,7 @@ func newRobotsService(t *testing.T) (*service.Service, *state.Store, *switchable
 		Now:        func() time.Time { return fixedNow },
 		ProbeGuard: allowGuard{},
 	})
+	t.Cleanup(svc.Close)
 	return svc, store, f
 }
 

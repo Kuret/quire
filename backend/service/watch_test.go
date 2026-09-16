@@ -207,6 +207,7 @@ func newWatchHarness(t *testing.T, chapters string) *watchHarness {
 		Now:        clk.now,
 		ProbeGuard: allowGuard{},
 	})
+	t.Cleanup(svc.Close)
 	addExampleSource(t, store)
 	return &watchHarness{svc: svc, store: store, rec: &recorder{}, fetch: pf, clk: clk, t: t}
 }
@@ -721,6 +722,7 @@ func TestAWatchCheckAsksAsDiscovery(t *testing.T) {
 		Store: store, Registry: reg, Fetcher: pf,
 		Covers: covers.New(dir+"/covers", pf), Now: clk.now, ProbeGuard: allowGuard{},
 	})
+	t.Cleanup(svc.Close)
 	addExampleSource(t, store)
 	if _, err := store.Watch("example-reader", seriesPath, "The Lantern Keeper", nil, fixedNow); err != nil {
 		t.Fatal(err)

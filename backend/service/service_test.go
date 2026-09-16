@@ -96,6 +96,11 @@ func newService(t *testing.T, routes map[string]themetest.Route) (*service.Servi
 		Now:        func() time.Time { return fixedNow },
 		ProbeGuard: allowGuard{},
 	})
+	// Wait for the service's background work before the temp dir is removed.
+	// Registered after t.TempDir's own cleanup, so it runs first: a re-probe
+	// still writing its verdict into the store is what used to make removal
+	// fail with "directory not empty".
+	t.Cleanup(svc.Close)
 	return svc, store, &recorder{}
 }
 

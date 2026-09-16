@@ -56,6 +56,7 @@ func newPagingService(t *testing.T) (*service.Service, *themetest.Fetcher) {
 		Now:        func() time.Time { return fixedNow },
 		ProbeGuard: allowGuard{},
 	})
+	t.Cleanup(svc.Close)
 	return svc, f
 }
 

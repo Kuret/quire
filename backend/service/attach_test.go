@@ -76,6 +76,7 @@ func TestNoNoticeAfterACleanShutdown(t *testing.T) {
 
 func TestANoticeAfterAnAbnormalExit(t *testing.T) {
 	svc := service.New(service.Options{PreviousSessionCrashed: true})
+	t.Cleanup(svc.Close)
 	got := svc.StartupNotice()
 	if got != service.AbnormalExitNotice {
 		t.Fatalf("notice %q", got)

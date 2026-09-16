@@ -191,7 +191,9 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
 	for _, tweak := range tweaks {
 		tweak(&opts)
 	}
-	return service.New(opts), store, libStore, fake, &recorder{}
+	svc := service.New(opts)
+	t.Cleanup(svc.Close)
+	return svc, store, libStore, fake, &recorder{}
 }
 
 func addSource(t *testing.T, store *state.Store) {
