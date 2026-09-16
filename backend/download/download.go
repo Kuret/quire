@@ -433,13 +433,12 @@ func (q *Queue) planJobs(dir string, chapters []Chapter) ([]job, []assemble.Chap
 		if len(ch.PageURLs) == 0 {
 			return nil, nil, nil, fmt.Errorf("%w: %s", ErrNoPages, ch.ID)
 		}
-		sub := slug(ch.ID)
-		if seen[sub] {
-			return nil, nil, nil, fmt.Errorf("download: two chapters map to the directory %q; chapter IDs must be unique", sub)
+		chDir := ChapterDir(dir, ch.ID)
+		if seen[chDir] {
+			return nil, nil, nil, fmt.Errorf("download: two chapters map to the directory %q; chapter IDs must be unique",
+				filepath.Base(chDir))
 		}
-		seen[sub] = true
-
-		chDir := filepath.Join(dir, sub)
+		seen[chDir] = true
 		found := make([]pageFiles, len(ch.PageURLs))
 		for i, u := range ch.PageURLs {
 			existing, ok := existingPages(chDir, i)
@@ -876,6 +875,17 @@ const slugReadable = 48
 // silently re-download a whole volume and orphan the old directory. sha256 of
 // the ID depends on nothing but the ID — no time, no map order, no position in
 // the chapter list — so it does not move.
+// ChapterDir is where a chapter's page files live, under the series directory.
+//
+// It is exported because deleting a download has to find the same directory
+// this package created — see the service's page reclaim. Computing that path a
+// second way is the one mistake this layout cannot survive: a slug derived by
+// slightly different rules either removes nothing, which is merely a leak, or
+// removes a directory belonging to another chapter, which is not.
+func ChapterDir(seriesDir, chapterID string) string {
+	return filepath.Join(seriesDir, slug(chapterID))
+}
+
 func slug(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	digest := hex.EncodeToString(sum[:4])
