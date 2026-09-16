@@ -10,6 +10,7 @@ import QtQuick.Window 2.2
 // type resolution only covers the directory the file itself lives in.
 import "../../ui"
 import "../../ui/Watch.js" as WatchJs
+import "../../ui/Style.js" as Style
 
 
 Window {
@@ -27,6 +28,20 @@ Window {
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
     ListModel { id: watchedModel }
+
+    // Stands in for Main.qml's root, which the harness cannot load (it imports
+    // the AppLoad plugin). The counters make "did this repaint?" observable:
+    // assigning the same string to a QML property emits no change signal, so a
+    // count that does not move is a label that did not redraw.
+    QtObject {
+        id: summaryTarget
+        property string watchShort: ""
+        property string watchPhrase: ""
+        property int shortWrites: 0
+        property int phraseWrites: 0
+        onWatchShortChanged: summaryTarget.shortWrites++
+        onWatchPhraseChanged: summaryTarget.phraseWrites++
+    }
 
     property int failures: 0
     function want(label, got, expected) {
@@ -193,6 +208,69 @@ Window {
         win.want("a dropped watch leaves one row", watchedModel.count, 1)
         win.want("the page clamps after a drop", watchList.page, 1)
         win.want("the watched pager is gone with one page", wp.visible, false)
+
+        // ---- PLAN §12.2: the at-a-glance summary -----------------------
+        //
+        // WatchList arrives on attach, after every watch and unwatch, and
+        // again at the end of every check round. A round that ends with the
+        // same summary it started with must produce no visible change at all:
+        // a flash on the source-list screen for no news is worse than no
+        // indicator.
+        var withNews = {"summary": {"seriesWithNew": 3, "newChapters": 11, "failed": 1,
+                                    "short": "3 new",
+                                    "phrase": "3 series have new chapters"}}
+
+        win.want("a summary is applied", WatchJs.applySummary(summaryTarget, withNews), true)
+        win.want("short is stored verbatim", summaryTarget.watchShort, "3 new")
+        win.want("phrase is stored verbatim", summaryTarget.watchPhrase,
+                 "3 series have new chapters")
+        var writesAfterFirst = summaryTarget.shortWrites + summaryTarget.phraseWrites
+
+        win.want("an unchanged summary writes nothing",
+                 WatchJs.applySummary(summaryTarget, withNews), false)
+        win.want("an unchanged summary repaints nothing",
+                 summaryTarget.shortWrites + summaryTarget.phraseWrites, writesAfterFirst)
+
+        // Empty means show nothing — not "0 new", not a placeholder.
+        win.want("an absent summary clears it",
+                 WatchJs.applySummary(summaryTarget, {"watched": []}), true)
+        win.want("short goes empty, not zero", summaryTarget.watchShort, "")
+        win.want("phrase goes empty, not zero", summaryTarget.watchPhrase, "")
+        win.want("an unchanged empty summary writes nothing",
+                 WatchJs.applySummary(summaryTarget, {"watched": []}), false)
+
+        // And back again, which is what the end of a fruitful round looks like.
+        win.want("empty to non-empty writes",
+                 WatchJs.applySummary(summaryTarget, withNews), true)
+        win.want("short is back", summaryTarget.watchShort, "3 new")
+
+        // The entry point: the view's own noun, then the backend's words.
+        var wl = win.findChild(sourceList, "watchingLabel")
+        sourceList.watchingLabel = ""
+        win.want("the plain entry point", wl.text, "Watching")
+        sourceList.watchingLabel = "3 new"
+        win.want("the entry point carries the summary", wl.text, "Watching · 3 new")
+        // It has to stay legible in the button it sits in: an elided or
+        // overflowing indicator is worse than none.
+        win.want("the grown label still fits its button",
+                 wl.implicitWidth <= wl.parent.width - Style.gap * 2, true)
+        // The backend owns this string and may make it longer — a failure
+        // case reads something like "3 new, 1 failed". Check the roomiest
+        // plausible one rather than only the happy short one.
+        sourceList.watchingLabel = "12 new, 3 failed"
+        console.log("     entry point width: label " + Math.round(wl.implicitWidth) +
+                    " of " + Math.round(wl.parent.width) + " available")
+        win.want("a long summary still fits",
+                 wl.implicitWidth <= wl.parent.width - Style.gap * 2, true)
+        sourceList.watchingLabel = "3 new"
+
+        // The watched screen: the phrase is absent, not blank, when empty.
+        var wph = win.findChild(watchList, "watchPhrase")
+        watchList.phrase = ""
+        win.want("no phrase means no line", wph.visible, false)
+        watchList.phrase = "3 series have new chapters"
+        win.want("the phrase is drawn as it arrived", wph.text, "3 series have new chapters")
+        win.want("the phrase line is there when there is news", wph.visible, true)
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12
