@@ -310,6 +310,7 @@ one.
 | `madara` | newest first | `li.wp-manga-chapter` in document order, reversed. One call in `parseChapters`, the single exit for all three of its chapter paths (inline HTML, current AJAX, legacy AJAX). |
 | `mangathemesia` | newest first | `#chapterlist li` in document order, reversed. The number comes from `data-num` when the title is decorative. |
 | `generic` | unknown | Whatever the user's selectors or script yield. Normalised like everyone else: selectors say *where* the chapters are, never which way round they run, and a user's script is not trusted to have got it right either. |
+| `mangakakalot` | newest first | The chapter **API**'s `chapters` array in response order, reversed. The number comes from the API's own `chapter_num`, which matters here: a title like `"Chapter 453: Night 453"` has two numbers in it and only one of them is the chapter's. |
 | `mangadex` | oldest first | `order[chapter]=asc`, then normalised anyway — see below. |
 
 **mangadex normalises even though the server sorts.** Not defensive
@@ -344,6 +345,7 @@ a source of that shape should carry by default; `""` means "no opinion" and
 | Theme | Suggestion | Why |
 |---|---|---|
 | `mangadex` | `"MangaDex"` | One site, which knows what it is called. Without this, adding `https://api.mangadex.org` produced a source named **"MangaDex API documentation"** — exactly what that page's `<title>` says, and meaningless in a source list. |
+| `mangakakalot` | `""` | A family of mirrors carrying different names and no shared branding. There is no one name to lend them, so the page title is the better default and a rename is one tap away. |
 | `madara`, `mangathemesia`, `generic` | `""` | Families of hundreds of independently branded sites, or an escape hatch pointed at a site nobody has themed. For these the page title genuinely *is* the best available default; inventing a name would be worse than the title ever is. |
 
 **There is no title cleaning, here or anywhere.** Stripping `" — Home"`,
@@ -762,7 +764,151 @@ restating where a theme author will read them:
 In this theme exactly one call is retrieval — `Pages()` — and it says so in a
 comment at the call site. `TestPagesIsFetchedAsRetrieval` asserts it, and
 `TestDiscoveryCallsAreNotRetrieval` asserts the more important converse: search
-and series are discovery and stay bound by robots.
+and series are classified as discovery.
+
+**Superseded in part, 2026-09-16 — read this before relying on the paragraph
+above.** PLAN §7.4 now makes the robots.txt consultation a **single global
+setting, off by default**, so a `Disallow` binds nothing unless the setting is
+turned on. The machinery is all still here — parser, cache, the three-way
+handling of an unreadable file — and is still tested against the on-state, so
+turning it back on is a setting rather than a rewrite.
+
+`Kind` stays, and the three properties above still hold; what changes is that
+while the setting is off it gates nothing. It remains the documentation of
+intent at each call site, it is what the gate reads the moment the setting is
+on, and it is named in the info line logged for **every** suppressed check — the
+only record of what the setting actually did, and the only thing that
+distinguishes a request a person drove from the probe and the watch checks,
+which run unattended. Nothing else moved: rate limits, per-host delays, the
+honest User-Agent, the size cap, byte accounting and the SSRF guard all still
+apply, and §7.6 is untouched — a challenge is a site actively refusing us, which
+is a different thing from an advisory file aimed at crawlers, and
+`blocked_challenge` stays terminal.
+
+The setting lives in `schema/settings.schema.json` as `consultRobots` and is
+stored with the sources; `fetch.Client.SetConsultRobots` applies it.
+
+---
+
+### `mangakakalot` — a family of mirrors, and the first non-WordPress family
+
+Implemented in `backend/theme/mangakakalot/`. Not in PLAN §7.3's list, and added
+because none of the themes that were there fit it: the check was structural
+rather than nominal. **No madara markers** (no `wp-manga` asset path, no
+`admin-ajax.php` chapter POST) and **no mangathemesia markers** (no
+`ts_reader.run(`, no `#chapterlist`, no `.bixbox`). It is its own lineage, and a
+*family* rather than a site — the same markup is served by a long tail of
+mirrors — so it is a theme like the others.
+
+#### Fingerprint signals
+
+Grouped by the page they appear on, because no page of this family carries all
+of them and the probe only ever sees one. The home page in particular carries
+none of the series, reader or listing markup, so its signals have to reach the
+threshold of 60 on their own.
+
+| Page | Signal | Weight | What it is |
+|---|---|---|---|
+| Series | `#chapter-list-container[data-api-url]` | 35 | The defining one. The chapter list is *not in the document*; what ships is an empty container carrying the API endpoint |
+| Series | `[data-chapter-url-template]` | 10 | The reader URL shape, alongside it |
+| Series | `.manga-info-top, .panel-story-info` | 20 | The info block |
+| Series | `ul.manga-info-text` | 10 | Its flat list of `Label : value` rows |
+| Series | `.manga-info-pic, span.info-image` | 10 | The cover |
+| Reader | `.container-chapter-reader` | 35 | The reader, server-rendered |
+| Reader | `chapterImages` / `cdns` | 20 / 5 | The inline image arrays |
+| Listing | `.list-comic-item-wrap, .list-truyen-item-wrap` | 25 | The card grid |
+| Listing | `a.list-story-item` | 20 | Its cover anchor |
+| Listing | `a.list-story-item-wrap-chapter` | 10 | The "newest chapter" line on a card |
+| Search | `.panel_story_list .story_item` | 35 | The older row-per-result rendering |
+| Search | `.story_item .story_name, .story_item_right` | 25 | Its inner structure |
+| Either | `.group_page, .group-page` | 5 | The pager |
+| Home | `#contentstory .doreamon` | 35 | The latest-releases row |
+| Home | `.itemupdate a.bookmark_check, a.cover.bookmark_check` | 25 | Its cards |
+| Home | `.daily-update` | 10 | The section heading block |
+| **Negative** | `wp-manga` | **-40** | A madara page is madara's, whatever else it shares |
+| **Negative** | `ts_reader.run(` | **-40** | Likewise mangathemesia's |
+
+The negatives are not decoration. Without them a page could in principle be
+claimed by two themes at once and §7.5 stage 4 would put a near-tie to the user
+over a question that is not actually close. Against the committed corpus this
+theme scores 60–85 on its own pages and 0 on every other theme's, and the
+cross-theme suite requires a 30-point gap.
+
+#### Endpoint shapes
+
+| What | Shape |
+|---|---|
+| Series | `GET /{seriesSubPath}/{slug}` |
+| Chapter list | `GET /api/manga/{slug}/chapters?limit=-1` → `{success, data:{chapters:[{chapter_name, chapter_slug, chapter_num, updated_at}]}}` |
+| Reader | `GET /{seriesSubPath}/{slug}/{chapterSlug}` |
+| Search | `GET /{searchPath}/{normalised query}?page=N` — the query is a **path segment**, lower-cased with every non-alphanumeric run folded to `_`, because that is what the site looks up |
+| Browse (empty query) | `GET /{browsePath}?page=N` |
+
+Two of those are worth dwelling on.
+
+**The chapter list is an API, not markup.** Parsing the series HTML for chapters
+finds *nothing* — not a short list, nothing — and `limit=-1` returns the whole
+list in one response, so there is no pagination to walk. The API answers
+**newest-first**, which is why `Chapters` reverses it; `testdata/chapters.json`
+is descending on purpose so that forgetting to is a red test rather than a
+volume that reads backwards.
+
+**Search is a path, not a parameter.** `?s=lantern` finds nothing here. The
+normalisation is the site's own and is reproduced rather than improved on:
+folding more than it does produces a query it cannot answer.
+
+#### `overrides` keys, and why each exists
+
+| Key | Default | Why |
+|---|---|---|
+| `seriesSubPath` | `manga` | Series and readers both hang off it. A mirror renaming a segment is exactly the drift a family of mirrors produces, and it should be a config change rather than a new build |
+| `searchPath` | `search/story` | Same reasoning; prior art keeps this overridable for the same reason |
+| `browsePath` | `manga-list/latest-manga` | The UI's Browse is a search with an empty query (§7.5, M3 correction 1) and this family's search endpoint has nothing to say about an empty string, so Browse goes to a listing instead |
+| `pageSource` | `dom` | The reader is server-rendered **and** carries the inline arrays. Whichever is chosen, the other is tried when the first yields nothing — a mirror that lazy-loads has only the arrays, and returning no pages while the fetched page plainly contained them would be a failure we could see and chose not to look at |
+
+#### `AllowedHosts`
+
+`*.2xstorage.com`, `storage.waitst.com`.
+
+This is the second theme after `mangadex` to declare anything, and for the same
+reason: **it does not host its own images.** Covers and page images both come
+from dedicated image hosts on a different registrable domain from the site, so
+without the declaration the SSRF guard refuses every download and the user's
+only route out is to guess a CDN's name from a rejection.
+
+Narrow in both available senses. One domain is named exactly; the other gets
+`*.` — subdomains only, never the bare domain — because the hosts under it are
+rotated numbered labels (`img-r1`, `img-r2`, `imgs-2`) rather than one stable
+name. A bare-domain entry there would permit a host the family never serves
+from.
+
+#### Quirks, and two honest limitations
+
+**This family's `robots.txt` disallows its search and its paginated listings.**
+Observed, not assumed: `Disallow: */search/story/*` and `Disallow: *?page=*`,
+alongside `Allow: /`. Under the rule this project shipped until 2026-09-16 —
+robots consulted, a `Disallow` binding every discovery request — a source of
+this theme could not be searched or browsed at all, which is to say it could not
+be used. That is the concrete case behind PLAN §7.4's global robots setting, and
+it is why the two pieces of work landed together. With the setting at its
+default (not consulted) browsing works; with it turned on, expect
+`robots_denied` on the first search.
+
+**The mirrors challenge the search path, and the image hosts challenge
+everything.** Run by hand against a live mirror with the honest `User-Agent`:
+the home page, the listings, the series page, the chapter API and the reader all
+answered 200 and parsed, but `/search/story/...` answered **403 with a
+Cloudflare interstitial**, and so did a page image on the image host. PLAN §7.6
+is the answer to both: a challenge is a site saying no and we take the answer.
+There is no bypass in this codebase and none is to be added. In practice that
+means a source of this theme is browsable and its chapter lists are readable,
+while search and downloads may or may not be, per mirror and per day — the
+probe's stage-5 capability check is what reports which, and it reports it
+honestly rather than adding the source and failing later.
+
+**Author rows are messy by nature.** The `Author(s)` row often carries a list of
+romanisations of one name. They are returned as the site gives them; picking a
+canonical one is a guess, and a wrong guess looks like a different author.
 
 ---
 
@@ -883,7 +1029,7 @@ actually seen, and say where it was seen in general terms — never name the sit
 
 ---
 
-## Writing theme #6 — the short version
+## Writing the next theme — the short version
 
 1. New package under `backend/theme/`. Implement `theme.Theme` (eight methods
    as of 2026-09-15 — the six of PLAN §7.2 plus `AllowedHosts` and
@@ -916,10 +1062,13 @@ actually seen, and say where it was seen in general terms — never name the sit
    widens the redirect boundary for all of them. Return hosts only if the
    theme's own images genuinely live on another registrable domain, and check
    the fixtures rather than assuming.
-10. If the theme needs a request that robots disallows, read §7.4's
-   discovery/retrieval decision and the `mangadex` section before reaching for
-   `GetRetrieval`. The bar is "the user named this thing", not "this request is
-   inconvenient to lose".
+10. If the theme needs a request that robots disallows, read §7.4 and the
+   `mangadex` section before reaching for `GetRetrieval`. The bar is "the user
+   named this thing", not "this request is inconvenient to lose" — and note
+   that since 2026-09-16 the consultation is off by default, so `Kind` is
+   documentation of intent and the answer to "which is this?" unless the
+   setting is on. Classify honestly anyway: the setting can be turned on, and
+   the kind is what the suppressed-check log line reports.
 11. If it is a JSON API rather than a markup family, say so at the top of its
    section the way `mangadex` does, and gate the fingerprint on something that
    cannot be worn by accident. A JSON envelope is not a fingerprint.
