@@ -9,6 +9,7 @@ import QtQuick.Window 2.2
 // The screens under test. A directory import rather than -I, because implicit
 // type resolution only covers the directory the file itself lives in.
 import "../../ui"
+import "../../ui/Watch.js" as WatchJs
 
 
 Window {
@@ -25,6 +26,7 @@ Window {
     }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
+    ListModel { id: watchedModel }
 
     property int failures: 0
     function want(label, got, expected) {
@@ -55,6 +57,7 @@ Window {
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
                   synopsis: "A long description that runs on and on. " }
     Settings    { id: settings;    objectName: "settings";    anchors.fill: parent; logShown: true }
+    WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
     PagerBar    { id: lonePager;   width: 1620 }
 
     Component.onCompleted: {
@@ -65,6 +68,12 @@ Window {
             chaptersModel.append({"chapterId": "c" + j, "title": "Chapter " + j, "number": j,
                                   "published": "2026-01-01", "scanlator": "Group",
                                   "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+        for (var w = 0; w < 25; ++w)
+            watchedModel.append(WatchJs.row({
+                "sourceId": "src", "seriesId": "w" + w, "sourceName": "Example Reader",
+                "title": "Watched " + w, "newChapters": 0,
+                "state": "ok", "status": "Up to date", "checkedAt": "2026-09-16T00:00:00Z"}))
+
         var log = []
         for (var k = 0; k < 300; ++k)
             log.push("2026-09-16T00:00:00 INFO something happened, number " + k)
@@ -123,6 +132,67 @@ Window {
         win.want("the keyboard does not move the pager",
                  win.findChild(seriesGrid, "seriesPager").y, pagerYBefore)
         seriesGrid.searching = false
+
+        // ---- PLAN §12.2: watched series --------------------------------
+        //
+        // A check round streams its results in while the user is reading a
+        // page. An update for a series on another page must cost this page
+        // nothing: no reflow, no change of count, and above all no change to
+        // which series the current page holds.
+        var wp = win.findChild(watchList, "watchPager")
+        watchList.page = 2
+        var pageBefore = watchList.page
+        var countBefore = watchedModel.count
+        var onThisPage = watchedModel.get((watchList.page - 1) * watchList.pageSize).seriesId
+
+        WatchJs.applyUpdate(watchedModel, {
+            "sourceId": "src", "seriesId": "w0", "sourceName": "Example Reader",
+            "title": "Watched 0", "newChapters": 3, "badge": "3 new chapters",
+            "state": "new", "status": "3 new chapters"})
+        win.want("an update elsewhere does not turn the page", watchList.page, pageBefore)
+        win.want("an update elsewhere does not change the count", watchedModel.count, countBefore)
+        win.want("an update elsewhere does not change what this page holds",
+                 watchedModel.get((watchList.page - 1) * watchList.pageSize).seriesId, onThisPage)
+        win.want("the update landed on its own row", watchedModel.get(0).badge, "3 new chapters")
+
+        // The badge and the status are the backend's words, stored verbatim.
+        win.want("the status is stored verbatim", watchedModel.get(0).status, "3 new chapters")
+
+        // A failed check keeps the count an earlier successful one established,
+        // so a row can carry a badge and a warning at once (PLAN §12.2).
+        WatchJs.applyUpdate(watchedModel, {
+            "sourceId": "src", "seriesId": "w0", "sourceName": "Example Reader",
+            "title": "Watched 0", "newChapters": 3, "badge": "3 new chapters",
+            "state": "failed", "status": "Couldn\u2019t check",
+            "detail": "The site did not answer."})
+        win.want("a failed row keeps its badge", watchedModel.get(0).badge, "3 new chapters")
+        win.want("a failed row says so", watchedModel.get(0).status, "Couldn\u2019t check")
+        win.want("a failed row carries its detail", watchedModel.get(0).detail,
+                 "The site did not answer.")
+
+        // A whole list arriving at the end of a round is applied in place: same
+        // rows, same order, same page.
+        var whole = []
+        for (var r = 0; r < watchedModel.count; ++r) {
+            var have = watchedModel.get(r)
+            whole.push({"sourceId": have.sourceId, "seriesId": have.seriesId,
+                        "sourceName": have.sourceName, "title": have.title,
+                        "newChapters": have.newChapters, "badge": have.badge,
+                        "state": have.state, "status": have.status, "detail": have.detail})
+        }
+        WatchJs.reconcile(watchedModel, whole)
+        win.want("a whole list does not turn the page", watchList.page, pageBefore)
+        win.want("a whole list does not change the count", watchedModel.count, countBefore)
+        win.want("a whole list does not reorder", watchedModel.get(0).seriesId, "w0")
+
+        // Unwatching drops the row, and the pager clamps rather than leaving
+        // the user on a page that no longer exists.
+        watchList.page = watchList.totalPages
+        whole.length = 1
+        WatchJs.reconcile(watchedModel, whole)
+        win.want("a dropped watch leaves one row", watchedModel.count, 1)
+        win.want("the page clamps after a drop", watchList.page, 1)
+        win.want("the watched pager is gone with one page", wp.visible, false)
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12
