@@ -1,0 +1,61 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the directory listing, which is what an empty query gets. PLAN
+  §7.5's M3 correction made Browse a search with no query, and this site's
+  search endpoint cannot answer one — it returns the catalogue in no useful
+  order — so Browse reads this instead.
+
+  Two things about the URL shape are worth having a fixture for, because both
+  are unlike anything else in the registry:
+
+    - **pages are files, not parameters**: /directory/3.html, not ?page=3
+    - **the sort is a valueless query parameter**: /directory/?latest, which
+      url.Values would render as "latest=" and which the server then ignores,
+      quietly sorting by rank instead
+
+  The rows are a manga-list-1-list, the same family as the home page's.
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Comic Directory - Example Comics</title>
+</head>
+<body>
+
+<div class="manga-list-1">
+  <ul class="manga-list-1-list line">
+    <li>
+      <a href="/manga/the_lantern_keeper/" title="The Lantern Keeper">
+        <img class="manga-list-1-cover" src="https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc" alt="The Lantern Keeper">
+      </a>
+      <p class="manga-list-1-item-title"><a href="/manga/the_lantern_keeper/" title="The Lantern Keeper">The Lantern Keeper</a></p>
+      <p class="manga-list-1-item-subtitle">
+        <a href="/manga/the_lantern_keeper/v02/c007/1.html" title="Vol.02 Ch.007">Vol.02 Ch.007</a>
+      </p>
+    </li>
+    <li>
+      <a href="/manga/paper_boats/" title="Paper Boats">
+        <img class="manga-list-1-cover" src="https://covers.example.invalid/store/manga/4087/cover.jpg?token=jkl" alt="Paper Boats">
+      </a>
+      <p class="manga-list-1-item-title"><a href="/manga/paper_boats/" title="Paper Boats">Paper Boats</a></p>
+      <p class="manga-list-1-item-subtitle">
+        <a href="/manga/paper_boats/v02/c031/1.html" title="Vol.02 Ch.031">Vol.02 Ch.031</a>
+      </p>
+    </li>
+  </ul>
+</div>
+
+<div class="pager-list">
+  <div class="pager-list-left">
+    <a href="/directory/" class="active">1</a>
+    <a href="/directory/2.html">2</a>
+    <a href="/directory/3.html">3</a>
+  </div>
+</div>
+
+</body>
+</html>

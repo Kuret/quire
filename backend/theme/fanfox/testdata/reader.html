@@ -1,0 +1,60 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the *mobile* scroll reader, which is the only surface of this site
+  that ships every page URL at once. The desktop reader hands out one page at a
+  time behind an obfuscated script and is not read by this theme at all.
+
+  The URL this answers is on the mobile host, with the series segment rewritten
+  to the scroll-view segment: /roll_manga/{slug}/v01/c006/1.html on
+  m.example.invalid. Both changes are load-bearing and there is a test on each.
+
+  **The real URL is in data-original; src is a loading animation.** A theme
+  reading src returns a chapter of spinners, which is why Pages() does not use
+  theme.ImageURL — that helper knows the lazy-load attributes WordPress plugins
+  use, and this is not one of them.
+
+  Deliberate variations exercised by the test:
+    - the image URLs are protocol-relative ("//host/path"), which is routine
+      here and must inherit the base's https rather than downgrading
+    - they are on a different registrable domain from the site, which is what
+      AllowedHosts() exists for
+    - the page counter between the images is a sibling <div>, not an <img>, and
+      must not be mistaken for one
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The Lantern Keeper</title>
+</head>
+<body>
+
+<header>
+  <div class="mangaread-title">V01 Ch006</div>
+  <a href="//m.example.invalid/manga/the_lantern_keeper/v01/c006/1.html"><span class="change-icon iconfont"></span></a>
+</header>
+
+<section class="main">
+  <div class="mangaread-main">
+    <div class="mangaread-img" id="viewer">
+      <img data-original="//pages.example.invalid/store/manga/4085/01-006.0/compressed/f000.jpg?token=abc&amp;ttl=1789560000"
+           src="//m.example.invalid/mobile/images/MF-Loading380x380.gif?v=201801301009071"
+           class="reader-page" />
+      <div class="roll-page">1/3</div>
+      <img data-original="//pages.example.invalid/store/manga/4085/01-006.0/compressed/f001.jpg?token=def&amp;ttl=1789560000"
+           src="//m.example.invalid/mobile/images/MF-Loading380x380.gif?v=201801301009071"
+           class="reader-page" />
+      <div class="roll-page">2/3</div>
+      <img data-original="//pages.example.invalid/store/manga/4085/01-006.0/compressed/f002.jpg?token=ghi&amp;ttl=1789560000"
+           src="//m.example.invalid/mobile/images/MF-Loading380x380.gif?v=201801301009071"
+           class="reader-page" />
+      <div class="roll-page">3/3</div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

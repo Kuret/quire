@@ -1,0 +1,133 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a series page. Unlike most of the registry, the whole chapter list
+  is in this document — no AJAX, no second endpoint — so Chapters() reads it
+  here. What it carries that nothing else here does is **real volume
+  structure**: the chapter links are /{series}/v01/c006/1.html, which is where
+  Chapter.Volume comes from and which lets PLAN §6 M4 group by volume instead
+  of falling back to runs of ten.
+
+  **The list is deliberately descending**, because that is the order the real
+  markup comes in, and a fixture that were ascending would let a theme that
+  never sorted anything pass a test about sorting.
+
+  Deliberate variations exercised by the test:
+    - the chapters span two volumes, and one is filed under "v00", which this
+      site uses for extras and prologues — so "0" must survive as a label and
+      not be trimmed to nothing
+    - one chapter carries a decimal number (c006.5)
+    - one series has no volume at all in its path (the "Ch.012" form), which
+      must yield an empty volume and a number rather than a parse failure
+    - one date is relative ("3 days ago") and the rest are absolute, so both
+      paths through theme.ParseDate are exercised
+    - the summary appears twice: truncated in one paragraph and complete in a
+      hidden one, and the complete one must win
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper Manga - Read The Lantern Keeper Online</title>
+</head>
+<body>
+
+<div class="detail-info">
+  <div class="detail-info-cover">
+    <img class="detail-info-cover-img" src="https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&amp;ttl=1789610400" alt="The Lantern Keeper">
+  </div>
+  <div class="detail-info-right">
+    <p class="detail-info-right-title">
+      <span class="detail-info-right-title-font">The Lantern Keeper</span>
+      <span class="detail-info-right-title-tip">Completed</span>
+      <span class="detail-info-right-title-star">
+        <img class="item-star" src="/static/images/star-10.png">
+        <span class="item-score">4.61</span>
+      </span>
+    </p>
+    <p class="detail-info-right-say">Author:
+      <a href="/search/author/IWANO+Miyuki/" title="IWANO Miyuki">IWANO Miyuki</a>
+      <a href="/search/author/SADA+Keiko/" title="SADA Keiko">SADA Keiko</a>
+    </p>
+    <p class="detail-info-right-tag-list">
+      <a href="/directory/drama/" title="Drama">Drama</a>
+      <a href="/directory/fantasy/" title="Fantasy">Fantasy</a>
+      <a href="/directory/historical/" title="Historical">Historical</a>
+    </p>
+    <p class="fullcontent" style="display:none">A lamplighter walks the harbour road every night, and every night one more lamp has gone out before she reaches it.</p>
+    <p class="detail-info-right-content">A lamplighter walks the harbour road every night, and every night one more lamp...<a href="javascript:void(0)">more</a></p>
+  </div>
+</div>
+
+<p class="detail-main-list-title mt40">
+  <a href="javascript:void(0);" id="tab-2" onclick="showList(2);" class="active">VOL<span>（7）</span></a>
+  <span class="detail-main-list-title-right">Last Updated: Sep 7,2026</span>
+</p>
+
+<div id="chapterlist">
+  <div id="list-2">
+    <ul class="detail-main-list">
+      <li>
+        <a href="/manga/the_lantern_keeper/v02/c007/1.html" title="The Lantern Keeper Vol.02 Ch.007 - The Last Lamp" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.02 Ch.007 - The Last Lamp</p>
+            <p class="title2">3 days ago</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v01/c006.5/1.html" title="The Lantern Keeper Vol.01 Ch.006.5 - Omake" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.01 Ch.006.5 - Omake</p>
+            <p class="title2">Sep 4,2026</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v01/c006/1.html" title="The Lantern Keeper Vol.01 Ch.006 - Know Thyself" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.01 Ch.006 - Know Thyself</p>
+            <p class="title2">Sep 1,2026</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v01/c005/1.html" title="The Lantern Keeper Vol.01 Ch.005" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.01 Ch.005</p>
+            <p class="title2">Aug 24,2026</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v01/c004/1.html" title="The Lantern Keeper Vol.01 Ch.004" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.01 Ch.004</p>
+            <p class="title2">Aug 17,2026</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v00/c002/1.html" title="The Lantern Keeper Vol.00 Ch.002 - Side Story" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.00 Ch.002 - Side Story</p>
+            <p class="title2">Aug 10,2026</p>
+          </div>
+        </a>
+      </li>
+      <li>
+        <a href="/manga/the_lantern_keeper/v00/c001/1.html" title="The Lantern Keeper Vol.00 Ch.001 - Prologue" target="_blank">
+          <div class="detail-main-list-main">
+            <p class="title3">Vol.00 Ch.001 - Prologue</p>
+            <p class="title2">Aug 3,2026</p>
+          </div>
+        </a>
+      </li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>

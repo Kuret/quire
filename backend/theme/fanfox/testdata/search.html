@@ -1,0 +1,61 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a search results page. The rows are a manga-list-4-list, and the
+  trap they set is that each row contains *four* anchors pointing at four
+  different things: the cover, the title, the status tag and the author's own
+  listing page. Reading "every anchor in the list" gives four results per
+  series, three of which are duplicates and one of which is not a series at
+  all.
+
+  Deliberate variations exercised by the test:
+    - the author link goes to /search/author/..., which is neither a series nor
+      a chapter and must be dropped
+    - a chapter link in the "latest" line of a row must not become a result
+    - the second row's anchor carries no title attribute, so the title has to
+      come from the item-title paragraph instead
+    - one title attribute is padded by the template
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Search Results for the lantern keeper</title>
+</head>
+<body>
+
+<div class="manga-list-4 mt15">
+  <ul class="manga-list-4-list line">
+    <li>
+      <a href="/manga/the_lantern_keeper/" title="  The Lantern Keeper  ">
+        <img class="manga-list-4-cover" src="https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&amp;ttl=1789610400&amp;v=1362908853" alt="The Lantern Keeper">
+      </a>
+      <p class="manga-list-4-item-title"><a href="/manga/the_lantern_keeper/" title="The Lantern Keeper">The Lantern Keeper</a></p>
+      <p class="manga-list-4-show-tag-list-2">
+        <a href="/manga/the_lantern_keeper/" title="The Lantern Keeper">Completed</a>
+      </p>
+      <p class="manga-list-4-item-tip">Author:<a class="blue" title="IWANO Miyuki" href="/search/author/IWANO+Miyuki/" target="_blank">IWANO Miyuki</a></p>
+      <p class="manga-list-4-item-tip">Latest:<a href="/manga/the_lantern_keeper/v01/c006/1.html" title="Vol.01 Ch.006">Vol.01 Ch.006</a></p>
+    </li>
+    <li>
+      <a href="/manga/salt_and_cinder/">
+        <img class="manga-list-4-cover" src="https://covers.example.invalid/store/manga/4086/cover.jpg?token=def&amp;ttl=1789610400" alt="Salt and Cinder">
+      </a>
+      <p class="manga-list-4-item-title"><a href="/manga/salt_and_cinder/">Salt and Cinder</a></p>
+      <p class="manga-list-4-item-tip">Author:<a class="blue" href="/search/author/SADA+Keiko/" target="_blank">SADA Keiko</a></p>
+    </li>
+  </ul>
+</div>
+
+<div class="pager-list">
+  <div class="pager-list-left">
+    <a href="javascript:void(0)" class="active">1</a>
+    <a href="/search?title=the+lantern+keeper&amp;page=2&amp;stype=1">2</a>
+    <a href="/search?title=the+lantern+keeper&amp;page=3&amp;stype=1">3</a>
+  </div>
+</div>
+
+</body>
+</html>
