@@ -1,0 +1,136 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces what GET /series/{id}/full-chapter-list answers: an htmx fragment
+  carrying the *whole* chapter list, which is the only place the whole list
+  exists. Compare testdata/series.html, which ships a truncated three-entry
+  version of the same markup.
+
+  **This fixture is deliberately in descending order**, because that is the
+  order the real markup comes in and because a fixture that happened to be
+  ascending would let a theme that never sorted anything pass a test about
+  sorting (PLAN §7.2's ordering contract; docs/THEME-NOTES.md, "Chapter
+  ordering"). TestChaptersAreAscending fails against this file if SortAndMark
+  is removed.
+
+  It also carries the case a plain sort-by-number gets wrong: "Special Chapter
+  — The Harbour Road" has no number at all and sits between 5 and 4 in the
+  site's order. Sorting by number would fling it to one end of the list; the
+  order.go rule of "the numbered chapters descend, so reverse the whole list"
+  keeps it where the site put it, between 4 and 5 ascending.
+
+  Deliberate variations exercised by the test:
+    - one chapter's badge is the -official.svg variant and must be attributed
+    - one <time> is absent entirely and must yield the zero time, not an error
+    - the chapter titles are in the "Chapter N" form with a trailing decimal on
+      one of them ("Chapter 3.5")
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+
+<div id="chapter-list" class="flex flex-col mt-2 divide-y divide-slate-500">
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-09-07T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERSIX00001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 6</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-09-07T17:04:15.717Z">2026-09-07T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERSIX00001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-31T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERFIVE0001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge-official.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 5</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-31T17:04:15.717Z">2026-08-31T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERFIVE0001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-28T09:00:00.000000Z') }">
+		<a href="/chapters/01EXAMPLE0SPECIALHARBOUR1" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Special Chapter — The Harbour Road</span>
+			</span>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0SPECIALHARBOUR1" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-24T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERFOUR0001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 4</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-24T17:04:15.717Z">2026-08-24T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERFOUR0001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-20T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERTHREE501" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 3.5</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-20T17:04:15.717Z">2026-08-20T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERTHREE501" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-17T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERTHREE001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 3</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-17T17:04:15.717Z">2026-08-17T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERTHREE001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-10T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERTWO00001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 2</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-10T17:04:15.717Z">2026-08-10T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERTWO00001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+	<div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-03T17:04:15.717343Z') }">
+		<a href="/chapters/01EXAMPLE0CHAPTERONE00001" class="hover:bg-base-300 flex-1 flex items-center p-2">
+			<span class="me-2">
+				<img src="/static/images/chapter-badge.svg" alt="" width="16" height="16" class="w-4 h-4" decoding="async">
+			</span>
+			<span class="grow flex items-center gap-2">
+				<span class="">Chapter 1</span>
+			</span>
+			<time class="text-datetime opacity-50" datetime="2026-08-03T17:04:15.717Z">2026-08-03T17:04:15.717343Z</time>
+		</a>
+		<input type="checkbox" value="01EXAMPLE0CHAPTERONE00001" name="chapter_id" form="mark-as-read-form" class="checkbox ms-4">
+	</div>
+
+</div>

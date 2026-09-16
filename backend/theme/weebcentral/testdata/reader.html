@@ -1,0 +1,66 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces what GET /chapters/{id}/images answers: an htmx fragment holding
+  the whole chapter's images, eagerly, in a #chapter-images section. No inline
+  JSON blob, no lazy-load attribute, no per-page round trip — the src is the
+  real URL, which makes this the simplest Pages() in the registry.
+
+  Deliberate variations exercised by the test:
+    - **the onerror handler names a same-site placeholder**,
+      /static/images/broken_image.jpg. It is a string in an attribute, not a
+      src, but a theme that read "any image URL on the node" — which is what
+      theme.ImageURL does, and what every WordPress theme here needs — would
+      pick some of them up and hand the download queue a page of broken-image
+      icons. Pages() reads src and only src, and this fixture is what says so.
+    - the images are on a different registrable domain from the site, which is
+      what AllowedHosts() exists for
+    - one <img> carries a srcset as well as a src; the src wins, because the
+      srcset's first candidate is the small rendition
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+
+<section
+	id="chapter-images"
+	class="w-full flex-1 flex flex-col pb-4 cursor-pointer"
+	style="gap: var(--strip-gap, 0px)"
+	x-data="{
+		scrollDown() { window.scrollBy({ top: window.innerHeight * 0.75, behavior: 'smooth' }); },
+	}"
+	hx-get="https://example.invalid/chapters/01EXAMPLE0CHAPTERSIX00001/images"
+	hx-trigger="change from:[name='reading_style']"
+	hx-swap="outerHTML">
+
+	<img
+		src="https://pages.example.invalid/manga/The-Lantern-Keeper/0006-001.png"
+		class="max-w-full h-auto mx-auto"
+		style="min-height: 50vh"
+		alt="Page 1"
+		decoding="async"
+		loading="lazy"
+		onload="this.style.minHeight=''"
+		onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" />
+
+	<img
+		src="https://pages.example.invalid/manga/The-Lantern-Keeper/0006-002.png"
+		srcset="https://pages.example.invalid/manga/The-Lantern-Keeper/small/0006-002.png 400w"
+		class="max-w-full h-auto mx-auto"
+		style="min-height: 50vh"
+		alt="Page 2"
+		decoding="async"
+		loading="lazy"
+		onload="this.style.minHeight=''"
+		onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" />
+
+	<img
+		src="https://pages.example.invalid/manga/The-Lantern-Keeper/0006-003.png"
+		class="max-w-full h-auto mx-auto"
+		style="min-height: 50vh"
+		alt="Page 3"
+		decoding="async"
+		loading="lazy"
+		onload="this.style.minHeight=''"
+		onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" />
+
+</section>

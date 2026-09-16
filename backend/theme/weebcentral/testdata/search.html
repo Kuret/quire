@@ -1,0 +1,71 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces what GET /search/data answers: an htmx *fragment*, not a page.
+  There is no <html>, no <head> and no <title> — just the rows, followed by the
+  "next page" <button> whose presence is the only signal that more results
+  exist. A theme that parsed this expecting a document would still work, and a
+  test over a full page would never notice the difference, so the fixture is
+  the fragment.
+
+  Deliberate variations exercised by the test:
+    - the title is a bare <div> with no class, the *last* child of the anchor;
+      every other div in the row carries classes, which is what makes
+      "div:not([class]):last-child" the selector rather than a positional one
+    - the first row's cover is a <picture> with two <source> srcsets and an
+      <img> fallback, the second row's is a plain <img>: both must yield a
+      cover URL
+    - the second row is a chapter-level link under /chapters/, which is not a
+      series and must be dropped rather than returned with an unusable ID
+    - one row's title carries surrounding whitespace and a newline
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+
+<article class="bg-base-300 flex gap-4 p-4">
+	<section class="w-full lg:w-[25%] xl:w-[20%]">
+		<a href="https://example.invalid/series/01EXAMPLE0LANTERNKEEPER01/The-Lantern-Keeper">
+			<article class="hidden lg:block w-full aspect-4/6 overflow-hidden">
+				<picture>
+					<source srcset="https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp" width="400" height="600" media="(min-width: 768px)" type="image/webp">
+					<source srcset="https://covers.example.invalid/cover/small/01EXAMPLE0LANTERNKEEPER01.webp" width="200" height="300" type="image/webp">
+					<img src="https://covers.example.invalid/cover/fallback/01EXAMPLE0LANTERNKEEPER01.jpg" alt="The Lantern Keeper cover" width="400" height="600" decoding="async">
+				</picture>
+			</article>
+			<div class="flex flex-col gap-2">
+				<div class="opacity-70 text-sm">Manga</div>
+			</div>
+			<div>
+				The Lantern Keeper
+			</div>
+		</a>
+	</section>
+</article>
+
+<article class="bg-base-300 flex gap-4 p-4">
+	<section class="w-full lg:w-[25%] xl:w-[20%]">
+		<a href="https://example.invalid/series/01EXAMPLE0SALTANDCINDER01/Salt-And-Cinder">
+			<article class="hidden lg:block w-full aspect-4/6 overflow-hidden">
+				<img src="https://covers.example.invalid/cover/normal/01EXAMPLE0SALTANDCINDER01.webp" alt="Salt and Cinder cover" width="400" height="600" decoding="async">
+			</article>
+			<div class="flex flex-col gap-2">
+				<div class="opacity-70 text-sm">Manhwa</div>
+			</div>
+			<div>Salt and Cinder</div>
+		</a>
+	</section>
+</article>
+
+<article class="bg-base-300 flex gap-4 p-4">
+	<section class="w-full lg:w-[25%] xl:w-[20%]">
+		<a href="https://example.invalid/chapters/01EXAMPLE0CHAPTERSIX00001">
+			<div>Chapter 6</div>
+		</a>
+	</section>
+</article>
+
+<button hx-get="/search/data?text=lantern&amp;limit=32&amp;offset=32&amp;sort=Popularity&amp;order=Descending&amp;adult=False&amp;display_mode=Full+Display"
+        hx-swap="outerHTML"
+        hx-trigger="click">
+	View More Results...
+</button>

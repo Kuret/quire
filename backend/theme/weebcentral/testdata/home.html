@@ -1,0 +1,110 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape this theme's *home* page generates. This is the page
+  PLAN §7.5 stage 4 actually fingerprints, and it is worth its own fixture
+  because it carries none of the series, chapter-list or reader markup the
+  other fixtures do: a probe that only recognised those would call a real site
+  of this shape "unrecognised" on the one page it gets to see.
+
+  The markers here are what makes this theme structurally unlike every other
+  one in the registry. It is not WordPress and does not render its lists on the
+  server into a page you can bookmark: it is an htmx + Alpine application whose
+  panels are named hx-get fragment endpoints, and whose entities are addressed
+  by a 26-character Crockford base32 identifier rather than by a slug.
+
+    - hx-get attributes pointing at /hot-series, /latest-updates/{n} and
+      /recently-added/{n} — the fragment endpoints the home page swaps in
+    - a #quick-search-input / #quick-search-result pair, the type-ahead that
+      posts to the same search endpoint the theme's Search() uses
+    - /static/images/chapter-badge.svg and its -official sibling
+    - /series/{ID}/{slug} and /chapters/{ID} link shapes
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing a real
+  aggregator's domain or content, and §1.4 forbids copying anyone's expression.
+  The markup *shape* is an observable fact about the software; the words, the
+  identifiers and the host are ours. Host is example.invalid (RFC 2606) and can
+  never resolve.
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>Example Comics</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/htmx.min.js" defer></script>
+  <script src="/static/js/alpine.min.js" defer></script>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<header x-data="{ menu_open: false }">
+  <a href="/"><img src="/static/images/brand.png" alt="" width="120" height="32"></a>
+
+  <form action="/search" method="get">
+    <input id="quick-search-input" name="text" type="search" autocomplete="off"
+           hx-get="https://example.invalid/search/simple?location=main"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#quick-search-result">
+    <div id="quick-search-result"></div>
+  </form>
+</header>
+
+<main>
+  <section id="hot-series-area"
+           hx-get="https://example.invalid/hot-series"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+    <div>
+      <button hx-get="https://example.invalid/hot-series?sort=weekly_views" hx-target="#hot-series-area">Weekly</button>
+      <button hx-get="https://example.invalid/hot-series?sort=monthly_views" hx-target="#hot-series-area">Monthly</button>
+      <button hx-get="https://example.invalid/hot-series?sort=total_views" hx-target="#hot-series-area">All time</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Latest Updates</h2>
+    <article>
+      <a href="/series/01EXAMPLE0LANTERNKEEPER01/The-Lantern-Keeper">
+        <img src="https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp"
+             alt="The Lantern Keeper cover" width="400" height="600" decoding="async">
+        <div>The Lantern Keeper</div>
+      </a>
+      <a href="/chapters/01EXAMPLE0CHAPTERSIX00001">
+        <img src="/static/images/chapter-badge.svg" alt="" width="16" height="16">
+        <span>Chapter 6</span>
+        <time class="text-datetime opacity-50" datetime="2026-09-07T17:04:15.717Z">2026-09-07T17:04:15.717343Z</time>
+      </a>
+    </article>
+    <article>
+      <a href="/series/01EXAMPLE0SALTANDCINDER01/Salt-And-Cinder">
+        <img src="https://covers.example.invalid/cover/normal/01EXAMPLE0SALTANDCINDER01.webp"
+             alt="Salt and Cinder cover" width="400" height="600" decoding="async">
+        <div>Salt and Cinder</div>
+      </a>
+      <a href="/chapters/01EXAMPLE0CINDERCH00000012">
+        <img src="/static/images/chapter-badge-official.svg" alt="" width="16" height="16">
+        <span>Chapter 12</span>
+        <time class="text-datetime opacity-50" datetime="2026-09-06T09:12:00.000Z">2026-09-06T09:12:00.000000Z</time>
+      </a>
+    </article>
+    <button hx-get="https://example.invalid/latest-updates/2" hx-swap="outerHTML">View more</button>
+  </section>
+
+  <section>
+    <h2>Recently Added</h2>
+    <article>
+      <a href="/series/01EXAMPLE0PAPERBOATS0001A/Paper-Boats">
+        <img src="https://covers.example.invalid/cover/normal/01EXAMPLE0PAPERBOATS0001A.webp"
+             alt="Paper Boats cover" width="400" height="600" decoding="async">
+        <div>Paper Boats</div>
+      </a>
+    </article>
+    <button hx-get="https://example.invalid/recently-added/2" hx-swap="outerHTML">View more</button>
+  </section>
+</main>
+
+<footer>
+  <p>Example Comics</p>
+</footer>
+</body>
+</html>

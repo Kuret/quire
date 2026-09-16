@@ -1,0 +1,147 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a series page generates, and with it the structural
+  trap this theme sets: **the chapter list in this document is a truncated
+  one**. A #chapter-list is rendered server-side with only the most recent
+  entries, and the full list lives behind a separate fragment endpoint
+  (testdata/chapters.html). Parsing this file for chapters yields a plausible,
+  wrong answer — three chapters out of six — which is worse than yielding
+  nothing, because nothing is visibly broken. The test asserts that Chapters()
+  never asks for this page.
+
+  Metadata is a flat <ul> of <li> rows, each a <strong> label followed by the
+  value, matched on the label text rather than on row position so a reordered
+  or extended block still parses.
+
+  Deliberate variations exercised by the test:
+    - Author(s) is two linked names and must yield two authors
+    - Tags(s) is five links and must yield five genres
+    - Status is "Complete", which is the site's word and must normalise to the
+      Quire vocabulary rather than being passed through
+    - the rows are in an order no other fixture uses, because position must not
+      matter
+    - the title appears twice, once in a mobile-only <h1> and once in the
+      desktop one, and must not come out doubled
+    - Associated Name(s) is a nested <ul>, not a comma-separated string
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper | Example Comics</title>
+  <script src="/static/js/htmx.min.js" defer></script>
+</head>
+<body>
+
+<main x-data="{ show_detail: false }">
+  <h1 class="md:hidden text-2xl font-bold">The Lantern Keeper</h1>
+
+  <section x-data="{ show_detail: false }">
+    <!-- LEFT -->
+    <section class="md:w-4/12 flex flex-col gap-4">
+      <section class="flex items-center justify-center">
+        <picture>
+          <source srcset="https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp" width="400" height="600" type="image/webp">
+          <img src="https://covers.example.invalid/cover/fallback/01EXAMPLE0LANTERNKEEPER01.jpg" alt="The Lantern Keeper cover" width="400" height="600" decoding="async">
+        </picture>
+      </section>
+
+      <section :class="show_detail ? '' : 'hidden md:block'">
+        <ul class="flex flex-col gap-4">
+          <li>
+            <strong>Released: </strong>
+            <span>2019</span>
+          </li>
+          <li>
+            <strong>Tags(s): </strong>
+            <span><a href="/search?included_tag=Adventure" class="link link-info link-hover">Adventure</a>,</span>
+            <span><a href="/search?included_tag=Drama" class="link link-info link-hover">Drama</a>,</span>
+            <span><a href="/search?included_tag=Fantasy" class="link link-info link-hover">Fantasy</a>,</span>
+            <span><a href="/search?included_tag=Historical" class="link link-info link-hover">Historical</a>,</span>
+            <span><a href="/search?included_tag=Slice+of+Life" class="link link-info link-hover">Slice of Life</a></span>
+          </li>
+          <li>
+            <strong>Status: </strong>
+            <a href="/search?included_status=Complete" class="link link-info link-hover">Complete</a>
+          </li>
+          <li>
+            <strong>Author(s): </strong>
+            <span><a href="/search?author=IWANO+Miyuki" class="link link-info link-hover">IWANO Miyuki</a></span>
+            <span><a href="/search?author=SADA+Keiko" class="link link-info link-hover">SADA Keiko</a></span>
+          </li>
+          <li>
+            <strong>Type: </strong>
+            <a href="/search?included_type=Manga" class="link link-info link-hover">Manga</a>
+          </li>
+          <li>
+            <strong>Official Translation: </strong>
+            <a href="/search?official=False" class="link link-info link-hover">No</a>
+          </li>
+          <li>
+            <strong>Adult Content: </strong>
+            <a href="/search?adult=False" class="link link-info link-hover">No</a>
+          </li>
+          <li>
+            <strong>RSS: </strong>
+            <a href="/series/01EXAMPLE0LANTERNKEEPER01/rss" class="link link-info link-hover">RSS Feed</a>
+          </li>
+        </ul>
+      </section>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="md:w-8/12 flex flex-col gap-4">
+      <h1 class="hidden md:block text-2xl font-bold">The Lantern Keeper</h1>
+      <section :class="show_detail ? '' : 'hidden md:block'">
+        <ul class="flex flex-col gap-4">
+          <li>
+            <strong>Description</strong>
+            <p class="whitespace-pre-wrap break-words">A lamplighter walks the harbour road every night, and every night one more lamp has gone out before she reaches it.</p>
+          </li>
+          <li>
+            <strong>Associated Name(s)</strong>
+            <ul class="list-disc list-inside">
+              <li>Kanteru no Banjin</li>
+              <li>The Keeper of Lanterns</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+    </section>
+  </section>
+
+  <!-- The truncated list. Chapters() must not read this. -->
+  <section x-data="{ mark_chapters: 'null' }">
+    <div id="chapter-list" class="flex flex-col mt-2 divide-y divide-slate-500">
+      <div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-09-07T17:04:15.717343Z') }">
+        <a href="/chapters/01EXAMPLE0CHAPTERSIX00001" class="flex-1 flex items-center p-2">
+          <span class="me-2"><img src="/static/images/chapter-badge.svg" alt="" width="16" height="16"></span>
+          <span class="grow flex items-center gap-2"><span class="">Chapter 6</span></span>
+          <time class="text-datetime opacity-50" datetime="2026-09-07T17:04:15.717Z">2026-09-07T17:04:15.717343Z</time>
+        </a>
+      </div>
+      <div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-31T17:04:15.717343Z') }">
+        <a href="/chapters/01EXAMPLE0CHAPTERFIVE0001" class="flex-1 flex items-center p-2">
+          <span class="me-2"><img src="/static/images/chapter-badge.svg" alt="" width="16" height="16"></span>
+          <span class="grow flex items-center gap-2"><span class="">Chapter 5</span></span>
+          <time class="text-datetime opacity-50" datetime="2026-08-31T17:04:15.717Z">2026-08-31T17:04:15.717343Z</time>
+        </a>
+      </div>
+      <div class="flex items-center" x-data="{ new_chapter: checkNewChapter('2026-08-24T17:04:15.717343Z') }">
+        <a href="/chapters/01EXAMPLE0CHAPTERFOUR0001" class="flex-1 flex items-center p-2">
+          <span class="me-2"><img src="/static/images/chapter-badge.svg" alt="" width="16" height="16"></span>
+          <span class="grow flex items-center gap-2"><span class="">Chapter 4</span></span>
+          <time class="text-datetime opacity-50" datetime="2026-08-24T17:04:15.717Z">2026-08-24T17:04:15.717343Z</time>
+        </a>
+      </div>
+      <button hx-get="https://example.invalid/series/01EXAMPLE0LANTERNKEEPER01/full-chapter-list"
+              hx-target="#chapter-list"
+              hx-swap="outerHTML">Show All Chapters</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>
