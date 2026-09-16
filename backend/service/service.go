@@ -21,6 +21,7 @@ import (
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/download"
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/state"
@@ -800,10 +801,15 @@ func (s *Service) sendError(out Sender, code, message string) error {
 }
 
 // plain trims Go error wrapping down to something a person can read.
+//
+// A refusal mid-download reduces to a bare "HTTP 429" once the wrapping is
+// gone — the same hole the probe had, in the place a rate limit is most likely
+// to show up — so a trailing status becomes a sentence the reader can act on
+// (PLAN §6 M3). No retry is added here: PLAN §7.4's client already backs off.
 func plain(err error) string {
 	msg := err.Error()
 	if i := strings.LastIndex(msg, ": "); i > 0 && i < len(msg)-2 {
 		msg = msg[i+2:]
 	}
-	return msg
+	return fetch.ExplainStatus(msg, "the site")
 }
