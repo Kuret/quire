@@ -1,0 +1,79 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape this platform's *home* page generates. This is the page
+  PLAN §7.5 stage 4 fingerprints, and it carries none of the series or viewer
+  markup the other fixtures do: a probe that only recognised those would call a
+  real site of this shape "unrecognised" on the one page it gets to see.
+
+  The markers are the platform's own card grid — a .webtoon_list of anchors,
+  each carrying the numeric series identifier in a data attribute and its
+  cover in an .image_wrap — and the /list?title_no= link shape every surface
+  of the platform agrees on.
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing a real
+  aggregator's or publisher's domain and content, and §1.4 forbids copying
+  anyone's expression. The markup *shape* is an observable fact about the
+  software; the words, the numbers and the host are ours. Host is
+  example.invalid (RFC 2606) and can never resolve.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EXAMPLE — Read Comics, Manga &amp; Manhwa</title>
+</head>
+<body>
+
+<div class="daily_lst">
+  <h2 class="blind">Daily</h2>
+  <ul class="webtoon_list daily">
+    <li>
+      <a href="/en/fantasy/the-lantern-keeper/list?title_no=95" class="link _daily_title_a" data-title-no="95" data-genre="FANTASY">
+        <div class="image_wrap">
+          <img src="https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90" width="192" height="192" alt="">
+          <div class="badge_area _badge_area"></div>
+        </div>
+        <div class="info_text">
+          <strong class="title">The Lantern Keeper</strong>
+          <p class="genre">Fantasy</p>
+          <div class="view_count">1.2M views</div>
+        </div>
+      </a>
+    </li>
+    <li>
+      <a href="/en/drama/salt-and-cinder/list?title_no=9842" class="link _daily_title_a" data-title-no="9842" data-genre="DRAMA">
+        <div class="image_wrap">
+          <img src="https://pages.example.invalid/20240102_2/salt_thumb.jpg?type=q90" width="192" height="192" alt="">
+          <div class="badge_area _badge_area"></div>
+        </div>
+        <div class="info_text">
+          <strong class="title">Salt and Cinder</strong>
+          <p class="genre">Drama</p>
+          <div class="view_count">430K views</div>
+        </div>
+      </a>
+    </li>
+  </ul>
+</div>
+
+<div class="canvas_lst">
+  <h2 class="blind">Canvas</h2>
+  <ul class="webtoon_list type_small">
+    <li>
+      <a href="/en/canvas/paper-boats/list?title_no=1022970" class="link _canvas_title_a" data-title-no="1022970">
+        <div class="image_wrap">
+          <img src="https://pages.example.invalid/20240103_3/boats_thumb.jpg?type=q90" width="192" height="192" alt="">
+          <div class="badge_area _badge_area"></div>
+        </div>
+        <div class="info_text">
+          <strong class="title">Paper Boats</strong>
+          <div class="view_count">106 views</div>
+        </div>
+      </a>
+    </li>
+  </ul>
+</div>
+
+</body>
+</html>

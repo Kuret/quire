@@ -1,0 +1,76 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a series listing page, and with it the structural reason
+  Chapters() does not read one: **the episode list here is paginated**, ten at
+  a time, with a numbered pager beneath. Parsing this document for chapters
+  yields the ten most recent and looks entirely healthy. The whole list exists
+  only behind the mobile host's JSON API (testdata/episodes.json), and the test
+  asserts this page is never fetched for a chapter list.
+
+  The metadata block is the publisher's own tier: the title is an <h1>, the
+  author is a bare text node with a "more info" button beside it, and the
+  update schedule stands where a status would be on any other site.
+
+  Deliberate variations exercised by the test:
+    - the author block contains a <button> whose label would otherwise end up
+      in the author name
+    - two genre headings, which must both be kept and not duplicated
+    - the schedule is a publishing day rather than one of PLAN §7.2's five
+      status values, and must normalise rather than pass through
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper | EXAMPLE</title>
+</head>
+<body>
+
+<div class="cont_box">
+  <div class="detail_header type_black">
+    <span class="thmb">
+      <img src="https://pages.example.invalid/20240101_1/lantern_cover.png" height="240" alt="The Lantern Keeper fantasy comic">
+    </span>
+    <div class="info">
+      <h2 class="genre g_fantasy">Fantasy</h2>
+      <h2 class="genre g_drama">Drama</h2>
+      <h1 class="subj">The Lantern Keeper</h1>
+      <div class="author_area">
+        IWANO Miyuki
+        <button type="button" class="ico_info2 _btnAuthorInfo">author info</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail_body">
+    <p class="day_info"><span class="txt_ico_up">UP</span>EVERY MONDAY</p>
+    <p class="summary">A lamplighter walks the harbour road every night, and every night one more lamp has gone out before she reaches it.</p>
+
+    <!-- Ten of them, and a pager. Chapters() must not read this. -->
+    <ul id="_listUl" class="detail_list">
+      <li class="_episodeItem detail_list_item" id="episode_6" data-episode-no="6">
+        <a href="/en/fantasy/the-lantern-keeper/season-1-ep-6/viewer?title_no=95&amp;episode_no=6">
+          <span class="subj"><span>[Season 1] Ep. 6</span></span>
+          <span class="date">Sep 7, 2026</span>
+        </a>
+      </li>
+      <li class="_episodeItem detail_list_item" id="episode_5" data-episode-no="5">
+        <a href="/en/fantasy/the-lantern-keeper/season-1-ep-5/viewer?title_no=95&amp;episode_no=5">
+          <span class="subj"><span>[Season 1] Ep. 5</span></span>
+          <span class="date">Aug 31, 2026</span>
+        </a>
+      </li>
+    </ul>
+
+    <div class="paginate">
+      <a href="/en/fantasy/the-lantern-keeper/list?title_no=95&amp;page=1" class="on"><span>1</span></a>
+      <a href="/en/fantasy/the-lantern-keeper/list?title_no=95&amp;page=2"><span>2</span></a>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

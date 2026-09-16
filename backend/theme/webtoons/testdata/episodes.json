@@ -1,0 +1,70 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "Reproduces the chapter-list API on the mobile host, which is the only",
+    "place a series' whole episode list exists: the desktop series page",
+    "paginates ten at a time (testdata/series.html).",
+
+    "**This fixture is in descending order on purpose.** The live API answers",
+    "ascending today, which is precisely why the fixture does not: a fixture",
+    "that agreed with the server would let a theme that never sorted anything",
+    "pass a test about sorting, and 'the server sorts it for us' is a property",
+    "of someone else's software that can change without notice. PLAN §7.2's",
+    "ordering contract is ours to keep. TestChaptersAreAscending fails against",
+    "this file if SortAndMark is removed.",
+
+    "It also carries the trap that makes episodeNo rather than the title the",
+    "source of the chapter number: titles read '[Season 2] Ep. 1', where a",
+    "number-finding heuristic returns the *season*. Ordering by that would put",
+    "season 2 episode 1 before season 1 episode 3 — a volume that reads out of",
+    "order, which is the failure the contract exists to prevent. The season",
+    "becomes the volume label instead, which is what M4 wants anyway.",
+
+    "One episode carries no exposure date, which must yield the zero time",
+    "rather than an error, and one title is padded by the template.",
+
+    "Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606)."
+  ],
+  "result": {
+    "episodeList": [
+      {
+        "episodeNo": 6,
+        "episodeTitle": "[Season 2] Ep. 2",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/season-2-ep-2/viewer?title_no=95&episode_no=6",
+        "exposureDateMillis": 1757264655000
+      },
+      {
+        "episodeNo": 5,
+        "episodeTitle": "  [Season 2] Ep. 1  ",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/season-2-ep-1/viewer?title_no=95&episode_no=5",
+        "exposureDateMillis": 1756659855000
+      },
+      {
+        "episodeNo": 4,
+        "episodeTitle": "The Harbour Road",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/the-harbour-road/viewer?title_no=95&episode_no=4",
+        "exposureDateMillis": 0
+      },
+      {
+        "episodeNo": 3,
+        "episodeTitle": "[Season 1] Ep. 3",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/season-1-ep-3/viewer?title_no=95&episode_no=3",
+        "exposureDateMillis": 1755450255000
+      },
+      {
+        "episodeNo": 2,
+        "episodeTitle": "[Season 1] Ep. 2",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/season-1-ep-2/viewer?title_no=95&episode_no=2",
+        "exposureDateMillis": 1754845455000
+      },
+      {
+        "episodeNo": 1,
+        "episodeTitle": "[Season 1] Ep. 1",
+        "viewerLink": "/en/fantasy/the-lantern-keeper/season-1-ep-1/viewer?title_no=95&episode_no=1",
+        "exposureDateMillis": 1754240655000
+      }
+    ]
+  },
+  "success": true
+}

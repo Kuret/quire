@@ -1,0 +1,67 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces an episode viewer. The page images hang off a single #_imageList,
+  and **the real URL is in data-url, not in src** — src holds a transparent
+  placeholder until the reader scrolls past. A theme reading src returns a
+  chapter of blank gifs, which is why Pages() reads data-url and does not use
+  theme.ImageURL: that helper knows the lazy-load attributes WordPress plugins
+  use, and this is not one of them.
+
+  The images are strips: the height attributes here are the real shape of this
+  platform's pages, several thousand pixels tall against a narrow width. PLAN
+  §6 M4 fits one into a 3:4 page, which turns a strip into a centred sliver.
+  That is a known limitation recorded in docs/THEME-NOTES.md and deliberately
+  not addressed by this theme.
+
+  Deliberate variations exercised by the test:
+    - every URL carries a rendition parameter, which the fullQualityImages
+      override removes and which must survive untouched when it is off
+    - one <img> has no data-url at all — the platform emits a spacer — and must
+      be skipped rather than yielding an empty page
+    - the URLs are on a different registrable domain from the site, which is
+      what AllowedHosts() exists for
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>[Season 2] Ep. 2 | The Lantern Keeper | EXAMPLE</title>
+</head>
+<body>
+
+<div id="_viewerBox" class="viewer_lst">
+  <div id="_imageList" class="viewer_img _img_viewer_area">
+    <img class="_images"
+         src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+         data-url="https://pages.example.invalid/20260907_11/lantern_0006_001.jpg?type=q90"
+         width="800" height="4200" alt="image">
+    <img class="_images"
+         src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+         data-url="https://pages.example.invalid/20260907_11/lantern_0006_002.jpg?type=q90"
+         width="800" height="3980" alt="image">
+    <img class="_spacer"
+         src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+         width="800" height="1" alt="">
+    <img class="_images"
+         src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+         data-url="https://pages.example.invalid/20260907_11/lantern_0006_003.jpg?type=q90"
+         width="800" height="4510" alt="image">
+  </div>
+</div>
+
+<div class="creator_note">
+  <p class="author_text">Thanks for reading!</p>
+</div>
+
+<div class="paginate">
+  <a href="https://www.example.invalid/en/fantasy/the-lantern-keeper/season-2-ep-1/viewer?title_no=95&amp;episode_no=5" class="pg_prev">
+    <span class="subj_episode">[Season 2] Ep. 1</span>
+  </a>
+  <a href="https://www.example.invalid/en/fantasy/the-lantern-keeper/list?title_no=95" class="btn_episode_list">Episode list</a>
+</div>
+
+</body>
+</html>

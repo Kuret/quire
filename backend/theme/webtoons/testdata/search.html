@@ -1,0 +1,100 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a search results page. The platform renders one .webtoon_list per
+  tier with a "view all" tab above each, which is the trap this fixture is
+  built around: the tabs are anchors inside the same block as the results and
+  look exactly like them apart from the link shape.
+
+  Deliberate variations exercised by the test:
+    - the tier tabs link to /{lang}/search/{tier}?keyword=..., which is a
+      search page and not a series; they must not become results
+    - a promotional link to a series *viewer* rather than its listing is also
+      present and must be dropped: a search result that opens onto a single
+      episode is not a series
+    - the same series appears twice, once per tier block, and must be returned
+      once
+    - one card's title is padded with newlines by the template
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search results for lantern — EXAMPLE</title>
+</head>
+<body>
+
+<div class="search_area">
+  <ul class="snb_list">
+    <li><a href="/en/search/originals?keyword=lantern" class="snb_tab">ORIGINALS</a></li>
+    <li><a href="/en/search/canvas?keyword=lantern" class="snb_tab">CANVAS</a></li>
+  </ul>
+</div>
+
+<div class="webtoon_list_wrap">
+  <div class="section_header">
+    <h2 class="section_title">ORIGINALS</h2>
+    <a href="/en/search/originals?keyword=lantern" class="button_view_all">View all</a>
+  </div>
+  <ul class="webtoon_list type_small">
+    <li>
+      <a href="https://www.example.invalid/en/fantasy/the-lantern-keeper/list?title_no=95" class="link _card_item" data-title-no="95" data-webtoon-type="WEBTOON">
+        <div class="image_wrap">
+          <img src="https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90" width="192" height="192" alt="">
+          <div class="badge_area"></div>
+        </div>
+        <div class="info_text">
+          <strong class="title">
+            The Lantern Keeper
+          </strong>
+          <div class="author">I. Miyuki</div>
+          <div class="view_count">1.2M Views</div>
+        </div>
+      </a>
+    </li>
+    <li>
+      <a href="/en/fantasy/the-lantern-keeper/season-1-ep-1/viewer?title_no=95&amp;episode_no=2" class="link _promo_item">
+        <div class="info_text">
+          <strong class="title">The Lantern Keeper — new episode</strong>
+        </div>
+      </a>
+    </li>
+  </ul>
+</div>
+
+<div class="webtoon_list_wrap">
+  <div class="section_header">
+    <h2 class="section_title">CANVAS</h2>
+    <a href="/en/search/canvas?keyword=lantern" class="button_view_all">View all</a>
+  </div>
+  <ul class="webtoon_list type_small">
+    <li>
+      <a href="https://www.example.invalid/en/canvas/the-lantern-theater/list?title_no=1022970" class="link _card_item" data-title-no="1022970" data-webtoon-type="CHALLENGE">
+        <div class="image_wrap" data-title-unsuitable-for-children="true">
+          <img src="https://pages.example.invalid/20240103_3/theater_thumb.jpg?type=q90" width="192" height="192" alt="">
+          <div class="badge_area"></div>
+        </div>
+        <div class="info_text">
+          <strong class="title">The Lantern Theater</strong>
+          <div class="author">The Lantern Theater</div>
+          <div class="view_count">106 Views</div>
+        </div>
+      </a>
+    </li>
+    <li>
+      <a href="https://www.example.invalid/en/fantasy/the-lantern-keeper/list?title_no=95" class="link _card_item" data-title-no="95" data-webtoon-type="WEBTOON">
+        <div class="image_wrap">
+          <img src="https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90" width="192" height="192" alt="">
+        </div>
+        <div class="info_text">
+          <strong class="title">The Lantern Keeper</strong>
+        </div>
+      </a>
+    </li>
+  </ul>
+</div>
+
+</body>
+</html>
