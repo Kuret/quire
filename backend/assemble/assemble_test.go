@@ -456,3 +456,42 @@ func TestAssembleHelper(t *testing.T) {
 		t.Fatalf("helper assemble: %v", err)
 	}
 }
+
+// PLAN §6 M4's reversal, consequence 2: with one PDF per chapter the
+// chapter→(PDF, page offset) map becomes trivial — offset 0 — and a trivial
+// case is exactly the kind that gets quietly dropped. M6's "Read" reads this
+// map, so an empty Chapters list here means a document that opens at page one
+// by luck rather than by design, and a PageFor that answers false means no
+// answer at all.
+func TestASingleChapterVolumeStillCarriesItsOffset(t *testing.T) {
+	dir := t.TempDir()
+	vol := buildVolume(t, dir, 1, 4)
+	out := filepath.Join(dir, "out")
+
+	m, err := assemble.Assemble(t.Context(), out, vol, assemble.DefaultOptions())
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if len(m.Chapters) != 1 {
+		t.Fatalf("manifest holds %d chapters, want 1; the map must exist even when it is trivial", len(m.Chapters))
+	}
+	if m.Chapters[0].PageOffset != 0 {
+		t.Errorf("offset = %d, want 0", m.Chapters[0].PageOffset)
+	}
+	if m.Chapters[0].PageCount != 4 {
+		t.Errorf("pageCount = %d, want 4", m.Chapters[0].PageCount)
+	}
+	off, ok := m.PageFor("ch-1")
+	if !ok {
+		t.Fatal(`PageFor("ch-1") says it does not know; "Read" has nothing to open with`)
+	}
+	if off != 0 {
+		t.Errorf(`PageFor("ch-1") = %d, want 0`, off)
+	}
+	// A chapter that is genuinely not in this document still answers no. The
+	// trivial case must not become "every chapter is page 0".
+	if _, ok := m.PageFor("ch-2"); ok {
+		t.Error(`PageFor("ch-2") claims a chapter this document does not hold`)
+	}
+}

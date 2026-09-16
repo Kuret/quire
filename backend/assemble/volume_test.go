@@ -2,6 +2,7 @@ package assemble_test
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -153,5 +154,71 @@ func TestVolumePageCount(t *testing.T) {
 	}}
 	if got := v.PageCount(); got != 8 {
 		t.Errorf("PageCount = %d, want 8", got)
+	}
+}
+
+// GroupIntoRuns is the "count" grouping mode. It ignores volume labels on
+// purpose: a reader asking for runs of N has looked at the source's own
+// volumes and decided against them.
+func TestGroupIntoRunsIgnoresLabels(t *testing.T) {
+	chs := chapters(7, func(i int) string { return "1" })
+	vols := assemble.GroupIntoRuns("Series", chs, 3)
+	if len(vols) != 3 {
+		t.Fatalf("%d runs, want 3 (3+3+1)", len(vols))
+	}
+	for i, want := range []int{3, 3, 1} {
+		if len(vols[i].Chapters) != want {
+			t.Errorf("run %d holds %d chapters, want %d", i+1, len(vols[i].Chapters), want)
+		}
+		if vols[i].Label != strconv.Itoa(i+1) {
+			t.Errorf("run %d is labelled %q", i+1, vols[i].Label)
+		}
+	}
+}
+
+func TestGroupIntoRunsDefaultsToTen(t *testing.T) {
+	vols := assemble.GroupIntoRuns("Series", chapters(12, nil), 0)
+	if len(vols) != 2 {
+		t.Fatalf("%d runs, want 2", len(vols))
+	}
+	if len(vols[0].Chapters) != assemble.DefaultChaptersPerVolume {
+		t.Errorf("first run holds %d chapters", len(vols[0].Chapters))
+	}
+}
+
+// Naming, PLAN §6 M5's flat Comics folder: one PDF per chapter puts ten times
+// as many documents in one folder sorted by name, and chapter numbers are not
+// always integers.
+func TestChapterDocumentLabelSortsAndKeepsFractions(t *testing.T) {
+	cases := []struct{ number, title, want string }{
+		{"1", "Chapter 1", "Ch 0001"},
+		{"10", "Chapter 10", "Ch 0010"},
+		{"12.5", "Chapter 12.5", "Ch 0012.5"},
+		{"100", "Chapter 100", "Ch 0100"},
+		{"1100", "Chapter 1100", "Ch 1100"},
+		{"", "Extra", "Extra"},
+	}
+	var labels []string
+	for _, c := range cases {
+		got := assemble.ChapterDocumentLabel(assemble.Chapter{
+			ID: "id", Number: c.number, Title: c.title,
+		})
+		if got != c.want {
+			t.Errorf("ChapterDocumentLabel(%q) = %q, want %q", c.number, got, c.want)
+		}
+		if c.number != "" {
+			labels = append(labels, got)
+		}
+	}
+	if !sort.StringsAreSorted(labels) {
+		t.Errorf("padded labels do not sort in reading order: %q", labels)
+	}
+}
+
+// Nothing to name is not a crash: the chapter ID is the last resort, because
+// the label ends up in a filename and an empty one is not a filename.
+func TestChapterDocumentLabelFallsBackToTheID(t *testing.T) {
+	if got := assemble.ChapterDocumentLabel(assemble.Chapter{ID: "abc"}); got != "abc" {
+		t.Errorf("label %q, want the chapter ID", got)
 	}
 }
