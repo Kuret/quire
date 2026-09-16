@@ -34,6 +34,7 @@ Item {
     onTotalPagesChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
 
     signal addRequested()
+    signal watchingRequested()
     signal openRequested(string sourceId, string name)
     signal toggleRequested(string sourceId, bool enabled)
     signal removeRequested(string sourceId)
@@ -384,27 +385,58 @@ Item {
             color: Style.rule
         }
 
-        Rectangle {
-            objectName: "addSourceButton"
+        // Two buttons, side by side. "Watching" lives here rather than in the
+        // header because the header's one slot is Settings on every screen, and
+        // because the first screen is where a list of things that may have
+        // gained a chapter belongs (PLAN §12.2).
+        Row {
             anchors.centerIn: parent
-            width: Math.min(parent.width - Style.margin * 2, 460)
-            height: Style.buttonHeight
-            color: addArea.pressed ? Style.pressed : Style.paper
-            border.width: 2
-            border.color: Style.ink
-            radius: 6
+            spacing: Style.gap
 
-            Text {
-                anchors.centerIn: parent
-                text: "Add a source"
-                font.pointSize: Style.bodySize
-                color: Style.ink
+            Rectangle {
+                objectName: "watchingButton"
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap) / 2, 300)
+                height: Style.buttonHeight
+                color: watchingArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Watching"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: watchingArea
+                    anchors.fill: parent
+                    onClicked: screen.watchingRequested()
+                }
             }
 
-            MouseArea {
-                id: addArea
-                anchors.fill: parent
-                onClicked: screen.addRequested()
+            Rectangle {
+                objectName: "addSourceButton"
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap) / 2, 300)
+                height: Style.buttonHeight
+                color: addArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Add a source"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: addArea
+                    anchors.fill: parent
+                    onClicked: screen.addRequested()
+                }
             }
         }
     }
