@@ -1114,7 +1114,7 @@ qualifier.
 
 ---
 
-## The `Referer` wall — decided, implemented, and one thing still open
+## The `Referer` wall — decided, implemented, wired
 
 Recorded 2026-09-16. Three otherwise-clean candidates were taken end to end —
 search → series → chapters → page URLs → fetch one image — and all three passed
@@ -1171,20 +1171,23 @@ to a later request on the same client (`backend/fetch/referrer_test.go`). Each
 theme asserts that its `PageReferer` equals the URL its `Pages()` actually
 fetched.
 
-### Still open: the two call sites
+### Wired at both call sites (2026-09-16)
 
-**The themes name the page; nothing yet passes the name to the fetch.** Page
-images are not fetched by themes. They are fetched in two places, both outside
-the scope this work was given:
+Page images are not fetched by themes; they are fetched in two places, and both
+now pass a truthful referrer:
 
-- `backend/service/download.go` — `sourceFetcher.Get`, the download queue
-- `backend/probe/prober/capability.go` — `fetchOnePageImage`, §7.5 stage 5
+- `backend/service/download.go` — the download queue, via `GetRetrievalFrom`
+- `backend/probe/prober/capability.go` — §7.5 stage 5, via `GetFrom`
 
-Each needs to ask the theme for `PageReferer` and call `GetRetrievalFrom` /
-`GetFrom` instead of the plain form. Until that lands, these three themes
-extract page URLs correctly and their stage-5 image fetch still returns
-`partial`. Everything they need is in place; what is missing is the two lines
-that connect it.
+The value **travels with the page** rather than being derived at fetch time:
+`PageReferer` is resolved **once per chapter at enqueue time**, where the
+chapter is known, and copied onto every job of that chapter. Recovering it later
+from an image URL would mean guessing which chapter it came from — the exact lie
+§7.6 forbids, and the failure would be silent, every page carrying the first
+chapter's referrer. A test pins that each page carries **its own** chapter's.
+
+A theme that does not implement `PageReferrer` yields the zero value and
+therefore **no header**, asserted by absence rather than by empty string.
 
 ### The strip problem, which is separate and not solved
 

@@ -1395,6 +1395,17 @@ endpoint (`backend/library`), for the same reason.
   rest. If a theme does not know the referring page, it sends **no** header.
 - It changes nothing else. A challenge is still `blocked_challenge` and still
   terminal, and the list below is unchanged.
+- **An *unusable* referrer (relative, non-http, no host) is handled differently
+  in the probe and in the download path, on purpose.** §7.6 covers `""`; this is
+  the case where a theme names something it cannot have fetched.
+  - **Probe: fail stage 5**, naming it as the failing step. The probe exists to
+    report theme breakage honestly, and proceeding quietly would manufacture the
+    `ok`-that-hides-a-bug this milestone spent real effort eliminating.
+  - **Download: log a warning and send no header.** The job here is to get the
+    user their comic; aborting a 200-page download over a header would be
+    disproportionate, and most hosts do not require one anyway.
+  Different jobs, different right answers — and **neither invents a value**,
+  which is the part §7.6 actually governs.
 
 Concretely, **do not**: rotate or spoof `User-Agent` strings, impersonate
 browser TLS fingerprints, integrate a CAPTCHA-solving service, proxy through a
