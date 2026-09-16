@@ -173,6 +173,33 @@ extraction fails immediately and offline. Every test in `backend/theme/...`
 runs with DNS disabled (`backend/internal/nonet`), so a future "just point it
 at a real site to check" is a red test rather than a quiet network call.
 
+**AND A COROLLARY NOBODY HAD DRAWN, added 2026-09-16 after it cost a user the
+largest family we support:** a fixture whose *score* does not resemble a real
+page's is worse than no fixture. It is evidence that is not evidence.
+
+The madara fingerprint scored **88 on our fixtures and 43 on a real page**,
+against a threshold of 60, because 40 of those points came from an asset path
+our own fixtures had invented and no live install serves. The fingerprint was
+then tuned against the fixtures and reviewed against the fixtures. Everything
+was green the whole time.
+
+So, when writing or changing a fingerprint:
+
+- **Fetch one or two real pages** of the family (honest UA, sparingly, nothing
+  committed — PLAN §1.3) and score them. Record the numbers in this file.
+- **A fixture may score lower than reality; it must not score higher.** Lower
+  means our signals are conservative. Higher means we are testing our own
+  invention, which is the failure above.
+- **Score the home page separately.** It is what the user pastes and what stage
+  4 usually judges, and it carries none of the series, reader or search markup
+  the other fixtures do. A theme that only clears the threshold on a series page
+  is a theme nobody can add.
+- `backend/theme/fidelity_test.go` now asserts the margin — measured at ten
+  points, because the weakest real landing page of any family we ship scores 70.
+
+Live landing-page scores measured 2026-09-16, for calibration: madara 111,
+weebcentral 95, webtoons 90, mangathemesia 85, mangakakalot 70, fanfox 70.
+
 **What that does not buy us:** the fixtures prove nothing about whether any
 live site is parsed correctly. They cannot. A site could change its markup
 tomorrow, or could have shipped a skin we never anticipated, and every test
@@ -372,22 +399,68 @@ UI.
 Implemented in `backend/theme/madara/`. PLAN §7.3 tier 1, and the largest
 family by a wide margin.
 
-**Fingerprint signals**, in descending weight. Scores are summed and clamped to
+**FINGERPRINT REBUILT 2026-09-16, from live markup, after it scored 43 on a
+real site of its own family.** The threshold is 60, so stage 4 returned
+`unrecognised` for the largest family we support, and the user could not add it.
+What follows is the measurement, because the gap between what we invented and
+what sites actually serve is the most useful thing to come out of the incident.
+
+**The gap, signal by signal.** Scored against three live pages of one install
+(home 320 KB, series 381 KB, search 282 KB) and against our own fixtures:
+
+| Signal | Old wt | Real home | Real series | Real search | Our fixtures | Verdict |
+|---|---|---|---|---|---|---|
+| `/wp-content/plugins/madara/` | **40** | ✗ | ✗ | ✗ | **✓** | **Invented.** No live install serves this path — see below |
+| `wp-manga` | 25 | ✓ | ✓ | ✓ | ✓ | Sound |
+| `manga_get_chapters` | 20 | ✗ | ✗ | ✗ | only in the AJAX fixtures | Not on any *page*; it is in the AJAX response |
+| `#manga-chapters-holder` | 15 | ✗ | ✗ | ✗ | ✓ | Legacy. Current installs use `.listing-chapters_wrap ul.main.version-chap` |
+| `li.wp-manga-chapter` | 15 | ✗ | ✓ | ✗ | ✓ | Sound, series pages only |
+| `.c-tabs-item__content` | 10 | ✗ | ✗ | ✓ | ✓ **on our home fixture** | **Wrong page.** This is the *search results* rendering; our home fixture used it |
+| `.c-blog__heading` | 8 | ✓ | ✓ | ✓ | ✓ | Sound |
+| `input.rating-post-id` | 8 | ✗ | ✓ | ✗ | ✓ | Sound, series pages only |
+| `.post-title h1/h3/h4` | 5 | ✓ | ✓ | ✓ | ✓ | Sound |
+| `.manga-title-badges, .summary_image` | 5 | ✓ | ✓ | ✗ | partly | Sound |
+| **Totals** | | **43** | **66** | **48** | **88** | Threshold is 60 |
+
+**The one that did the damage.** Madara is distributed as a WordPress **theme**,
+so its assets are served from **`/wp-content/themes/madara/`**, and its
+companion plugin registers as **`madara-core`** —
+`/wp-content/plugins/madara-core/`. The string we checked,
+`/wp-content/plugins/madara/`, exists nowhere. It was invented in our own
+fixtures and then confirmed against those same fixtures, which is precisely the
+loop "What the fixtures do and do not prove" warns about, closed on itself.
+
+**Signals that were missing entirely**, and are present on every live page: the
+home page's `.page-listing-item` → `.page-item-detail.manga` → `.item-thumb`
+chain, its `.list-chapter .chapter-item` rows, and the current chapter wrapper
+`.listing-chapters_wrap ul.main.version-chap`. The home page carries *none* of
+the series, reader or search markup — and the home page is what the probe
+fingerprints.
+
+**Fingerprint signals**, as they now stand. Scores are summed and clamped to
 0..100; the probe treats 60 as the confidence threshold.
 
 | Signal | Weight | Why it is worth that much |
 |---|---|---|
-| `/wp-content/plugins/madara/` in the body | 40 | The plugin's own asset path. Nothing else emits it. Near-conclusive on its own. |
-| `wp-manga` anywhere in the body | 25 | The custom post type, which leaks into body classes, search forms and REST links. |
-| `manga_get_chapters` | 20 | The AJAX action name, present in inline script on series pages of both shapes. |
-| `#manga-chapters-holder` | 15 | The chapter container, present whether or not the list has loaded. |
-| `li.wp-manga-chapter` | 15 | One chapter row. |
-| `.c-tabs-item__content` | 10 | Listing/search card. |
-| `.reading-content .page-break` | 10 | Reader page wrapper. |
-| `.c-blog__heading` | 8 | Section heading. |
-| `input.rating-post-id` | 8 | Carries the WordPress post ID. |
-| `.post-title h1/h3/h4` | 5 | Weak on its own; useful as a tie-breaker. |
-| `.manga-title-badges, .summary_image` | 5 | Ditto. |
+| `/wp-content/themes/madara/`, `/wp-content/plugins/madara-core/`, or `/wp-content/plugins/madara/` | 35 | The family's asset paths. The first two are measured on live installs; the third is kept because allowing a renamed directory costs nothing |
+| `wp-manga` anywhere in the body | 25 | The custom post type, which leaks into body classes, menu item classes, search forms and REST links |
+| `.page-listing-item .page-item-detail`, `.page-item-detail.manga` | 15 | The home page's listing card. Measured on every live listing |
+| `.listing-chapters_wrap ul.main`, `.listing-chapters_wrap` | 12 | The current chapter wrapper |
+| `#manga-chapters-holder` | 12 | The older chapter holder, still in the wild |
+| `manga_get_chapters` | 12 | The AJAX action name, in inline script on some installs |
+| `li.wp-manga-chapter` | 12 | One chapter row |
+| `.list-chapter .chapter-item` | 10 | The "latest chapter" rows on a listing card |
+| `.reading-content .page-break` | 10 | Reader page wrapper |
+| `.c-tabs-item__content` | 10 | Search results card — **search only**, not the home page |
+| `.item-thumb.c-image-hover`, `.tab-thumb.c-image-hover` | 8 | Card thumbnails, in both renderings |
+| `.c-blog__heading` | 8 | Section heading |
+| `input.rating-post-id` | 8 | Carries the WordPress post ID |
+| `.post-title h1/h3/h4` | 5 | Weak on its own; useful as a tie-breaker |
+| `.manga-title-badges, .summary_image` | 5 | Ditto |
+
+Live scores after the rebuild: **home 111, series 120, search 91** (clamped to
+100), against 43/66/48 before. Every other theme still scores **0** on all
+three.
 
 Comments are stripped from the body before any substring signal is tested
 (`probe.Page.Contains`). A signal found in a comment is not evidence: sites
@@ -1693,6 +1766,17 @@ Edge headers used as the second half of a combined signal, never alone:
 `cf-ray`, `cf-mitigated`, `server: cloudflare`, `server: ddos-guard`,
 `server: sucuri/cloudproxy`, `x-sucuri-id`, `x-iinfo`, `x-datadome`,
 `x-datadome-cid`.
+
+**Warnings are suppressed when nothing matched (2026-09-16).** If stage 4
+recognised no theme, the `unrecognised` verdict naming what was tried is the
+whole story, and a login-wall note beside it points the user at the wrong
+question. This came from a real complaint: "the first thing this site shows is a
+sign-in form", said about a page that had just served 158 series links, from two
+password inputs in a WordPress nav. The warning's own condition was not wrong —
+it fires when no theme matched, which was true, because the fingerprint was
+broken — but a warning describes what a *working* source will be like, and when
+there is no source there is nothing to describe. Detection is unchanged: a
+challenge is still terminal whatever stage 4 would have said.
 
 **Warnings, not blocks.** A login wall (a password input on a page we cannot
 otherwise read), a paywall ("subscribers only", "members only", "subscribe to
