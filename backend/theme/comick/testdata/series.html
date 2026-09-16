@@ -1,0 +1,72 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a series page, whose useful content is **not its markup**: the
+  data the frontend builds the page from is served alongside it as JSON in a
+  script element of declared type. Series() reads that and ignores everything
+  else, which is both more complete than the rendered page — that truncates the
+  description and hides the alternate titles behind a control — and more stable
+  than any selector over utility classes.
+
+  Deliberate variations exercised by the test:
+    - the page carries a second, third-party script element as well, so
+      matching on the identifier without requiring the JSON type would
+      eventually hand someone else's payload to a JSON parser
+    - the rendered description below is truncated and the payload's is not; the
+      payload must win
+    - authors and artists are separate lists and one is empty
+    - the status is an integer code, not a word, and must be normalised rather
+      than passed through
+
+  Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper - Read Free on Example</title>
+</head>
+<body>
+
+<script async data-cfasync="false" data-size="728x90" data-id="dl-banner-728x90" src="https://ads.example.invalid/b.js"></script>
+
+<main>
+  <h1>The Lantern Keeper</h1>
+  <p class="truncated">A lamplighter walks the harbour road every night, and every night one more...</p>
+  <a href="/comic/the-lantern-keeper/RH6nHLl-chapter-7-en">Chapter 7</a>
+</main>
+
+<script type="application/json" id="comic-data">
+{
+  "id": 107947,
+  "hid": "I1ImYpV",
+  "title": "The Lantern Keeper",
+  "slug": "the-lantern-keeper",
+  "status": 2,
+  "last_chapter": 7,
+  "chapter_count": 7,
+  "desc": "A lamplighter walks the harbour road every night, and every night one more lamp has gone out before she reaches it.",
+  "content_rating": "safe",
+  "default_thumbnail": "https://pages.example.invalid/the-lantern-keeper/covers/8edfff1d.jpg",
+  "md_titles": [
+    { "id": 266160, "comic_id": 107947, "title": "Kanteru no Banjin", "lang": null },
+    { "id": 266161, "comic_id": 107947, "title": "The Keeper of Lanterns", "lang": "en" }
+  ],
+  "md_comic_md_genres": [
+    { "md_genres": { "name": "Drama", "slug": "drama", "group": "Genre" } },
+    { "md_genres": { "name": "Fantasy", "slug": "fantasy", "group": "Genre" } },
+    { "md_genres": { "name": "Historical", "slug": "historical", "group": "Genre" } }
+  ],
+  "authors": [
+    { "name": "IWANO Miyuki", "slug": "iwano-miyuki" },
+    { "name": "SADA Keiko", "slug": "sada-keiko" }
+  ],
+  "artists": [],
+  "cdn_id": 1
+}
+</script>
+
+<script type="application/json" id="not-the-one">{"noise": true}</script>
+
+</body>
+</html>

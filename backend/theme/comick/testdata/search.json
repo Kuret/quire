@@ -1,0 +1,86 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "Reproduces the search API's envelope. The real payload carries some fifty",
+    "fields per entry; the four this theme reads are here, plus the cursor keys",
+    "the envelope always has, because the fingerprint keys on them.",
+
+    "Deliberate variations exercised by the test:",
+    "  - the entries span three content ratings, so the maxContentRating filter",
+    "    has something to do. It is applied to the *response* rather than sent",
+    "    as a query parameter: the endpoint accepts a parameter of that name but",
+    "    its semantics are undocumented, and guessing wrong would drop results",
+    "    silently. Filtering what came back cannot.",
+    "  - one entry carries no rating at all, and must be kept: refusing to show",
+    "    something because the site forgot to classify it is the wrong way round",
+    "  - one entry has no slug and must be skipped rather than yielding an ID",
+    "    that resolves to the listing root",
+    "  - one title is padded by the serialiser",
+
+    "Why synthetic: PLAN §1.3 forbids this repository from containing a real",
+    "aggregator's domain or content, and §1.4 forbids copying anyone's",
+    "expression. The response *shape* is an observable fact; the words, the",
+    "identifiers and the host are ours. Host is example.invalid (RFC 2606)."
+  ],
+  "data": [
+    {
+      "id": 107947,
+      "cdn_id": 1,
+      "title": "  The Lantern Keeper  ",
+      "slug": "the-lantern-keeper",
+      "hid": "I1ImYpV",
+      "content_rating": "safe",
+      "default_thumbnail": "https://pages.example.invalid/the-lantern-keeper/covers/8edfff1d.jpg",
+      "last_chapter": 7,
+      "chapter_count": 7
+    },
+    {
+      "id": 107948,
+      "cdn_id": 1,
+      "title": "Salt and Cinder",
+      "slug": "salt-and-cinder",
+      "hid": "J2JnZqW",
+      "content_rating": "suggestive",
+      "default_thumbnail": "https://pages.example.invalid/salt-and-cinder/covers/1a2b3c4d.jpg",
+      "last_chapter": 12,
+      "chapter_count": 12
+    },
+    {
+      "id": 107949,
+      "cdn_id": 2,
+      "title": "Paper Boats",
+      "slug": "paper-boats",
+      "hid": "K3KoArX",
+      "content_rating": "erotica",
+      "default_thumbnail": "https://pages.example.invalid/paper-boats/covers/5e6f7a8b.jpg",
+      "last_chapter": 3,
+      "chapter_count": 3
+    },
+    {
+      "id": 107950,
+      "cdn_id": 1,
+      "title": "The Harbour Road",
+      "slug": "the-harbour-road",
+      "hid": "L4LpBsY",
+      "content_rating": "",
+      "default_thumbnail": "https://pages.example.invalid/the-harbour-road/covers/9c0d1e2f.jpg",
+      "last_chapter": 1,
+      "chapter_count": 1
+    },
+    {
+      "id": 107951,
+      "cdn_id": 1,
+      "title": "A Record With No Slug",
+      "slug": "",
+      "hid": "M5MqCtZ",
+      "content_rating": "safe",
+      "default_thumbnail": ""
+    }
+  ],
+  "path": "https://example.invalid/api/search",
+  "per_page": 25,
+  "next_cursor": 25,
+  "next_page_url": "https://example.invalid/api/search?q=lantern&type=comic&page=2",
+  "prev_cursor": null
+}

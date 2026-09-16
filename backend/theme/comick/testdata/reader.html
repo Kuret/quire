@@ -1,0 +1,58 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces a chapter page. As with the series page, the data is served as
+  JSON in a script element and the markup is what the frontend does with it —
+  so Pages() reads the payload and never the <img> tags, which on a real page
+  are rendered client-side and are not in this document at all.
+
+  Deliberate variations exercised by the test:
+    - the document carries the *third-party* script element too, and a
+      like-named element that is not JSON, so requiring the declared type is
+      load-bearing rather than defensive
+    - the image URLs are on a different registrable domain from the site, which
+      is what AllowedHosts() exists for, and that host answers 403 to a request
+      that does not name the page they came from — see PageReferer and PLAN
+      §7.6
+    - one entry in the payload has an empty URL and must be skipped
+
+  Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper Chapter 7 - Example</title>
+</head>
+<body>
+
+<script async data-cfasync="false" data-id="dl-banner-728x90" src="https://ads.example.invalid/b.js"></script>
+
+<div id="reader-root"></div>
+
+<script id="sv-data" type="application/json">
+{
+  "chapter": {
+    "id": 10663187,
+    "chap": "7",
+    "vol": "2",
+    "title": "The Last Lamp",
+    "hid": "RH6nHLl",
+    "group_name": "Harbour Road Scans",
+    "lang": "en",
+    "langName": "English",
+    "created_at": "2026-09-07T17:04:15.717343Z",
+    "images": [
+      { "h": 1500, "w": 800, "name": "image 0", "url": "https://pages.example.invalid/the-lantern-keeper/0_7/en/64be7829/0.webp" },
+      { "h": 1500, "w": 800, "name": "image 1", "url": "https://pages.example.invalid/the-lantern-keeper/0_7/en/64be7829/1.webp" },
+      { "h": 1500, "w": 800, "name": "image 2", "url": "" },
+      { "h": 1500, "w": 800, "name": "image 3", "url": "https://pages.example.invalid/the-lantern-keeper/0_7/en/64be7829/2.webp" }
+    ]
+  }
+}
+</script>
+
+<script id="sv-data-init">/* not JSON, and deliberately named to look like it */</script>
+
+</body>
+</html>

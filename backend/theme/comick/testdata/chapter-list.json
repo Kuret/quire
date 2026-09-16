@@ -1,0 +1,102 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "Reproduces the chapter-list API. The whole list comes back in one response",
+    "— there is no cursor to walk here, unlike the search endpoint.",
+
+    "**This fixture is deliberately descending**, because that is the order the",
+    "real API answers in and because a fixture that were ascending would let a",
+    "theme that never sorted anything pass a test about sorting.",
+    "TestChaptersAreAscending fails against this file if SortAndMark is removed.",
+
+    "It also carries the case a plain sort-by-number gets wrong: the one-shot",
+    "has no chapter number at all and sits between 5 and 4 in the site's order.",
+    "Sorting by number would fling it to one end of the list; order.go's rule —",
+    "the numbered chapters descend, so reverse the whole list — keeps it where",
+    "the site put it, between 4 and 5 ascending.",
+
+    "Deliberate variations exercised by the test:",
+    "  - volumes are present on some chapters and null on others, which is what",
+    "    PLAN §6 M4 needs in order to decide whether it has volume structure",
+    "  - one chapter has a decimal number and a name; one has a number and no",
+    "    name; one has a name and no number",
+    "  - one chapter is credited to two groups",
+    "  - one has an unparseable created_at, which must yield the zero time",
+    "    rather than an error",
+
+    "Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606)."
+  ],
+  "data": [
+    {
+      "id": 10663187,
+      "hid": "RH6nHLl",
+      "chap": "7",
+      "title": "The Last Lamp",
+      "vol": "2",
+      "lang": "en",
+      "group_name": ["Harbour Road Scans", "Lamplight"],
+      "created_at": "2026-09-07T17:04:15.717343Z"
+    },
+    {
+      "id": 10663186,
+      "hid": "QG5mGKk",
+      "chap": "6.5",
+      "title": "Omake",
+      "vol": "1",
+      "lang": "en",
+      "group_name": ["Harbour Road Scans"],
+      "created_at": "2026-09-04T09:12:00.000000Z"
+    },
+    {
+      "id": 10663185,
+      "hid": "PF4lFJj",
+      "chap": "6",
+      "title": "",
+      "vol": "1",
+      "lang": "en",
+      "group_name": ["Harbour Road Scans"],
+      "created_at": "2026-09-01T09:12:00.000000Z"
+    },
+    {
+      "id": 10663184,
+      "hid": "OE3kEIi",
+      "chap": "5",
+      "title": "",
+      "vol": "1",
+      "lang": "en",
+      "group_name": ["Harbour Road Scans"],
+      "created_at": "2026-08-24T09:12:00.000000Z"
+    },
+    {
+      "id": 10663183,
+      "hid": "ND2jDHh",
+      "chap": "",
+      "title": "Side Story: The Harbour Road",
+      "vol": null,
+      "lang": "en",
+      "group_name": ["Lamplight"],
+      "created_at": "not a date"
+    },
+    {
+      "id": 10663182,
+      "hid": "MC1iCGg",
+      "chap": "4",
+      "title": "",
+      "vol": "1",
+      "lang": "en",
+      "group_name": ["Harbour Road Scans"],
+      "created_at": "2026-08-17T09:12:00.000000Z"
+    },
+    {
+      "id": 10663181,
+      "hid": "LB0hBFf",
+      "chap": "3",
+      "title": "",
+      "vol": null,
+      "lang": "en",
+      "group_name": ["Harbour Road Scans"],
+      "created_at": "2026-08-10T09:12:00.000000Z"
+    }
+  ]
+}
