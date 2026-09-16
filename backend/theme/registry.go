@@ -186,6 +186,15 @@ func (r *Registry) Validate(s *Source) error {
 			s.ID, strings.Join(SplitStripsValues, ", "), s.SplitStrips)
 	}
 
+	if !validGrouping(s.Grouping) {
+		return fmt.Errorf("theme: source %q: grouping must be one of %s, got %q",
+			s.ID, strings.Join(GroupingValues, ", "), s.Grouping)
+	}
+	if s.GroupSize != 0 && (s.GroupSize < GroupSizeMin || s.GroupSize > GroupSizeMax) {
+		return fmt.Errorf("theme: source %q: groupSize must be between %d and %d, got %d",
+			s.ID, GroupSizeMin, GroupSizeMax, s.GroupSize)
+	}
+
 	if v, ok := t.(OverrideValidator); ok {
 		if err := v.ValidateOverrides(s.Overrides); err != nil {
 			return fmt.Errorf("theme: source %q: %w", s.ID, err)

@@ -359,3 +359,95 @@ func schemaEnum(t *testing.T, property string) []string {
 	}
 	return doc.Properties[property].Enum
 }
+
+// TestGroupingEnumAgreesEverywhere is TestSplitStripsEnumAgreesEverywhere for
+// PLAN §6 M4's grouping control, and exists for the same reason: the schema is
+// the document a user hand-edits and an import is validated against, so a
+// spelling it offers that the Go side quietly refuses — or worse, silently
+// ignores — is a setting that does not work and says nothing about it.
+//
+// The enum is read out of the committed schema as data. Nothing here is a
+// hand-copied list.
+func TestGroupingEnumAgreesEverywhere(t *testing.T) {
+	values := schemaEnum(t, "grouping")
+	if len(values) == 0 {
+		t.Fatal("the schema declares no grouping enum; this test is checking nothing")
+	}
+
+	s := loadSchema(t)
+	reg := theme.NewRegistry()
+	reg.MustRegister(&fake{id: "madara"})
+	at := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+
+	for _, v := range values {
+		t.Run(v, func(t *testing.T) {
+			src := theme.Source{
+				ID: "a", Name: "A", Lang: "en", Theme: "madara",
+				BaseURL:  "https://example.invalid",
+				AddedAt:  at,
+				Grouping: v,
+			}
+			if err := validate(t, s, src); err != nil {
+				t.Errorf("the schema rejects its own enum value %q: %v", v, err)
+			}
+			if err := reg.Validate(&src); err != nil {
+				t.Errorf("Registry.Validate rejects the schema's enum value %q: %v", v, err)
+			}
+		})
+	}
+
+	// Go's list and the schema's must be the same list, in the same order:
+	// the UI shows them in that order and the backend answers with them.
+	if len(theme.GroupingValues) != len(values) {
+		t.Fatalf("theme.GroupingValues = %v, schema = %v", theme.GroupingValues, values)
+	}
+	for i, v := range values {
+		if theme.GroupingValues[i] != v {
+			t.Errorf("theme.GroupingValues[%d] = %q, schema says %q", i, theme.GroupingValues[i], v)
+		}
+	}
+
+	// The first value is the default, and the default is what an untouched
+	// source gets. PLAN §6 M4 reversed this on 2026-09-16 and the reason is
+	// sampling: a volume is 7–10 minutes before anything is readable.
+	if values[0] != theme.GroupingChapter {
+		t.Errorf("the schema's first grouping value is %q; per chapter is the default", values[0])
+	}
+	var unset theme.Source
+	if got := unset.Group(); got != theme.GroupingChapter {
+		t.Errorf("an unset source groups by %q, want %q", got, theme.GroupingChapter)
+	}
+	if got := unset.Size(); got != theme.DefaultGroupSize {
+		t.Errorf("an unset source's run length is %d, want %d", got, theme.DefaultGroupSize)
+	}
+
+	// And a value none of them offers is refused by both, so a hand-edited
+	// source cannot smuggle one past the Go side.
+	bad := theme.Source{
+		ID: "a", Name: "A", Lang: "en", Theme: "madara",
+		BaseURL:  "https://example.invalid",
+		AddedAt:  at,
+		Grouping: "sometimes",
+	}
+	if err := reg.Validate(&bad); err == nil {
+		t.Error("Registry.Validate accepted grouping=sometimes")
+	}
+	if err := validate(t, s, bad); err == nil {
+		t.Error("the schema accepted grouping=sometimes")
+	}
+
+	// groupSize's bounds are in the schema too, and both sides enforce them.
+	over := theme.Source{
+		ID: "a", Name: "A", Lang: "en", Theme: "madara",
+		BaseURL:   "https://example.invalid",
+		AddedAt:   at,
+		Grouping:  theme.GroupingCount,
+		GroupSize: theme.GroupSizeMax + 1,
+	}
+	if err := reg.Validate(&over); err == nil {
+		t.Errorf("Registry.Validate accepted groupSize=%d", over.GroupSize)
+	}
+	if err := validate(t, s, over); err == nil {
+		t.Errorf("the schema accepted groupSize=%d", over.GroupSize)
+	}
+}
