@@ -76,6 +76,13 @@ Window {
     property var queueSent: []
     property bool queueSentVolumes: false
 
+    // The download cache control (PLAN §12.4). Counters for the same reason as
+    // everywhere else here: the property under test is that the first tap asks
+    // and clears *nothing*, which is a count that did not move.
+    property int cacheSizeAsks: 0
+    property int cacheClearAsks: 0
+    property int cacheClears: 0
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -188,6 +195,9 @@ Window {
             win.robotsAsks++
             win.robotsAskedFor = on
         }
+        onCacheSizeRequested: win.cacheSizeAsks++
+        onClearCacheRequested: win.cacheClearAsks++
+        onClearCacheConfirmed: win.cacheClears++
     }
     WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
     PagerBar    { id: lonePager;   width: 1620 }
@@ -862,6 +872,56 @@ Window {
         // Put the rows back as they were found.
         chaptersModel.setProperty(1, "downloadState", "")
         chaptersModel.setProperty(3, "documentUuid", "")
+
+        // ---- the download cache control (PLAN §12.4) -----------------------
+        //
+        // The size is shown because a button to clear something of unknown size
+        // is a button nobody presses; the first tap asks; confirming clears
+        // once. Every sentence here is the backend's — the screen is asserted
+        // to render what it is given, not to compose anything.
+
+        settings.closeCacheQuestion()
+        var cacheLine = win.findChild(settings, "cacheSummary")
+        var clearButton = win.findChild(settings, "clearCacheButton")
+        var cachePanel = win.findChild(settings, "cacheConfirm")
+
+        settings.cacheSummary = "The download cache is holding 636.0 MB of page images."
+        win.want("the cache size is on screen", cacheLine.text,
+                 "The download cache is holding 636.0 MB of page images.")
+        win.want("the clear button is offered", clearButton.visible, true)
+        win.want("and no question is open yet", cachePanel.visible, false)
+
+        // The first tap asks the backend for the question and clears nothing.
+        var clearsBefore = win.cacheClears
+        win.findChild(settings, "clearCacheArea").clicked(null)
+        win.want("tapping Clear asks once", win.cacheClearAsks, 1)
+        win.want("asking clears nothing", win.cacheClears, clearsBefore)
+
+        // The backend's question, as Main.qml applies it.
+        settings.cacheQuestion = "Clear 636.0 MB of cached page images?"
+        win.want("the question is on screen", cachePanel.visible, true)
+        win.want("in the backend's words",
+                 win.findChild(settings, "cacheQuestion").text,
+                 "Clear 636.0 MB of cached page images?")
+        win.want("and the button it replaces is gone", clearButton.visible, false)
+
+        // "Keep it" is the way out, and it clears nothing.
+        win.findChild(settings, "keepCacheArea").clicked(null)
+        win.want("Keep it closes the question", cachePanel.visible, false)
+        win.want("Keep it clears nothing", win.cacheClears, clearsBefore)
+        win.want("and the clear button comes back", clearButton.visible, true)
+
+        // Confirming clears exactly once.
+        settings.cacheQuestion = "Clear 636.0 MB of cached page images?"
+        win.findChild(settings, "confirmClearArea").clicked(null)
+        win.want("confirming clears once", win.cacheClears, clearsBefore + 1)
+        win.want("confirming closes the question", cachePanel.visible, false)
+
+        // The result sentence lands in the same line as the size, because it is
+        // the most recent true thing said about the cache.
+        settings.cacheSummary = "Cleared 592.0 MB. 44.0 MB was left, because a download is still using it."
+        win.want("the outcome replaces the size", cacheLine.text,
+                 "Cleared 592.0 MB. 44.0 MB was left, because a download is still using it.")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
