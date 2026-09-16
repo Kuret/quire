@@ -179,21 +179,51 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 		}
 	}
 
-	// The plugin's own asset path. Only the plugin puts files here.
-	add(p.Contains("/wp-content/plugins/madara/"), 40)
+	// The family's own asset paths.
+	//
+	// CORRECTED 2026-09-16, and this was the bug: the only string checked here
+	// used to be "/wp-content/plugins/madara/", worth 40 — and **no real site
+	// serves that path.** Madara is distributed as a WordPress *theme*, so its
+	// assets come from /wp-content/themes/madara/, and its companion plugin is
+	// registered as `madara-core`. A live site of the largest family we support
+	// scored 43 against a threshold of 60, which made stage 4 return
+	// `unrecognised` for it. The string had been invented in our own fixtures
+	// and then verified against those fixtures, which is how it survived.
+	//
+	// All three spellings are accepted: two are measured on live installs, and
+	// the original is kept because an install that renames its plugin
+	// directory back is cheap to allow and costs nothing.
+	add(p.Contains("/wp-content/themes/madara/") ||
+		p.Contains("/wp-content/plugins/madara-core/") ||
+		p.Contains("/wp-content/plugins/madara/"), 35)
 
 	// The custom post type, which appears in body classes, search forms and
-	// REST links alike.
+	// REST links alike. Measured on every live page we looked at.
 	add(p.Contains("wp-manga"), 25)
 
-	// The AJAX action name, present in inline script on series pages of both
-	// the current and the legacy shape.
-	add(p.Contains("manga_get_chapters"), 20)
+	// Listing markup, which is what a *home* page is made of. Measured: the
+	// home page of a live install carries none of the series, reader or search
+	// markup below, and the home page is what the probe fingerprints — so this
+	// group has to be able to carry a page on its own, the same problem
+	// mangathemesia's listing signals solve.
+	add(p.Has(".page-listing-item .page-item-detail, .page-item-detail.manga"), 15)
+	add(p.Has(".page-content-listing .list-chapter .chapter-item, .list-chapter .chapter-item"), 10)
+	add(p.Has(".item-thumb.c-image-hover, .tab-thumb.c-image-hover"), 8)
 
-	// Markup landmarks. Individually weak, collectively decisive.
-	add(p.Has("#manga-chapters-holder"), 15)
-	add(p.Has("li.wp-manga-chapter"), 15)
+	// The chapter list, in both spellings this family has shipped: the current
+	// wrapper and the older holder with its data-id.
+	add(p.Has(".listing-chapters_wrap ul.main, .listing-chapters_wrap"), 12)
+	add(p.Has("#manga-chapters-holder"), 12)
+	add(p.Contains("manga_get_chapters"), 12)
+	add(p.Has("li.wp-manga-chapter"), 12)
+
+	// Search results, which are a different rendering again from the home
+	// page's — measured, after a home fixture of ours had put this one on the
+	// wrong page for a year.
 	add(p.Has(".c-tabs-item__content"), 10)
+
+	// Remaining landmarks. Individually weak, and all of them measured present
+	// on at least one live page.
 	add(p.Has(".site-content .c-blog__heading, .c-blog__heading"), 8)
 	add(p.Has(".reading-content .page-break"), 10)
 	add(p.Has("input.rating-post-id"), 8)
