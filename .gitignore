@@ -11,3 +11,6 @@ output-rmpp/
 
 # AppLoad PC emulator: cloned and built locally, never vendored (PLAN §1.4)
 /.emulator/
+
+# macOS
+.DS_Store
