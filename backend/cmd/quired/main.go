@@ -31,11 +31,14 @@ import (
 	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/comick"
+	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/webtoons"
 	"github.com/rickl/quire/backend/theme/weebcentral"
 )
 
@@ -436,6 +439,9 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	reg.MustRegister(mangakakalot.New(client))
 	reg.MustRegister(mangadex.New(client))
 	reg.MustRegister(weebcentral.New(client))
+	reg.MustRegister(webtoons.New(client))
+	reg.MustRegister(fanfox.New(client))
+	reg.MustRegister(comick.New(client))
 	reg.MustRegister(generic.New(client))
 
 	store, err := state.Open(stateDir, reg)
