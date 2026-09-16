@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rickl/quire/schema/settings.schema.json",
+  "title": "Quire device settings",
+  "description": "Device-wide configuration that belongs to no single source. Stored as the 'settings' object of the state envelope alongside the sources, so it travels with an exported setup (PLAN §7.2). Everything here is optional; an absent object means every default applies.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "consultRobots": {
+      "type": "boolean",
+      "description": "Whether robots.txt is fetched and honoured before a discovery request. DEFAULT false -- PLAN §7.4, superseded 2026-09-16: RFC 9309 scopes robots.txt to 'automatic clients known as crawlers', a person searching and tapping is driving every request, and no comparable reader consults it at all. This is the ONLY switch: it is global, never per-source, and there is deliberately no per-source equivalent. It narrows nothing else -- rate limits, the per-host minimum delay, the honest User-Agent, the response size cap, byte accounting and the SSRF guard all still apply in full, and PLAN §7.6 is untouched: no UA spoofing, no TLS impersonation, no CAPTCHA solving, no challenge bypass, and a blocked_challenge verdict stays terminal. Every suppressed check is logged at info level, naming the path and the request kind.",
+      "default": false
+    }
+  }
+}

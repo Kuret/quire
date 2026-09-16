@@ -46,6 +46,11 @@ type file struct {
 	// without them — a watch names a source — and because the pair has to be
 	// exported and imported together to be worth anything.
 	Watched []*Watch `json:"watched,omitempty"`
+
+	// Settings is the device-wide configuration of settings.go. Omitted when
+	// empty, so a file written before the setting existed and a file whose
+	// settings are all at their defaults are the same file.
+	Settings *Settings `json:"settings,omitempty"`
 }
 
 // Store holds the configured sources. It is safe for concurrent use: the
@@ -55,9 +60,10 @@ type Store struct {
 	path string
 	reg  *theme.Registry
 
-	mu      sync.RWMutex
-	sources []*theme.Source
-	watched []*Watch
+	mu       sync.RWMutex
+	sources  []*theme.Source
+	watched  []*Watch
+	settings Settings
 }
 
 // Open loads the store from dir, creating the directory if it is missing. A
@@ -110,6 +116,9 @@ func OpenWithLog(dir string, reg *theme.Registry, log *slog.Logger) (*Store, err
 	}
 	s.sources = f.Sources
 	s.watched = f.Watched
+	if f.Settings != nil {
+		s.settings = copySettings(*f.Settings)
+	}
 	s.sort()
 	s.sortWatches()
 
@@ -287,11 +296,18 @@ func (s *Store) sort() {
 // device that lost power mid-write would lose every source the user added, and
 // there is no cloud copy to fall back on (PLAN §1.2).
 func (s *Store) save() error {
-	b, err := json.MarshalIndent(file{
+	env := file{
 		Version: fileVersion,
 		Sources: s.sources,
 		Watched: s.watched,
-	}, "", "  ")
+	}
+	// Only written once something has been set, so a store nobody has
+	// configured keeps the file it had.
+	if s.settings != (Settings{}) {
+		set := copySettings(s.settings)
+		env.Settings = &set
+	}
+	b, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
