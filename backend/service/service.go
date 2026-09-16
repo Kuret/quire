@@ -342,6 +342,16 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.openInReader(out, req)
 
+	case appload.MessageGetCacheSize:
+		return true, s.sendCacheStatus(out, "")
+
+	case appload.MessageClearCache:
+		var req clearCacheRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.clearCache(out, req)
+
 	case appload.MessageDeleteDownload:
 		var req deleteRequest
 		if err := decode(payload, &req); err != nil {

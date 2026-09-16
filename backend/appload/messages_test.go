@@ -49,6 +49,10 @@ func TestMessageTypeValues(t *testing.T) {
 		"WatchList":             63,
 		"WatchUpdate":           64,
 		"SetConsultRobots":      70,
+		"GetCacheSize":          71,
+		"CacheStatus":           72,
+		"ClearCache":            73,
+		"CacheConfirm":          74,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {

@@ -234,6 +234,25 @@ const (
 	MessageSetConsultRobots MessageType = 70
 
 	// MessageError is BE→UI, JSON {code, message}.
+	// The download cache (PLAN §12.4). Page images outlive the download that
+	// fetched them so a repeat can skip them, and a delete cannot always reach
+	// them afterwards — see clearCache for the two ways they are orphaned.
+	//
+	// MessageGetCacheSize is UI→BE, JSON {}. MessageCacheStatus is the reply,
+	// JSON {bytes, message}: the size, and the sentence for it.
+	MessageGetCacheSize MessageType = 71
+	MessageCacheStatus  MessageType = 72
+
+	// MessageClearCache is UI→BE, JSON {confirmed}. Without `confirmed` it is a
+	// request for the question, answered with MessageCacheConfirm, JSON
+	// {bytes, message}; with it, the cache is cleared and the reply is a fresh
+	// MessageCacheStatus saying what went and what was kept.
+	//
+	// It asks first for the same reason deleting a download does: it is
+	// hundreds of megabytes and the only way back is to fetch it all again.
+	MessageClearCache   MessageType = 73
+	MessageCacheConfirm MessageType = 74
+
 	MessageError MessageType = 90
 )
 
@@ -279,6 +298,10 @@ var messageNames = map[MessageType]string{
 	MessageWatchList:             "WatchList",
 	MessageWatchUpdate:           "WatchUpdate",
 	MessageSetConsultRobots:      "SetConsultRobots",
+	MessageGetCacheSize:          "GetCacheSize",
+	MessageCacheStatus:           "CacheStatus",
+	MessageClearCache:            "ClearCache",
+	MessageCacheConfirm:          "CacheConfirm",
 	MessageError:                 "Error",
 }
 

@@ -67,4 +67,10 @@ var WatchUpdate = 64
 // value comes back on the Pong status rather than in a reply of its own.
 var SetConsultRobots = 70
 
+// The download cache (PLAN §12.4): its size, and the two steps to clear it.
+var GetCacheSize = 71
+var CacheStatus = 72
+var ClearCache = 73
+var CacheConfirm = 74
+
 var Error = 90
