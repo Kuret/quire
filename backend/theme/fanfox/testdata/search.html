@@ -16,6 +16,15 @@
       come from the item-title paragraph instead
     - one title attribute is padded by the template
 
+  **Updated 2026-09-16: one link is on the `www.` sibling of the source's
+  host, and that is deliberate.** Every fixture in this repository used to put
+  its links on exactly the host the test configures as the base, so "links are
+  on the base host" was a claim no test could disprove — and a real site of
+  this family, which redirects its apex to `www.` and emits absolute links
+  there, had every result discarded as off-site. A perfect fingerprint followed
+  by a search that returned nothing. See PLAN §9 and backend/theme/site.go;
+  removing theme.SameSite now turns this suite red.
+
   Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
 -->
 <!DOCTYPE html>
@@ -40,7 +49,7 @@
       <p class="manga-list-4-item-tip">Latest:<a href="/manga/the_lantern_keeper/v01/c006/1.html" title="Vol.01 Ch.006">Vol.01 Ch.006</a></p>
     </li>
     <li>
-      <a href="/manga/salt_and_cinder/">
+      <a href="https://www.example.invalid/manga/salt_and_cinder/">
         <img class="manga-list-4-cover" src="https://covers.example.invalid/store/manga/4086/cover.jpg?token=def&amp;ttl=1789610400" alt="Salt and Cinder">
       </a>
       <p class="manga-list-4-item-title"><a href="/manga/salt_and_cinder/">Salt and Cinder</a></p>

@@ -5,6 +5,15 @@
   page an empty query browses, since this family's text search has nothing to
   say about an empty string (PLAN §7.5, M3 correction 1).
 
+  **Updated 2026-09-16: one link is on the `www.` sibling of the source's
+  host, and that is deliberate.** Every fixture in this repository used to put
+  its links on exactly the host the test configures as the base, so "links are
+  on the base host" was a claim no test could disprove — and a real site of
+  this family, which redirects its apex to `www.` and emits absolute links
+  there, had every result discarded as off-site. A perfect fingerprint followed
+  by a search that returned nothing. See PLAN §9 and backend/theme/site.go;
+  removing theme.SameSite now turns this suite red.
+
   Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
 
   Deliberate variations exercised by the test:
@@ -34,7 +43,7 @@
              width="120" height="170" loading="lazy">
       </a>
       <h3>
-        <a href="https://example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">The Lantern Keeper</a>
+        <a href="https://www.example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">The Lantern Keeper</a>
       </h3>
       <a class="list-story-item-wrap-chapter" title="Chapter 4"
          href="https://example.invalid/manga/the-lantern-keeper/chapter-4">Chapter 4</a>

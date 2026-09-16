@@ -13,14 +13,23 @@
     - the last chapter has a plain <i> absolute date and no anchor
     - one entry has no href and must be skipped rather than yielding a blank
 
+  **Updated 2026-09-16: one link is on the `www.` sibling of the source's
+  host, and that is deliberate.** Every fixture in this repository used to put
+  its links on exactly the host the test configures as the base, so "links are
+  on the base host" was a claim no test could disprove — and a real site of
+  this family, which redirects its apex to `www.` and emits absolute links
+  there, had every result discarded as off-site. A perfect fingerprint followed
+  by a search that returned nothing. See PLAN §9 and backend/theme/site.go;
+  removing theme.SameSite now turns this suite red.
+
   Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
 -->
 <ul class="main version-chap no-volumn">
 
   <li class="wp-manga-chapter">
-    <a href="https://example.invalid/manga/the-lantern-keeper/chapter-4/">Chapter 4 - The Forty-Second Lamp</a>
+    <a href="https://www.example.invalid/manga/the-lantern-keeper/chapter-4/">Chapter 4 - The Forty-Second Lamp</a>
     <span class="chapter-release-date">
-      <a href="https://example.invalid/manga/the-lantern-keeper/chapter-4/" title="March 2, 2026">2 days ago</a>
+      <a href="https://www.example.invalid/manga/the-lantern-keeper/chapter-4/" title="March 2, 2026">2 days ago</a>
     </span>
   </li>
 

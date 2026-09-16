@@ -6,6 +6,15 @@
   list of .c-tabs-item__content blocks, each holding a .tab-thumb image and a
   .post-title heading whose anchor is the series permalink.
 
+  **Updated 2026-09-16: one link is on the `www.` sibling of the source's
+  host, and that is deliberate.** Every fixture in this repository used to put
+  its links on exactly the host the test configures as the base, so "links are
+  on the base host" was a claim no test could disprove — and a real site of
+  this family, which redirects its apex to `www.` and emits absolute links
+  there, had every result discarded as off-site. A perfect fingerprint followed
+  by a search that returned nothing. See PLAN §9 and backend/theme/site.go;
+  removing theme.SameSite now turns this suite red.
+
   Why synthetic: PLAN §1.3 forbids this repository from containing source URLs
   or anything that functions as a catalogue, and §1.4 forbids copying others'
   expression. The markup *structure* is a documented, observable property of a
@@ -46,7 +55,7 @@
 
         <div class="c-tabs-item__content">
           <div class="tab-thumb c-image-hover">
-            <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
+            <a href="https://www.example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
               <img width="110" height="155"
                    src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
                    data-src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg"
@@ -56,14 +65,14 @@
           <div class="tab-summary">
             <div class="post-title">
               <h3 class="h4">
-                <a href="https://example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a>
+                <a href="https://www.example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a>
               </h3>
             </div>
             <div class="post-content">
               <div class="post-content_item mg_genres">
                 <div class="summary-heading"><h5>Genre(s)</h5></div>
                 <div class="summary-content">
-                  <a href="https://example.invalid/manga-genre/fantasy/" rel="tag">Fantasy</a>
+                  <a href="https://www.example.invalid/manga-genre/fantasy/" rel="tag">Fantasy</a>
                 </div>
               </div>
             </div>
@@ -88,7 +97,7 @@
 
         <div class="c-tabs-item__content">
           <div class="tab-thumb c-image-hover">
-            <a href="https://example.invalid/manga/paper-lanterns-of-the-ninth-ward/">
+            <a href="https://www.example.invalid/manga/paper-lanterns-of-the-ninth-ward/">
               <img srcset="https://example.invalid/wp-content/uploads/2026/03/ninth-ward-193x278.jpg 193w,
                            https://example.invalid/wp-content/uploads/2026/03/ninth-ward-386x556.jpg 386w"
                    class="img-responsive" alt="Paper Lanterns of the Ninth Ward">
@@ -96,7 +105,7 @@
           </div>
           <div class="tab-summary">
             <div class="post-title">
-              <h4><a href="https://example.invalid/manga/paper-lanterns-of-the-ninth-ward/">Paper Lanterns of the Ninth Ward</a></h4>
+              <h4><a href="https://www.example.invalid/manga/paper-lanterns-of-the-ninth-ward/">Paper Lanterns of the Ninth Ward</a></h4>
             </div>
           </div>
         </div>
@@ -105,7 +114,7 @@
         <div class="c-tabs-item__content">
           <div class="tab-summary">
             <div class="post-title">
-              <h3 class="h4"><a href="https://example.invalid/manga-tag/lantern/">Everything tagged lantern</a></h3>
+              <h3 class="h4"><a href="https://www.example.invalid/manga-tag/lantern/">Everything tagged lantern</a></h3>
             </div>
           </div>
         </div>

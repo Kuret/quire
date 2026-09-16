@@ -37,6 +37,58 @@ func siteA() *theme.Source {
 	}
 }
 
+// The failure the real prober found on 2026-09-16: a live madara install
+// fingerprinted at 100 and then searched to **zero results**.
+//
+// The user had typed the apex; the site redirects to its www host and renders
+// absolute links there; and the host filter compared exactly, so every result
+// was discarded as off-site. Not an error — an empty list, which reads as "this
+// site has nothing".
+//
+// testdata/search.html now puts two of its three results on the www sibling,
+// so this is a property of the corpus and not only of this test. See
+// backend/theme/site.go.
+func TestSearchFindsResultsWhenTheSiteRedirectsToWWW(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /?post_type=wp-manga&s=lantern": {File: "search.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+
+	// The base is the apex, as a user would paste it.
+	src := siteA()
+	src.BaseURL = "https://example.invalid"
+
+	got, err := th.Search(context.Background(), src, "lantern", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two of the three results are on the www sibling. An exact host filter
+	// leaves the one relative link and drops the rest, which is the shape of
+	// the live failure: not an error, a short list.
+	if len(got) != 3 {
+		t.Fatalf("got %d results, want 3: links on the site's www host were discarded "+
+			"as off-site, which is what a live install that redirects its apex produces: %+v", len(got), got)
+	}
+	var onWWW int
+	for _, r := range got {
+		if !strings.HasPrefix(r.ID, "/") {
+			t.Errorf("result ID %q is not site-relative", r.ID)
+		}
+		if strings.Contains(r.ID, "://") {
+			t.Errorf("result ID %q kept a host", r.ID)
+		}
+	}
+	// And the fixture really does exercise it.
+	b, err := os.ReadFile("testdata/search.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	onWWW = strings.Count(string(b), `href="https://www.example.invalid/manga/`)
+	if onWWW == 0 {
+		t.Error("the fixture no longer puts any result on the www sibling; this test proves nothing")
+	}
+}
+
 func TestSearch(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /": {File: "search.html"},

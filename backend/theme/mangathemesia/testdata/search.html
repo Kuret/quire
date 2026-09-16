@@ -7,6 +7,15 @@
   grid of .bs > .bsx > a cards. The title lives in the anchor's title attribute
   and, redundantly, in a .tt element that also carries a badge.
 
+  **Updated 2026-09-16: one link is on the `www.` sibling of the source's
+  host, and that is deliberate.** Every fixture in this repository used to put
+  its links on exactly the host the test configures as the base, so "links are
+  on the base host" was a claim no test could disprove — and a real site of
+  this family, which redirects its apex to `www.` and emits absolute links
+  there, had every result discarded as off-site. A perfect fingerprint followed
+  by a search that returned nothing. See PLAN §9 and backend/theme/site.go;
+  removing theme.SameSite now turns this suite red.
+
   Why synthetic: PLAN §1.3 forbids this repository from containing source URLs
   or anything that functions as a catalogue, and §1.4 forbids copying others'
   expression. The markup structure is an observable property of a distributed
@@ -38,7 +47,7 @@
 
         <div class="bs">
           <div class="bsx">
-            <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
+            <a href="https://www.example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
               <div class="limit">
                 <span class="type Manga"></span>
                 <div class="ply"></div>
