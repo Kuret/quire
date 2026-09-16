@@ -2040,7 +2040,47 @@ user, and it is what the stock UI does.
 > provide a reset.
 
 **Implementation notes:** clear the selection afterwards so nothing is left
-selected under the user; the document is in Trash rather than gone, so the
-wording should say so; and a stored `library.Record` for a trashed document
+selected under the user; and a stored `library.Record` for a trashed document
 should be dropped, since §6 M6 already handles `entryForId` returning null with
 an offer to download again.
+
+#### Emptying the Trash — probed separately, and it destroys
+
+The user asked for the Trash to be emptied after a delete ("i don't really mind
+if my whole trash is emptied"). That was probed on its own rather than assumed
+safe because a sibling method worked — the same discipline as above, one write
+per button, read-only first. Hardware, OS 3.25.1.1, 2026-09-16:
+
+```
+READ:   selection.size=0 moveToTrash=function ex.removeAllTrashed=function
+        ex.emptyTrash=undefined Library.removeAllTrashed=undefined
+        LibraryController.removeAllTrashed=undefined
+EMPTY:  called on explorer
+```
+
+- **`removeAllTrashed()` lives only on `NavigationManager.treeExplorerForNavigation`.**
+  `emptyTrash` does not exist, and neither `Library` nor `LibraryController`
+  carries it. There is nothing to fall back to and nothing to probe for.
+- **It destroys rather than hides.** A document deleted through Quire at
+  18:39:58 had its `.metadata` and content replaced, by the 18:41:22.745 call,
+  with `<uuid>.tombstone` whose entire body is `Wed Sep 16 18:41:22 2026`.
+  Documents left with `parent: trash` afterwards: 0.
+- **Nothing else was touched.** No other file under
+  `/home/root/.local/share/remarkable/xochitl/` had an mtime later than 17:23.
+- Nothing wedged; later taps and the user's own UI were fine.
+
+Two consequences for the code:
+
+1. **The copy has to say so.** Quire's confirmation says the download is deleted
+   *for good* and that the whole Trash goes with it, including anything of the
+   user's own that is in there. It is destruction, and the sentence that asks
+   for it is the last moment it can honestly be said.
+2. **Emptying is a second step and fails separately.** It runs only after a move
+   to Trash that worked, and a move that worked with an emptying that did not is
+   still a delete: the download is out of the library and the record is gone, so
+   it is reported as done with a note about the Trash, never as a failed delete.
+
+**An incidental finding, and it is load-bearing:** the probe called
+`selectionMoveToTrash()` on a UUID that no longer existed and `selection.size`
+stayed **1** instead of dropping to 0. That is why the frontend treats a
+non-zero size after the move as a failure rather than as defensive decoration.
