@@ -238,6 +238,7 @@ func send(conn *appload.Conn, log *slog.Logger, svc *service.Service, logTail []
 	st.LogTail = logTail
 	if svc != nil {
 		st.Notice = svc.StartupNotice()
+		st.ConsultRobots = svc.ConsultRobots()
 	}
 	body, err := json.Marshal(st)
 	if err != nil {
@@ -279,6 +280,12 @@ type status struct {
 	// table is not worth growing for a line of text that is only ever sent
 	// alongside the status.
 	Notice string `json:"notice,omitempty"`
+
+	// ConsultRobots is PLAN §7.4's one global switch. It rides here for the
+	// same reason Notice does: the settings screen has to draw the toggle in
+	// the right position the moment it appears, and a second round trip to
+	// find out would show it in the wrong one first.
+	ConsultRobots bool `json:"consultRobots"`
 
 	// LogTail is the most recent log lines, sent only when asked for. Bounded
 	// by backend/logging: the socket is SOCK_SEQPACKET and a whole message has
