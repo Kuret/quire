@@ -1,0 +1,33 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "The chapter-list API again, with every shape this backend varies sent the",
+    "other way round. Its pair is chapter-list.json; see series-single.html for",
+    "the live failure on 2026-09-16 that made a second shape necessary, and",
+    "PLAN §9 for why a fixture that only ever shows one of them is not evidence.",
+
+    "Deliberate variations exercised by the test:",
+    "  - `data` is a bare object rather than an array of one. This is the same",
+    "    serialiser behaviour that broke md_titles, applied to the envelope: a",
+    "    series with exactly one chapter is where it would show, and a series",
+    "    with one chapter is common.",
+    "  - `group_name` is a bare string rather than an array of one",
+    "  - `chap` and `vol` are numbers rather than text. They are text in every",
+    "    response observed, and they are the two fields an API of this kind",
+    "    emits unquoted sooner or later — 7, not \"7\". The number must survive",
+    "    as written, because order.go reads it.",
+
+    "Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606)."
+  ],
+  "data": {
+    "id": 10663190,
+    "hid": "SI7oIMm",
+    "chap": 1,
+    "title": "The Only Chapter",
+    "vol": 1,
+    "lang": "en",
+    "group_name": "Lamplight",
+    "created_at": "2026-09-07T17:04:15.717343Z"
+  }
+}

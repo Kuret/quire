@@ -45,7 +45,7 @@ func (t *Theme) seriesSlug(id string) string {
 // one-shot has no chapter number and the segment is built with it empty, which
 // is what the site's own frontend does with the same template.
 func (t *Theme) chapterID(slug string, e chapterEntry) string {
-	seg := e.HID + "-chapter-" + strings.TrimSpace(e.Chap) + "-" + strings.TrimSpace(e.Lang)
+	seg := e.HID + "-chapter-" + strings.TrimSpace(e.Chap.String()) + "-" + strings.TrimSpace(e.Lang)
 	return "/" + comicSegment + "/" + strings.Trim(slug, "/") + "/" + seg
 }
 

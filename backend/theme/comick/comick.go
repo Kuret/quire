@@ -291,8 +291,12 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 }
 
 // searchResponse is the search API's envelope.
+//
+// `data` is a to-many relation like any other here, so it goes through list
+// for the reason shapes.go gives: a single result arriving unwrapped would
+// otherwise fail the whole search.
 type searchResponse struct {
-	Data []searchEntry `json:"data"`
+	Data list[searchEntry] `json:"data"`
 }
 
 type searchEntry struct {
@@ -370,16 +374,21 @@ func ratingsUpTo(max string) map[string]bool {
 
 // comicData is the series page's embedded payload. Only the fields this theme
 // uses are named; the rest of it is the frontend's business.
+// The four relations are the ones observed to vary — md_titles is the field
+// that produced the 2026-09-16 failure — and they are all to-many, so all four
+// go through list. Title, slug, desc and the thumbnail are scalars the site's
+// own data gives no reason to expect in another shape, so they stay plain and
+// encoding/json keeps naming them when they are not.
 type comicData struct {
-	Title            string     `json:"title"`
-	Slug             string     `json:"slug"`
-	Desc             string     `json:"desc"`
-	Status           int        `json:"status"`
-	DefaultThumbnail string     `json:"default_thumbnail"`
-	Authors          []namedRef `json:"authors"`
-	Artists          []namedRef `json:"artists"`
-	Titles           []altTitle `json:"md_titles"`
-	Genres           []genreRef `json:"md_comic_md_genres"`
+	Title            string         `json:"title"`
+	Slug             string         `json:"slug"`
+	Desc             string         `json:"desc"`
+	Status           int            `json:"status"`
+	DefaultThumbnail string         `json:"default_thumbnail"`
+	Authors          list[namedRef] `json:"authors"`
+	Artists          list[namedRef] `json:"artists"`
+	Titles           list[altTitle] `json:"md_titles"`
+	Genres           list[genreRef] `json:"md_comic_md_genres"`
 }
 
 type namedRef struct {
@@ -390,10 +399,15 @@ type altTitle struct {
 	Title string `json:"title"`
 }
 
+// genreRef is a join row: many of them, each naming one genre. The join is
+// to-many and goes through list above; the genre it names is to-one and goes
+// through one, which accepts the array form the same serialiser could produce.
 type genreRef struct {
-	Genre struct {
-		Name string `json:"name"`
-	} `json:"md_genres"`
+	Genre one[genreName] `json:"md_genres"`
+}
+
+type genreName struct {
+	Name string `json:"name"`
 }
 
 // Series implements theme.Theme.
@@ -439,8 +453,8 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 		}
 	}
 	for _, g := range d.Genres {
-		if g.Genre.Name != "" {
-			out.Genres = append(out.Genres, g.Genre.Name)
+		if g.Genre.V.Name != "" {
+			out.Genres = append(out.Genres, g.Genre.V.Name)
 		}
 	}
 	return out, nil
@@ -469,17 +483,21 @@ func parseStatus(code int) string {
 
 // chapterListResponse is the chapter-list API's envelope.
 type chapterListResponse struct {
-	Data []chapterEntry `json:"data"`
+	Data list[chapterEntry] `json:"data"`
 }
 
+// Chap and Vol are flexString because they are numbers written as text here,
+// and an API of this kind emits exactly those two unquoted sooner or later.
+// GroupName is the one to-many relation on a chapter and has been seen holding
+// a single scanlator; list takes the bare string as a list of one.
 type chapterEntry struct {
-	HID       string   `json:"hid"`
-	Chap      string   `json:"chap"`
-	Title     string   `json:"title"`
-	Vol       string   `json:"vol"`
-	Lang      string   `json:"lang"`
-	GroupName []string `json:"group_name"`
-	CreatedAt string   `json:"created_at"`
+	HID       string       `json:"hid"`
+	Chap      flexString   `json:"chap"`
+	Title     string       `json:"title"`
+	Vol       flexString   `json:"vol"`
+	Lang      string       `json:"lang"`
+	GroupName list[string] `json:"group_name"`
+	CreatedAt string       `json:"created_at"`
 }
 
 // Chapters implements theme.Theme.
@@ -518,8 +536,8 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 		ch := theme.Chapter{
 			ID:        t.chapterID(slug, e),
 			Title:     chapterTitle(e),
-			Volume:    strings.TrimSpace(e.Vol),
-			Number:    chapterNumber(e.Chap),
+			Volume:    strings.TrimSpace(e.Vol.String()),
+			Number:    chapterNumber(e.Chap.String()),
 			Scanlator: strings.Join(e.GroupName, ", "),
 		}
 		if ts, err := time.Parse(time.RFC3339, strings.TrimSpace(e.CreatedAt)); err == nil {
@@ -552,7 +570,7 @@ func chapterNumber(chap string) float64 {
 // Neither alone is enough: a bare number is a poor PDF title and a bare name
 // loses the position in the series.
 func chapterTitle(e chapterEntry) string {
-	chap := strings.TrimSpace(e.Chap)
+	chap := strings.TrimSpace(e.Chap.String())
 	name := theme.Collapse(e.Title)
 	switch {
 	case chap != "" && name != "":
@@ -568,9 +586,11 @@ func chapterTitle(e chapterEntry) string {
 
 // readerData is the chapter page's embedded payload.
 type readerData struct {
-	Chapter struct {
-		Images []readerImage `json:"images"`
-	} `json:"chapter"`
+	Chapter one[readerChapter] `json:"chapter"`
+}
+
+type readerChapter struct {
+	Images list[readerImage] `json:"images"`
 }
 
 type readerImage struct {
@@ -597,8 +617,8 @@ func (t *Theme) Pages(ctx context.Context, s *theme.Source, chapterID string) ([
 		return nil, fmt.Errorf("%s: %s: parse payload: %w", ID, path, err)
 	}
 
-	out := make([]string, 0, len(d.Chapter.Images))
-	for _, img := range d.Chapter.Images {
+	out := make([]string, 0, len(d.Chapter.V.Images))
+	for _, img := range d.Chapter.V.Images {
 		if abs := t.absolute(s, img.URL); abs != "" {
 			out = append(out, abs)
 		}

@@ -1,0 +1,92 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  **The same series as series.html, with every relation sent in the other
+  cardinality.** It exists because of a live failure on 2026-09-16:
+
+      cannot unmarshal object into Go struct field comicData.md_titles of type []comick.altTitle
+
+  The endpoint sends `md_titles` as an array for some series and as an object
+  for others. Our fixture had only ever shown the array, so the parser
+  was validated against a shape the API does not always send, the series screen
+  errored as a unit, and the user saw **no chapters at all** — on many series.
+  PLAN §9 names this exactly: a fixture that cannot disagree with the code is
+  not evidence.
+
+  So the two fixtures are a pair: series.html is the array shape and this is
+  the object shape, and the test reads both. The series is the same one, with
+  the same alternate titles, in the same order. Here:
+    - `md_titles` is an **object keyed by position** — `{"1": {…}, "2": {…}}`,
+      which is the shape that broke it, measured against 60 live series on
+      2026-09-16. It is not a bare single object, and the difference is the
+      whole bug: read as one title it would yield a title with no text in it,
+      turning a loud failure into every alternate title quietly gone. The two
+      entries are in the order the site wrote them, which must survive.
+    - `md_comic_md_genres` is keyed the same way
+    - `authors` is a bare object — the other object form, which a different
+      serialiser produces and which costs nothing to accept
+    - `artists` is null rather than an empty array
+    - the `md_genres` inside the join row is an array rather than an object —
+      the to-one relation varying the other way
+
+  Deleting the tolerance in shapes.go turns this suite red, which is the point
+  of committing it.
+
+  Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en" x-data="Utils.loadTheme()">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper - Read Free on Example</title>
+  <link rel="stylesheet" href="/build/assets/app-BqR2vN1a.css">
+  <script type="module" src="/build/assets/app-Ci31YMOj.js"></script>
+  <script type="module" src="/build/assets/utils-BhNZlY5s.js"></script>
+  <script type="module" src="/build/assets/header-IrjfPRfj.js"></script>
+  <script type="module" src="/build/assets/settings-sync-DkEAqJg5.js"></script>
+  <script type="module" src="/build/assets/owl-carousel-DCrA3J-z.js"></script>
+  <script type="module" src="/build/assets/alpine-Duq4ovsg.js"></script>
+</head>
+<body>
+
+<script async data-cfasync="false" data-size="728x90" data-id="dl-banner-728x90" src="https://ads.example.invalid/b.js"></script>
+
+<header class="relative z-100" x-data="Header.loadDataHeader()">
+  <a class="block p-2" href="/publisher/popular">Popular Publishers</a>
+  <a class="block p-2" href="/group/popular">Popular Groups</a>
+  <a class="block p-2" href="/search">Search</a>
+</header>
+
+<main>
+  <h1>The Lantern Keeper</h1>
+  <p class="truncated">A lamplighter walks the harbour road every night, and every night one more...</p>
+  <a href="/comic/the-lantern-keeper/RH6nHLl-chapter-7-en">Chapter 7</a>
+</main>
+
+<script type="application/json" id="comic-data">
+{
+  "id": 107947,
+  "hid": "I1ImYpV",
+  "title": "The Lantern Keeper",
+  "slug": "the-lantern-keeper",
+  "status": 2,
+  "last_chapter": 7,
+  "chapter_count": 7,
+  "desc": "A lamplighter walks the harbour road every night, and every night one more lamp has gone out before she reaches it.",
+  "content_rating": "safe",
+  "default_thumbnail": "https://pages.example.invalid/the-lantern-keeper/covers/8edfff1d.jpg",
+  "md_titles": {
+    "1": { "id": 266160, "comic_id": 107947, "title": "Kanteru no Banjin", "lang": null },
+    "2": { "id": 266161, "comic_id": 107947, "title": "The Keeper of Lanterns", "lang": "en" }
+  },
+  "md_comic_md_genres": { "1": { "md_genres": [{ "name": "Drama", "slug": "drama", "group": "Genre" }] } },
+  "authors": { "name": "IWANO Miyuki", "slug": "iwano-miyuki" },
+  "artists": null,
+  "cdn_id": 1
+}
+</script>
+
+<script type="application/json" id="not-the-one">{"noise": true}</script>
+
+</body>
+</html>

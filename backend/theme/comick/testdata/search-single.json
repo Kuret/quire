@@ -1,0 +1,37 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "The search API answering with **one** result, and answering with it as an",
+    "object keyed by position rather than an array of one — the shape measured",
+    "on md_titles against 60 live series on 2026-09-16. Pair of search.json; see",
+    "series-single.html for the failure on 2026-09-16 that made a second shape",
+    "necessary and PLAN §9 for why one shape is not evidence.",
+
+    "A search precise enough to match a single series is an ordinary thing for",
+    "a user to type, so this is not an exotic case — it is the first one that",
+    "would have failed.",
+
+    "Slashes are escaped, as the server's encoder escapes them. See search.json.",
+
+    "Why synthetic: see testdata/search.json. Host is example.invalid (RFC 2606)."
+  ],
+  "data": {
+   "1": {
+    "id": 107947,
+    "cdn_id": 1,
+    "title": "The Lantern Keeper",
+    "slug": "the-lantern-keeper",
+    "hid": "I1ImYpV",
+    "content_rating": "safe",
+    "default_thumbnail": "https:\/\/pages.example.invalid\/the-lantern-keeper\/covers\/8edfff1d.jpg",
+    "last_chapter": 7,
+    "chapter_count": 7
+   }
+  },
+  "path": "https:\/\/example.invalid\/api\/search",
+  "per_page": 25,
+  "next_cursor": null,
+  "next_page_url": null,
+  "prev_cursor": null
+}
