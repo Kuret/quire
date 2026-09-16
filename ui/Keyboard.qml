@@ -135,19 +135,27 @@ Item {
                 }
             }
 
+            // The space bar, in the text layout only.
+            //
+            // It used to type "." in the URL layout, which put a second full
+            // stop on a keyboard that already has one in its fourth row — so
+            // an address had two keys that did the same thing and a space bar
+            // that silently was not one. A URL has no spaces in it, so the
+            // honest answer is that the URL layout has no space bar, and the
+            // room goes to the two keys below that actually save typing.
             Rectangle {
-                width: keyboard.layout === "url" ? 150 : 300
+                objectName: "keyboardSpace"
+                width: 300
                 height: 84
                 color: spaceArea.pressed ? Style.pressed : Style.paper
                 border.width: 1
                 border.color: Style.rule
                 radius: 4
+                visible: keyboard.layout !== "url"
 
                 Text {
                     anchors.centerIn: parent
-                    // A URL has no spaces in it, so that key types the one
-                    // character a typed address actually needs.
-                    text: keyboard.layout === "url" ? "." : "Space"
+                    text: "Space"
                     font.pointSize: Style.smallSize
                     color: Style.ink
                 }
@@ -155,7 +163,7 @@ Item {
                 MouseArea {
                     id: spaceArea
                     anchors.fill: parent
-                    onClicked: keyboard.keyTyped(keyboard.layout === "url" ? "." : " ")
+                    onClicked: keyboard.keyTyped(" ")
                 }
             }
 
