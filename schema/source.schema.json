@@ -67,6 +67,12 @@
       },
       "default": { "requestsPerMinute": 30, "concurrency": 2 }
     },
+    "splitStrips": {
+      "type": "string",
+      "description": "Vertical-scroll ('webtoon') strip splitting, PLAN §12.3. Tall single-image pages are cut into panel-shaped pages instead of being fitted into a 3:4 page as an unreadable centred sliver. Detection is per *image*, never per source -- a single index, and a single series, hosts both formats -- and it is biased hard toward doing nothing: a strip left unsplit is a sliver the reader can see, whereas a manga page wrongly split is mangled art across a whole volume, silently. 'auto' requires an aspect past the measured threshold (h:w 3.76, the empty middle between two stacked pages at 2.83 and the shortest real strip at 5.0) AND either corroboration from the rest of the chapter or a ratio past 10:1 that nothing else explains. 'never' disables it for this source. 'always' waives detection and hands every image to the splitter, which still leaves anything that already fits one page alone. This is an escape hatch: detection will eventually be wrong and the user should not have to wait for a release.",
+      "enum": ["auto", "never", "always"],
+      "default": "auto"
+    },
     "enabled": {
       "type": "boolean",
       "description": "Per-source toggle surfaced in the source list (PLAN §6 M3).",
