@@ -124,11 +124,25 @@ func (p *phasedFetcher) Get(ctx context.Context, pol *fetch.Policy, u string) (*
 	return p.inner.Get(ctx, pol, u)
 }
 
+func (p *phasedFetcher) GetFrom(ctx context.Context, pol *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return p.inner.GetFrom(ctx, pol, u, from)
+}
+
 func (p *phasedFetcher) GetRetrieval(ctx context.Context, pol *fetch.Policy, u string) (*fetch.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
 	return p.inner.GetRetrieval(ctx, pol, u)
+}
+
+func (p *phasedFetcher) GetRetrievalFrom(ctx context.Context, pol *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return p.inner.GetRetrievalFrom(ctx, pol, u, from)
 }
 
 func (p *phasedFetcher) PostForm(ctx context.Context, pol *fetch.Policy, u string, form url.Values) (*fetch.Response, error) {

@@ -91,11 +91,19 @@ func (f *failingFetcher) Get(ctx context.Context, p *fetch.Policy, u string) (*f
 	return f.inner.Get(ctx, p, u)
 }
 
+func (f *failingFetcher) GetFrom(ctx context.Context, p *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.inner.GetFrom(ctx, p, u, from)
+}
+
 func (f *failingFetcher) PostForm(ctx context.Context, p *fetch.Policy, u string, form url.Values) (*fetch.Response, error) {
 	return f.inner.PostForm(ctx, p, u, form)
 }
 
 func (f *failingFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, u string) (*fetch.Response, error) {
+	return f.GetRetrievalFrom(ctx, p, u, fetch.Referrer{})
+}
+
+func (f *failingFetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
 	f.mu.Lock()
 	f.n++
 	fail := f.n > f.after
@@ -103,7 +111,7 @@ func (f *failingFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, u st
 	if fail {
 		return nil, f.err
 	}
-	return f.inner.GetRetrieval(ctx, p, u)
+	return f.inner.GetRetrievalFrom(ctx, p, u, from)
 }
 
 // Wifi drops mid-volume. The acceptance wording: no corrupt PDF, no orphaned

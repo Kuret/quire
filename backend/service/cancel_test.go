@@ -48,13 +48,21 @@ func (f *stallingFetcher) Get(ctx context.Context, p *fetch.Policy, rawurl strin
 	return f.inner.Get(ctx, p, rawurl)
 }
 
+func (f *stallingFetcher) GetFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.inner.GetFrom(ctx, p, rawurl, from)
+}
+
 func (f *stallingFetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error) {
 	return f.inner.PostForm(ctx, p, rawurl, form)
 }
 
-// GetRetrieval is the page-image path, and the only one that stalls: the
-// chapter list has to come back or there is no download to cancel.
 func (f *stallingFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
+	return f.GetRetrievalFrom(ctx, p, rawurl, fetch.Referrer{})
+}
+
+// GetRetrievalFrom is the page-image path, and the only one that stalls: the
+// chapter list has to come back or there is no download to cancel.
+func (f *stallingFetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
 	f.mu.Lock()
 	f.served++
 	pass := f.served <= f.stallAfter
@@ -64,11 +72,11 @@ func (f *stallingFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, raw
 	f.mu.Unlock()
 
 	if pass {
-		return f.inner.GetRetrieval(ctx, p, rawurl)
+		return f.inner.GetRetrievalFrom(ctx, p, rawurl, from)
 	}
 	select {
 	case <-f.release:
-		return f.inner.GetRetrieval(ctx, p, rawurl)
+		return f.inner.GetRetrievalFrom(ctx, p, rawurl, from)
 	case <-ctx.Done():
 		// The whole point: a cancelled context unblocks a fetch already in
 		// flight, rather than the cancel waiting for the fetch.

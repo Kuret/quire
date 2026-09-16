@@ -162,6 +162,35 @@ type PageReferrer interface {
 	PageReferer(s *Source, chapterID string) string
 }
 
+// PageRefererFor resolves the Referer to send with chapterID's page images.
+//
+// It is the single place the PageReferrer side interface is consulted, so that
+// both call sites — the download queue and the probe's stage 5 image fetch —
+// answer the question the same way. A theme that does not implement
+// PageReferrer, or that returns "" because it has no page to name, yields the
+// zero fetch.Referrer and therefore **no header at all**: PLAN §7.6 is explicit
+// that "no header" is the correct answer when we do not know, because a Referer
+// naming a page we did not fetch is a lie.
+//
+// A non-empty value that fetch.PageReferrer refuses is a bug in the theme, not
+// a reason to invent something: the error is returned so the caller can say so,
+// and the Referrer handed back is the zero one, which sends nothing.
+func PageRefererFor(th Theme, s *Source, chapterID string) (fetch.Referrer, error) {
+	pr, ok := th.(PageReferrer)
+	if !ok {
+		return fetch.Referrer{}, nil
+	}
+	raw := pr.PageReferer(s, chapterID)
+	if raw == "" {
+		return fetch.Referrer{}, nil
+	}
+	ref, err := fetch.PageReferrer(raw)
+	if err != nil {
+		return fetch.Referrer{}, err
+	}
+	return ref, nil
+}
+
 // Fetcher is the slice of fetch.Client a theme uses. Themes depend on this
 // interface rather than the concrete client so tests can serve committed
 // fixtures without a network, a server or a loopback exemption.
@@ -169,6 +198,17 @@ type Fetcher interface {
 	// Get is a discovery request (PLAN §7.4): a search, a listing, a link
 	// being followed. robots.txt gates it strictly.
 	Get(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error)
+
+	// GetFrom is Get with a Referer naming the page rawurl was taken from. A
+	// zero fetch.Referrer sends no header, so Get above is exactly this call
+	// with one.
+	//
+	// It is on this interface rather than reached for by asserting the
+	// concrete client, because an optional assertion would let a test fake
+	// injected as a Fetcher silently miss it — and the case that matters most
+	// here is the *absence* of a header, which would then be untested by
+	// accident rather than guaranteed by rule. See PageRefererFor.
+	GetFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error)
 
 	// GetRetrieval is a request for one thing the user named. Every other
 	// invariant — rate limits, the honest UA, Retry-After, the size cap, the
@@ -180,6 +220,11 @@ type Fetcher interface {
 	// never need it: it exists because MangaDex disallows the endpoint that
 	// serves page images while allowing everything used to find them.
 	GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error)
+
+	// GetRetrievalFrom is GetRetrieval with a Referer naming the page rawurl
+	// was taken from. A zero fetch.Referrer sends no header. It is what the
+	// download queue fetches page images with; see PageRefererFor.
+	GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error)
 
 	PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error)
 }
@@ -231,6 +276,10 @@ type discoveryFetcher struct{ Fetcher }
 
 func (d discoveryFetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
 	return d.Fetcher.Get(ctx, p, rawurl)
+}
+
+func (d discoveryFetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	return d.Fetcher.GetFrom(ctx, p, rawurl, from)
 }
 
 // Source is a configured source, stored on device and validated against

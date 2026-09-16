@@ -94,8 +94,16 @@ func (f fetcher) Get(ctx context.Context, _ *fetch.Policy, u string) (*fetch.Res
 	return f.c.Get(ctx, f.p, u)
 }
 
+func (f fetcher) GetFrom(ctx context.Context, _ *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.c.GetFrom(ctx, f.p, u, from)
+}
+
 func (f fetcher) GetRetrieval(ctx context.Context, _ *fetch.Policy, u string) (*fetch.Response, error) {
 	return f.c.GetRetrieval(ctx, f.p, u)
+}
+
+func (f fetcher) GetRetrievalFrom(ctx context.Context, _ *fetch.Policy, u string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.c.GetRetrievalFrom(ctx, f.p, u, from)
 }
 
 func (f fetcher) PostForm(ctx context.Context, _ *fetch.Policy, u string, form url.Values) (*fetch.Response, error) {

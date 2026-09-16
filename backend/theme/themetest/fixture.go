@@ -40,6 +40,13 @@ type Request struct {
 	// because "was this fetched as retrieval?" is a claim a test should be
 	// able to check, not something to take a theme's word for.
 	Kind fetch.Kind
+
+	// Referrer is the fetch.Referrer the caller passed, zero when it passed
+	// none. It is recorded rather than flattened to a string because "no
+	// Referer header at all" and "an empty Referer" are different requests,
+	// and PLAN §7.6 turns on the first one being what a caller who cannot name
+	// a page gets. Assert absence with Referrer.IsZero().
+	Referrer fetch.Referrer
 }
 
 // Route answers one request. Body is either inline or loaded from a file under
@@ -110,22 +117,33 @@ func (f *Fetcher) routeKeys() []string {
 
 // Get implements theme.Fetcher.
 func (f *Fetcher) Get(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil)
+	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil, fetch.Referrer{})
+}
+
+// GetFrom implements theme.Fetcher, recording the Referrer it was given.
+func (f *Fetcher) GetFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil, from)
 }
 
 // GetRetrieval records the PLAN §7.4 request kind alongside the URL, so a
 // theme test can assert that a call the user asked for was made as retrieval
 // and — just as importantly — that a search or a listing was not.
 func (f *Fetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil)
+	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil, fetch.Referrer{})
+}
+
+// GetRetrievalFrom implements theme.Fetcher, recording the Referrer it was
+// given. It is the call the download queue makes for a page image.
+func (f *Fetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil, from)
 }
 
 // PostForm implements theme.Fetcher.
 func (f *Fetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, form)
+	return f.answer(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, form, fetch.Referrer{})
 }
 
-func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl string, form url.Values) (*fetch.Response, error) {
+func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl string, form url.Values, from fetch.Referrer) (*fetch.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -135,7 +153,7 @@ func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl st
 	}
 
 	f.mu.Lock()
-	f.calls = append(f.calls, Request{Method: method, URL: rawurl, Form: form, Kind: kind})
+	f.calls = append(f.calls, Request{Method: method, URL: rawurl, Form: form, Kind: kind, Referrer: from})
 	f.mu.Unlock()
 
 	// Try the path+query key first, then the bare path, so a route only has to

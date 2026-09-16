@@ -15,15 +15,30 @@ import (
 
 // kindRecorder is a theme.Fetcher that records which PLAN §7.4 kind it was
 // asked for, and nothing else.
-type kindRecorder struct{ kinds []string }
+type kindRecorder struct {
+	kinds     []string
+	referrers []fetch.Referrer
+}
 
 func (k *kindRecorder) Get(context.Context, *fetch.Policy, string) (*fetch.Response, error) {
 	k.kinds = append(k.kinds, "discovery")
 	return &fetch.Response{StatusCode: 200}, nil
 }
 
+func (k *kindRecorder) GetFrom(_ context.Context, _ *fetch.Policy, _ string, from fetch.Referrer) (*fetch.Response, error) {
+	k.kinds = append(k.kinds, "discovery")
+	k.referrers = append(k.referrers, from)
+	return &fetch.Response{StatusCode: 200}, nil
+}
+
 func (k *kindRecorder) GetRetrieval(context.Context, *fetch.Policy, string) (*fetch.Response, error) {
 	k.kinds = append(k.kinds, "retrieval")
+	return &fetch.Response{StatusCode: 200}, nil
+}
+
+func (k *kindRecorder) GetRetrievalFrom(_ context.Context, _ *fetch.Policy, _ string, from fetch.Referrer) (*fetch.Response, error) {
+	k.kinds = append(k.kinds, "retrieval")
+	k.referrers = append(k.referrers, from)
 	return &fetch.Response{StatusCode: 200}, nil
 }
 

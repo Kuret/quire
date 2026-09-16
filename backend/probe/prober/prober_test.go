@@ -561,7 +561,15 @@ func (f errFetcher) Get(context.Context, *fetch.Policy, string) (*fetch.Response
 	return nil, f.err
 }
 
+func (f errFetcher) GetFrom(context.Context, *fetch.Policy, string, fetch.Referrer) (*fetch.Response, error) {
+	return nil, f.err
+}
+
 func (f errFetcher) GetRetrieval(context.Context, *fetch.Policy, string) (*fetch.Response, error) {
+	return nil, f.err
+}
+
+func (f errFetcher) GetRetrievalFrom(context.Context, *fetch.Policy, string, fetch.Referrer) (*fetch.Response, error) {
 	return nil, f.err
 }
 
