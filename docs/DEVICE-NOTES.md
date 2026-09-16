@@ -351,6 +351,39 @@ Consequences, both implemented in `backend/library`:
   mutex, and the upload's result is verified by reading the folder back rather
   than assumed.
 
+#### Does the upload mutex become a bottleneck with one PDF per chapter?
+
+**No — measured, host, 2026-09-16.** PLAN §6 M4 was reversed that day and the
+default became one PDF per chapter, which is roughly ten times as many uploads.
+The worry was that a many-chapter download would spend most of its time queued
+behind the single library mutex.
+
+Two reasons it does not, and the first one is structural:
+
+1. **There is only one download worker** (`service.enqueueDownload`), so there
+   is never a second download waiting on the mutex. The lock serialises the
+   `GET`/`POST`/`GET` *inside* one upload, and nothing else contends for it.
+2. **The lock is held for milliseconds.** Against a local server, with a
+   `Comics` folder already holding **2000 documents** so both listings are
+   realistically large:
+
+   | document body | time per upload (GET + POST + GET, all under the mutex) |
+   |---|---|
+   | 0 MB (pure overhead) | **12 ms** |
+   | 6 MB — a typical chapter at M4's ~307 KiB/page | **18 ms** |
+   | 60 MB — a whole volume | **81 ms** |
+
+   Per chapter costs *more round trips* (three HTTP calls per document instead
+   of three per volume) but the same bytes, so a 10-chapter series pays about
+   **180 ms** of upload against a download that M4 measured in tens of seconds
+   even on the host. These are host numbers over loopback and the device is
+   slower, but the ratio is what matters and it is three orders of magnitude.
+
+The second-order effect is the one to keep an eye on: **every upload lists the
+target folder twice**, and per chapter puts ten times as many documents in the
+flat `Comics` folder, so those listings grow. The 2000-document row above is
+what that looks like, and it costs ~2 ms over an empty folder.
+
 ### ❌ There is no folder-create route
 
 The whole HTTP surface is three routes. `strings` on `/usr/bin/xochitl` yields
