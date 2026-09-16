@@ -416,7 +416,10 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		log.Warn("the previous session did not end cleanly", "marker", session.Path())
 	}
 
-	client := fetch.NewClient(fetch.Options{Version: version})
+	// ConsultRobots is left at its default (off, PLAN §7.4) until the store is
+	// open and can say what the user set; the client is needed first because
+	// the themes are built over it.
+	client := fetch.NewClient(fetch.Options{Version: version, Logger: log})
 
 	reg := theme.NewRegistry()
 	reg.MustRegister(madara.New(client))
@@ -429,6 +432,12 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		return nil, nil, err
 	}
 	log.Info("state opened", "path", store.Path(), "sources", len(store.List()))
+
+	// The one global robots.txt switch (PLAN §7.4). Logged at startup as well
+	// as per suppressed check, so a log that begins mid-session still says
+	// which way it was set.
+	client.SetConsultRobots(store.Settings().RobotsConsulted())
+	log.Info("robots.txt setting", "consulted", client.ConsultRobots())
 
 	// The library store holds the document UUIDs, and losing it means losing
 	// the "Read" button for everything already downloaded, so a broken file is
