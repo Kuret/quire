@@ -1146,6 +1146,37 @@ Non-negotiable, and not configurable by a source entry:
   fetch layer, never a per-source flag a user can flip. Requests must carry
   their kind explicitly — do not infer it from the URL.
 
+  **OWNER OVERRIDE (added 2026-09-16, per-source, opt-in, off by default).**
+  A source may carry `ignoreRobots: true`, which skips the robots check for that
+  source only. Recorded here with the argument on both sides, because it changes
+  a rule this document previously called non-bypassable.
+
+  *For:* `robots.txt` is the Robots **Exclusion** Protocol and RFC 9309 scopes it
+  to crawlers. **No comparable reader consults it at all** — verified against
+  `keiyoushi/extensions-source`, where nothing fetches `robots.txt` in any
+  extension or shared library. Mihon-class readers treat every request as a user
+  agent acting on direct instruction, as a browser does. Quire's
+  discovery/retrieval split was therefore already *stricter than the entire
+  ecosystem*, not equal to it. The operator selects every source by hand and
+  §1.3 puts that determination with them.
+
+  *Against:* a `Disallow` is still a site operator expressing a preference about
+  automated access, and honouring it by default is why the exception granted for
+  MangaDex could be kept narrow. Turning it off is a real change of posture, not
+  a configuration detail.
+
+  **Constraints, so this stays honest:**
+  - **Off by default**, per-source, never global, and never inferred. The user
+    sets it deliberately on a source they chose.
+  - **Log it every time it suppresses a check**, at info level. A safeguard that
+    is off silently is worse than one that was never there.
+  - **It changes nothing else.** Rate limits, per-host delays, the honest
+    `User-Agent`, the SSRF guard and §7.6's absolute no-circumvention rule all
+    still apply in full. In particular §7.6 is untouched: this does not license
+    UA spoofing, TLS impersonation, CAPTCHA solving or challenge bypass, and a
+    `blocked_challenge` verdict remains terminal.
+  - Surface it in the UI as what it is, not as a tick-box with no consequence.
+
   **Worked classifications — when in doubt, classify as discovery.** The rule
   above is a narrow exception and should stay narrow; "the user is ultimately
   responsible for every request" would swallow it whole and is not the test.
