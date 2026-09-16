@@ -282,21 +282,47 @@ type Result struct {
 // bytes have already been written to dst; the caller owns discarding them,
 // which is cheap because callers write to a temp file anyway.
 func Normalise(dst io.Writer, src io.Reader, opts Options) (Result, error) {
-	if opts.MaxWidth <= 0 || opts.MaxHeight <= 0 {
-		return Result{}, fmt.Errorf("imageproc: bad target size %dx%d", opts.MaxWidth, opts.MaxHeight)
+	if err := opts.check(); err != nil {
+		return Result{}, err
 	}
-	if opts.Quality <= 0 || opts.Quality > 100 {
-		return Result{}, fmt.Errorf("imageproc: bad quality %d", opts.Quality)
-	}
-	if opts.Background == nil {
-		opts.Background = color.White
-	}
-
 	img, format, err := image.Decode(src)
 	if err != nil {
 		return Result{}, fmt.Errorf("imageproc: decode: %w", err)
 	}
+	return normalise(dst, img, format, opts)
+}
 
+// NormaliseImage is Normalise for an image already in memory.
+//
+// It exists for the strip splitter (PLAN §12.3): a tall strip is decoded once,
+// cut into pieces, and each piece normalised from the decoded pixels. Going
+// back through an encoder between the cut and the fit would cost a JPEG
+// generation for nothing — and, more to the point, PLAN §12.3 requires the
+// split to happen *before* the fit-and-pad resize, so that each piece is
+// resized rather than the whole strip. Result.SrcFormat is empty here: the
+// caller knows the source format and this function does not.
+func NormaliseImage(dst io.Writer, img image.Image, opts Options) (Result, error) {
+	if err := opts.check(); err != nil {
+		return Result{}, err
+	}
+	return normalise(dst, img, "", opts)
+}
+
+// check validates and fills the options both entry points share.
+func (o *Options) check() error {
+	if o.MaxWidth <= 0 || o.MaxHeight <= 0 {
+		return fmt.Errorf("imageproc: bad target size %dx%d", o.MaxWidth, o.MaxHeight)
+	}
+	if o.Quality <= 0 || o.Quality > 100 {
+		return fmt.Errorf("imageproc: bad quality %d", o.Quality)
+	}
+	if o.Background == nil {
+		o.Background = color.White
+	}
+	return nil
+}
+
+func normalise(dst io.Writer, img image.Image, format string, opts Options) (Result, error) {
 	out, padded, guard, imgRect := fit(img, opts)
 
 	sb := img.Bounds()
