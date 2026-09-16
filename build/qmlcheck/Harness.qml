@@ -61,6 +61,14 @@ Window {
     property int robotsAsks: 0
     property bool robotsAskedFor: false
 
+    // What the delete affordance asked for (PLAN §12.4). Counters, because the
+    // point of the confirmation step is that the first tap asks and does not
+    // delete — which is only observable as a count that did not move.
+    property int deleteAsks: 0
+    property string deleteAskedAbout: ""
+    property int deleteConfirms: 0
+    property string deleteConfirmedAbout: ""
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -139,6 +147,14 @@ Window {
                   onVolumeDownloadRequested: {
                       win.volumeAsks++
                       win.volumeAskedFor = chapterId
+                  }
+                  onDeleteRequested: {
+                      win.deleteAsks++
+                      win.deleteAskedAbout = documentUuid
+                  }
+                  onDeleteConfirmed: {
+                      win.deleteConfirms++
+                      win.deleteConfirmedAbout = documentUuid
                   }
                   synopsis: "A long description that runs on and on. " }
 
@@ -578,6 +594,74 @@ Window {
         volumesModel.clear()
         win.want("a series that loses its volumes loses the switch", vs.visible, false)
         win.want("and is left looking at chapters", chapterList.view, "chapters")
+
+        // ---- deleting a download (PLAN §12.4) ------------------------------
+        //
+        // Two properties of the affordance are worth holding on to: it is only
+        // on rows that have something to delete, and the first tap asks rather
+        // than deletes.
+
+        chapterList.showView("chapters")
+        chapterList.closeConfirm()
+
+        var deletes = win.findChildren(chapterList, "deleteButton", [])
+        var visibleDeletes = function () {
+            var n = 0
+            for (var i = 0; i < deletes.length; ++i)
+                if (deletes[i].visible)
+                    n++
+            return n
+        }
+        win.want("nothing is downloaded, so no row offers Delete", visibleDeletes(), 0)
+
+        chaptersModel.setProperty(0, "documentUuid", "doc-1")
+        win.want("a downloaded row offers Delete", visibleDeletes(), 1)
+
+        // The first tap asks the backend for the question. Nothing is deleted
+        // by it, and that is the whole reason the step exists.
+        win.findChild(chapterList, "deleteArea").clicked(null)
+        win.want("tapping Delete asks once", win.deleteAsks, 1)
+        win.want("and asks about the document on the row", win.deleteAskedAbout, "doc-1")
+        win.want("asking deletes nothing", win.deleteConfirms, 0)
+
+        // The backend's answer, as Main.qml applies it.
+        chapterList.confirmingKind = "delete"
+        chapterList.confirmingId = "doc-1"
+        chapterList.confirmingMessage = "Move “The Lantern Keeper — Ch 0001.pdf” to your reMarkable’s Trash?"
+        var strip = win.findChild(chapterList, "confirmStrip")
+        win.want("the question is on screen", strip.visible, true)
+        win.want("and it is not offering a download",
+                 win.findChild(chapterList, "confirmDownloadButton").visible, false)
+
+        // Keep is the way out, and it must leave the download alone.
+        win.findChild(chapterList, "keepArea").clicked(null)
+        win.want("Keep closes the question", strip.visible, false)
+        win.want("Keep deletes nothing", win.deleteConfirms, 0)
+        win.want("and puts the strip back to downloads", chapterList.confirmingKind, "download")
+
+        // The answer that does delete carries the document, not the chapter.
+        chapterList.confirmingKind = "delete"
+        chapterList.confirmingId = "doc-1"
+        chapterList.confirmingMessage = "Move it to the Trash?"
+        win.findChild(chapterList, "confirmDeleteArea").clicked(null)
+        win.want("confirming deletes once", win.deleteConfirms, 1)
+        win.want("and names the document", win.deleteConfirmedAbout, "doc-1")
+        win.want("confirming closes the question", strip.visible, false)
+
+        // A question about a row that is no longer on screen must not survive
+        // the view changing under it.
+        chapterList.confirmingKind = "delete"
+        chapterList.confirmingId = "doc-1"
+        chapterList.confirmingMessage = "Move it to the Trash?"
+        chapterList.showView("volumes")
+        win.want("changing view closes the delete question", strip.visible, false)
+        win.want("and forgets which kind it was", chapterList.confirmingKind, "download")
+        chapterList.showView("chapters")
+
+        // Put the row back as it was, so nothing below inherits a downloaded
+        // row it did not ask for.
+        chaptersModel.setProperty(0, "documentUuid", "")
+        win.want("clearing the UUID takes the Delete button with it", visibleDeletes(), 0)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)

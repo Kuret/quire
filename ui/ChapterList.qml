@@ -449,6 +449,7 @@ Item {
 
                         MouseArea {
                             id: deleteArea
+                            objectName: "deleteArea"
                             anchors.fill: parent
                             enabled: deleteButton.visible
                             onClicked: screen.askToDelete(model.documentUuid)
@@ -693,6 +694,7 @@ Item {
 
                 MouseArea {
                     id: keepArea
+                    objectName: "keepArea"
                     anchors.fill: parent
                     onClicked: screen.closeConfirm()
                 }
@@ -717,6 +719,7 @@ Item {
 
                 MouseArea {
                     id: confirmDeleteArea
+                    objectName: "confirmDeleteArea"
                     anchors.fill: parent
                     onClicked: {
                         var uuid = screen.confirmingId
