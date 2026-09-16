@@ -25,6 +25,12 @@ Item {
     // log is paged like every other list, and nothing in Quire scrolls).
     property int logPage: 1
 
+    // The newest lines are the ones anyone diagnosing a problem wants, so a
+    // fresh log tail opens at the last page rather than the first.
+    onLogLinesChanged: screen.logPage = Paging.pageCount(
+        screen.logLines ? screen.logLines.length : 0,
+        Paging.rowsPerPage(logViewport.height, logPanel.rowHeight))
+
     signal pingRequested()
     signal logRequested()
     signal clearErrorRequested()
@@ -183,7 +189,10 @@ Item {
 
             readonly property int rowHeight: Math.max(1, Math.round(logLineProbe.height * 2))
             readonly property int pageSize: Paging.rowsPerPage(logViewport.height, logPanel.rowHeight)
-            readonly property int totalPages: Paging.pageCount(logView.count, logPanel.pageSize)
+            // From the model, not the view: a ListView updates its own count
+            // during a layout pass, so a page count taken from it lags a frame.
+            readonly property int lineCount: screen.logLines ? screen.logLines.length : 0
+            readonly property int totalPages: Paging.pageCount(logPanel.lineCount, logPanel.pageSize)
 
             Text {
                 id: logLineProbe
@@ -215,10 +224,6 @@ Item {
 
                     model: screen.logLines
 
-                    // The newest lines are the ones anyone diagnosing a problem
-                    // wants, so open at the last page rather than the first.
-                    onCountChanged: screen.logPage = logPanel.totalPages
-
                     delegate: Item {
                         width: logView.width
                         height: logPanel.rowHeight
@@ -241,7 +246,7 @@ Item {
                     text: "Nothing logged yet."
                     font.pointSize: Style.smallSize
                     color: Style.muted
-                    visible: logView.count === 0
+                    visible: logPanel.lineCount === 0
                 }
             }
 

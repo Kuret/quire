@@ -23,8 +23,15 @@ Item {
     // the view. Only the series grid, where the list is fetched lazily, needs
     // the backend's pager.
     property int page: 1
+    // From the model, not the view: a ListView updates its own count during a
+    // layout pass, so a page count taken from it lags by a frame.
+    readonly property int rowCount: screen.model ? screen.model.count : 0
     readonly property int pageSize: Paging.rowsPerPage(viewport.height, Style.rowHeight)
-    readonly property int totalPages: Paging.pageCount(list.count, screen.pageSize)
+    readonly property int totalPages: Paging.pageCount(screen.rowCount, screen.pageSize)
+
+    // Removing the last source on the last page would otherwise leave the user
+    // on a page that no longer exists.
+    onTotalPagesChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
 
     signal addRequested()
     signal openRequested(string sourceId, string name)
@@ -151,10 +158,6 @@ Item {
             cacheBuffer: 0
             contentY: Paging.firstIndex(screen.page, screen.pageSize) * Style.rowHeight
 
-            // Removing the last source on the last page would otherwise leave
-            // the user on a page that no longer exists.
-            onCountChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
-
             delegate: Item {
                 width: list.width
                 height: Style.rowHeight
@@ -245,7 +248,7 @@ Item {
         anchors.centerIn: viewport
         width: Math.min(parent.width - Style.margin * 2, 700)
         spacing: Style.gap
-        visible: list.count === 0
+        visible: screen.rowCount === 0
 
         Text {
             width: parent.width

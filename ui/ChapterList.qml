@@ -38,8 +38,13 @@ Item {
     // Where in the list we are. Everything is in hand, so the total is always
     // known and the label can always say "of".
     property int page: 1
+    // From the model, not the view: a ListView updates its own count during a
+    // layout pass, so a page count taken from it lags by a frame.
+    readonly property int rowCount: screen.model ? screen.model.count : 0
     readonly property int pageSize: Paging.rowsPerPage(viewport.height, Style.rowHeight)
-    readonly property int totalPages: Paging.pageCount(list.count, screen.pageSize)
+    readonly property int totalPages: Paging.pageCount(screen.rowCount, screen.pageSize)
+
+    onTotalPagesChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
 
     // The chapter whose confirm strip is open, and the backend's question about
     // it. Only ever one: the strip asks a question, and two open questions is
@@ -158,8 +163,6 @@ Item {
             cacheBuffer: 0
             contentY: Paging.firstIndex(screen.page, screen.pageSize) * Style.rowHeight
 
-            onCountChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
-
             delegate: Item {
                 id: entry
                 width: list.width
@@ -241,7 +244,7 @@ Item {
             text: screen.busy ? "Fetching…" : "No chapters listed."
             font.pointSize: Style.bodySize
             color: Style.muted
-            visible: list.count === 0
+            visible: screen.rowCount === 0
         }
     }
 
