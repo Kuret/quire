@@ -12,6 +12,7 @@ import (
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
+	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
 )
 
@@ -55,12 +56,18 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(mangadex.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// mangakakalot is the first family here that is not WordPress at all, so
+	// it is the one most likely to be waved through by a signal that is really
+	// just "this is a comic site". It scores on every page below like the rest.
+	if err := reg.Register(mangakakalot.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 3
+const scorers = 4
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -101,6 +108,26 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a mangathemesia reader page",
 			file:       "mangathemesia/testdata/reader.html",
 			wantWinner: mangathemesia.ID,
+		},
+		{
+			name:       "a mangakakalot home page",
+			file:       "mangakakalot/testdata/home.html",
+			wantWinner: mangakakalot.ID,
+		},
+		{
+			name:       "a mangakakalot series page",
+			file:       "mangakakalot/testdata/series.html",
+			wantWinner: mangakakalot.ID,
+		},
+		{
+			name:       "a mangakakalot listing page",
+			file:       "mangakakalot/testdata/browse.html",
+			wantWinner: mangakakalot.ID,
+		},
+		{
+			name:       "a mangakakalot reader page",
+			file:       "mangakakalot/testdata/reader.html",
+			wantWinner: mangakakalot.ID,
 		},
 		{
 			// The deliberate near-miss: WordPress, comic-shaped, and neither
@@ -224,6 +251,11 @@ func TestDeclaredAllowedHosts(t *testing.T) {
 		want []string
 	}{
 		{madara.New(nil), nil},
+		// The one family here that is not WordPress, and the one that does not
+		// host its own images: covers and page images both come from dedicated
+		// image hosts on another registrable domain, so declaring nothing would
+		// mean the SSRF guard refused every download.
+		{mangakakalot.New(nil), []string{"*.2xstorage.com", "storage.waitst.com"}},
 		{mangathemesia.New(nil), nil},
 		{generic.New(nil), nil},
 		// MangaDex serves page images from generated labels on a different
@@ -278,6 +310,7 @@ func TestSuggestedNames(t *testing.T) {
 	}{
 		{madara.New(nil), "", "hundreds of independently branded WordPress installs"},
 		{mangathemesia.New(nil), "", "likewise; a distributed theme lends no name"},
+		{mangakakalot.New(nil), "", "a family of mirrors with different names and no shared branding"},
 		{generic.New(nil), "", "the escape hatch knows nothing about the site it is pointed at"},
 		{mangadex.New(nil), "MangaDex", "one site, which knows what it is called; without this a " +
 			"new source is named from the API root's <title> and reads " +
