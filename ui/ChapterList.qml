@@ -30,10 +30,18 @@ Item {
     property string synopsis: ""
     property bool busy: false
 
+    // Whether this series is watched (PLAN §12.2). It is set from the watched
+    // list the backend pushes, never toggled locally: a tap sends the message
+    // and the answer comes back, so the button cannot end up disagreeing with
+    // the store after a failed round trip.
+    property bool watched: false
+
     signal downloadRequested(string chapterId)
     signal downloadConfirmed(string chapterId)
     signal downloadCancelled(string chapterId)
     signal readRequested(string documentUuid)
+    signal watchRequested()
+    signal unwatchRequested()
 
     // Where in the list we are. Everything is in hand, so the total is always
     // known and the label can always say "of".
@@ -122,7 +130,7 @@ Item {
             anchors {
                 top: parent.top; topMargin: Style.margin
                 left: parent.left; leftMargin: Style.margin
-                right: parent.right; rightMargin: Style.margin
+                right: watchButton.left; rightMargin: Style.gap
             }
             wrapMode: Text.WordWrap
             maximumLineCount: 3
@@ -131,6 +139,44 @@ Item {
                                              : (screen.busy ? "Fetching…" : "No description.")
             font.pointSize: Style.bodySize
             color: Style.muted
+        }
+
+        // Watching is offered here because this is where the baseline comes
+        // from: the backend seeds a new watch from the chapter list it last
+        // served, which is the one on screen. Watching from anywhere else
+        // would make the first check announce the whole back catalogue as new
+        // (PLAN §12.2).
+        Rectangle {
+            id: watchButton
+            objectName: "watchButton"
+            anchors {
+                right: parent.right; rightMargin: Style.margin
+                top: parent.top; topMargin: Style.margin
+            }
+            width: 220
+            height: Style.buttonHeight
+            color: watchArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: screen.watched ? "Unwatch" : "Watch"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: watchArea
+                anchors.fill: parent
+                onClicked: {
+                    if (screen.watched)
+                        screen.unwatchRequested()
+                    else
+                        screen.watchRequested()
+                }
+            }
         }
 
         Rectangle {
