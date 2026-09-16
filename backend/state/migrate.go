@@ -11,7 +11,7 @@ import (
 // lower version is migrated forward on load; a file from the future is refused,
 // because guessing at a shape a newer Quire wrote is how a user's sources get
 // mangled by a downgrade.
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 // migration is one forward step. Steps are applied in order, each taking the
 // file from To-1 to To, and the envelope version is written only once every
@@ -31,6 +31,7 @@ type migration struct {
 // rewriting history breaks the one device that skipped a version.
 var migrations = []migration{
 	{To: 2, Name: "seed allowedHosts from the theme", Apply: seedAllowedHosts},
+	{To: 3, Name: "drop watched series with no source", Apply: dropOrphanWatches},
 }
 
 // migrate brings a loaded file up to CurrentVersion.
@@ -106,5 +107,43 @@ func seedAllowedHosts(f *file, reg *theme.Registry, log *slog.Logger) (bool, err
 		log.Info("seeded allowedHosts for an existing source",
 			"source", src.ID, "theme", src.Theme, "hosts", hosts)
 	}
+	return changed, nil
+}
+
+// dropOrphanWatches is migration #2: the envelope gained PLAN §12.2's watched
+// series, and this is the step that says so.
+//
+// A file written before the watch list simply has none, and on that file this
+// step finds nothing to do — which is the normal case and is why it reports
+// false rather than rewriting the store for nothing.
+//
+// Its real work is the invariant it enforces on the way in: a watch whose
+// source is not in the file is dropped. Store.Remove takes the watches with the
+// source, so Quire itself does not create orphans — but this file is also
+// hand-editable and importable from another device (PLAN §7.2), and an imported
+// half of someone else's setup is exactly where a watch naming a source that
+// was never brought across would arrive. A watch like that can never be checked
+// (no source, so no theme) and can never be cleared from the UI (no row to put
+// it on), so the only honest thing to do with it is not to keep it.
+func dropOrphanWatches(f *file, _ *theme.Registry, log *slog.Logger) (bool, error) {
+	if len(f.Watched) == 0 {
+		return false, nil
+	}
+	known := make(map[string]struct{}, len(f.Sources))
+	for _, src := range f.Sources {
+		known[src.ID] = struct{}{}
+	}
+	kept := make([]*Watch, 0, len(f.Watched))
+	changed := false
+	for _, w := range f.Watched {
+		if _, ok := known[w.SourceID]; !ok {
+			changed = true
+			log.Info("dropped a watched series whose source is gone",
+				"source", w.SourceID, "series", w.SeriesID, "title", w.Title)
+			continue
+		}
+		kept = append(kept, w)
+	}
+	f.Watched = kept
 	return changed, nil
 }

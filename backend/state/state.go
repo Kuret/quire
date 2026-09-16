@@ -40,6 +40,12 @@ var ErrNotFound = errors.New("no such source")
 type file struct {
 	Version int             `json:"version"`
 	Sources []*theme.Source `json:"sources"`
+
+	// Watched is PLAN §12.2's watched series. It rides in the same envelope as
+	// the sources rather than in a file of its own because it is meaningless
+	// without them — a watch names a source — and because the pair has to be
+	// exported and imported together to be worth anything.
+	Watched []*Watch `json:"watched,omitempty"`
 }
 
 // Store holds the configured sources. It is safe for concurrent use: the
@@ -51,6 +57,7 @@ type Store struct {
 
 	mu      sync.RWMutex
 	sources []*theme.Source
+	watched []*Watch
 }
 
 // Open loads the store from dir, creating the directory if it is missing. A
@@ -102,7 +109,9 @@ func OpenWithLog(dir string, reg *theme.Registry, log *slog.Logger) (*Store, err
 		}
 	}
 	s.sources = f.Sources
+	s.watched = f.Watched
 	s.sort()
+	s.sortWatches()
 
 	if migrated {
 		// Written back immediately so the migration runs once, not on every
@@ -253,6 +262,10 @@ func (s *Store) Remove(id string) error {
 	for i, src := range s.sources {
 		if src.ID == id {
 			s.sources = append(s.sources[:i], s.sources[i+1:]...)
+			// PLAN §12.2: a watched series whose source is removed goes with
+			// it. Leaving the watch behind would leave a row nothing can
+			// check and nothing can un-watch.
+			s.dropWatchesFor(id)
 			return s.save()
 		}
 	}
@@ -274,7 +287,11 @@ func (s *Store) sort() {
 // device that lost power mid-write would lose every source the user added, and
 // there is no cloud copy to fall back on (PLAN §1.2).
 func (s *Store) save() error {
-	b, err := json.MarshalIndent(file{Version: fileVersion, Sources: s.sources}, "", "  ")
+	b, err := json.MarshalIndent(file{
+		Version: fileVersion,
+		Sources: s.sources,
+		Watched: s.watched,
+	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("state: %w", err)
 	}
