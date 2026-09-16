@@ -208,3 +208,52 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// Migration #3, and the reason it exists: a source stored on a real device
+// before 2026-09-16 carries `grouping` and `groupSize`, which theme.Source no
+// longer has. A removed field must never become a load error — the user has
+// live sources and losing them to a format change is the worst failure this
+// package has.
+func TestASourceCarryingTheRemovedGroupingFieldsStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	path := writeStore(t, dir, `{
+	  "version": 3,
+	  "sources": [
+	    {
+	      "id": "example",
+	      "name": "Example",
+	      "theme": "madara",
+	      "baseUrl": "https://example.invalid",
+	      "lang": "en",
+	      "addedAt": "2026-03-04T12:00:00Z",
+	      "grouping": "volume",
+	      "groupSize": 25
+	    }
+	  ]
+	}`)
+
+	store, err := state.Open(dir, migrationRegistry(t))
+	if err != nil {
+		t.Fatalf("a source carrying the removed settings would not load: %v", err)
+	}
+	src, ok := store.Get("example")
+	if !ok {
+		t.Fatal("the source did not survive the migration")
+	}
+	if src.Name != "Example" || src.BaseURL != "https://example.invalid" {
+		t.Errorf("the source came back changed: %+v", src)
+	}
+
+	// And the stale keys left the disk on that one rewrite, rather than
+	// lingering until something unrelated happened to save.
+	on := readStore(t, path)
+	if on["version"] != float64(state.CurrentVersion) {
+		t.Errorf("file version %v, want %d", on["version"], state.CurrentVersion)
+	}
+	stored := on["sources"].([]any)[0].(map[string]any)
+	for _, key := range []string{"grouping", "groupSize"} {
+		if _, still := stored[key]; still {
+			t.Errorf("%q is still on disk; the migration did not rewrite the file", key)
+		}
+	}
+}

@@ -11,7 +11,7 @@ import (
 // lower version is migrated forward on load; a file from the future is refused,
 // because guessing at a shape a newer Quire wrote is how a user's sources get
 // mangled by a downgrade.
-const CurrentVersion = 3
+const CurrentVersion = 4
 
 // migration is one forward step. Steps are applied in order, each taking the
 // file from To-1 to To, and the envelope version is written only once every
@@ -32,6 +32,7 @@ type migration struct {
 var migrations = []migration{
 	{To: 2, Name: "seed allowedHosts from the theme", Apply: seedAllowedHosts},
 	{To: 3, Name: "drop watched series with no source", Apply: dropOrphanWatches},
+	{To: 4, Name: "drop the removed grouping settings", Apply: dropGroupingSettings},
 }
 
 // migrate brings a loaded file up to CurrentVersion.
@@ -125,6 +126,31 @@ func seedAllowedHosts(f *file, reg *theme.Registry, log *slog.Logger) (bool, err
 // was never brought across would arrive. A watch like that can never be checked
 // (no source, so no theme) and can never be cleared from the UI (no row to put
 // it on), so the only honest thing to do with it is not to keep it.
+// dropGroupingSettings is migration #3, for the per-source `grouping` and
+// `groupSize` settings removed on 2026-09-16 when PLAN §6 M4 made the grouping
+// a choice at download time (see backend/assemble's GroupingChapter).
+//
+// **A removed field must not become a load error on a device that has one.**
+// It does not: theme.Source is decoded with encoding/json's default behaviour,
+// which ignores a key the struct no longer has, so a source stored with either
+// setting loads exactly as it did — it simply stops carrying a preference,
+// which is the whole point of the change.
+//
+// That makes this step's body empty by necessity: by the time a migration runs,
+// the keys are already gone from memory and there is nothing left to strip. Its
+// job is the *rewrite*. Reporting a change bumps the envelope to 4 and writes
+// the file back once, so the stale keys leave the disk on the next launch
+// rather than lingering until something unrelated happens to save. Keyed on the
+// version, it runs exactly once and never rewrites the file again.
+func dropGroupingSettings(f *file, _ *theme.Registry, log *slog.Logger) (bool, error) {
+	if len(f.Sources) == 0 {
+		return false, nil
+	}
+	log.Info("rewriting the source store without the removed grouping settings",
+		"sources", len(f.Sources))
+	return true, nil
+}
+
 func dropOrphanWatches(f *file, _ *theme.Registry, log *slog.Logger) (bool, error) {
 	if len(f.Watched) == 0 {
 		return false, nil
