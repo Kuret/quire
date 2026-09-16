@@ -84,7 +84,10 @@ func (t *Theme) relativeID(s *theme.Source, href string) string {
 
 // sameSite reports whether host is the configured host or its mobile sibling.
 func sameSite(host, base string) bool {
-	return strings.EqualFold(host, base) || strings.EqualFold(host, mobileHost(base))
+	// theme.SameSite covers the apex/www equivalence; the mobile sibling is
+	// this theme's own addition, because the scroll reader lives there and its
+	// links are absolute.
+	return theme.SameSite(host, base) || theme.SameSite(host, mobileHost(base))
 }
 
 // mobileHost is the `m.` sibling of a host. It stays under the same

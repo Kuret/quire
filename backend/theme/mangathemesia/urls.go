@@ -57,7 +57,11 @@ func (t *Theme) relativeID(s *theme.Source, href string) string {
 		return ""
 	}
 	abs := base.ResolveReference(u)
-	if !strings.EqualFold(abs.Hostname(), base.Hostname()) {
+	// theme.SameSite rather than an exact host comparison: a site that
+	// redirects its apex to www emits absolute links there, and comparing
+	// exactly discarded every one of them. See site.go — this was worth a
+	// live search returning zero results.
+	if !theme.SameSite(abs.Hostname(), base.Hostname()) {
 		return ""
 	}
 	out := abs.EscapedPath()

@@ -144,10 +144,12 @@ func (t *Theme) relativeID(s *theme.Source, href string) string {
 
 // sameSite reports whether host is the configured host or its mobile sibling.
 func sameSite(host, base string) bool {
-	if strings.EqualFold(host, base) {
-		return true
-	}
-	return strings.EqualFold(host, mobileHost(base))
+	// theme.SameSite covers the apex/www equivalence, which every theme needs
+	// and which cost a live madara search zero results before it existed. The
+	// mobile sibling is this theme's own addition, because its chapter-list
+	// API is served from there and its viewer links are absolute.
+	return theme.SameSite(host, base) ||
+		theme.SameSite(host, mobileHost(base))
 }
 
 // mobileHost is the `m.` sibling of a host: the chapter-list API lives there
