@@ -57,8 +57,7 @@ Item {
     // so setting the view to what it already is repaints nothing.
     onViewChanged: {
         screen.page = 1
-        screen.confirmingId = ""
-        screen.confirmingMessage = ""
+        screen.closeConfirm()
     }
 
     function showView(which) {
@@ -84,6 +83,14 @@ Item {
     signal volumeDownloadCancelled(string chapterId)
 
     signal readRequested(string documentUuid)
+
+    // Deleting a download (PLAN §12.4). Two signals because it is two steps and
+    // the question in between is the backend's: deleteRequested asks for it,
+    // deleteConfirmed is the answer. An accidental tap can only ever reach the
+    // first one.
+    signal deleteRequested(string documentUuid)
+    signal deleteConfirmed(string documentUuid)
+
     signal watchRequested()
     signal unwatchRequested()
 
@@ -107,6 +114,32 @@ Item {
     // off the row because the strip is no longer inside the row.
     property string confirmingId: ""
     property string confirmingMessage: ""
+
+    // Which question the strip is asking. "download" is the volume-download
+    // confirmation the strip was built for; "delete" is PLAN §12.4's. One
+    // property rather than a second strip: there is one place at the foot of
+    // the list for a question, and two strips fighting over it is two ways to
+    // answer the one you were not looking at.
+    property string confirmingKind: "download"
+
+    // askToDelete opens the delete question for a row. The sentence itself
+    // comes back from the backend, which is the only thing that knows what the
+    // document is called on the tablet.
+    function askToDelete(documentUuid) {
+        if (!documentUuid)
+            return
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+        screen.confirmingKind = "delete"
+        screen.deleteRequested(documentUuid)
+    }
+
+    // closeConfirm puts the strip away without answering it.
+    function closeConfirm() {
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+        screen.confirmingKind = "download"
+    }
 
     // The phases are backend/service's; the words each maps to are the view's,
     // and they are the only wording this file invents. Every sentence shown to
@@ -139,8 +172,7 @@ Item {
         }
         switch (state) {
         case "confirm":
-            screen.confirmingId = ""
-            screen.confirmingMessage = ""
+            screen.closeConfirm()
             return
         case "":
         case "failed":
@@ -162,8 +194,7 @@ Item {
         }
         switch (state) {
         case "confirm":
-            screen.confirmingId = ""
-            screen.confirmingMessage = ""
+            screen.closeConfirm()
             return
         case "":
         case "failed":
@@ -354,7 +385,8 @@ Item {
                     Column {
                         anchors {
                             left: parent.left; leftMargin: Style.margin
-                            right: downloadButton.left; rightMargin: Style.gap
+                            right: deleteButton.visible ? deleteButton.left : downloadButton.left
+                            rightMargin: Style.gap
                             verticalCenter: parent.verticalCenter
                         }
                         spacing: 4
@@ -389,6 +421,37 @@ Item {
                                     (model.scanlator.length > 0 ? " · " + model.scanlator : "")
                             font.pointSize: Style.smallSize
                             color: Style.muted
+                        }
+                    }
+
+                    // Only on a row that has something to delete, and never
+                    // instead of Read: the download is the thing the user came
+                    // for, and a delete that sits where they expect to tap to
+                    // read is a delete they will hit by accident.
+                    Rectangle {
+                        id: deleteButton
+                        objectName: "deleteButton"
+                        anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                        width: 140
+                        height: Style.buttonHeight
+                        visible: model.documentUuid ? true : false
+                        color: deleteArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Delete"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: deleteArea
+                            anchors.fill: parent
+                            enabled: deleteButton.visible
+                            onClicked: screen.askToDelete(model.documentUuid)
                         }
                     }
 
@@ -570,6 +633,7 @@ Item {
         Rectangle {
             id: confirmButton
             objectName: "confirmDownloadButton"
+            visible: screen.confirmingKind !== "delete"
             anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
             width: 220
             height: Style.buttonHeight
@@ -591,12 +655,74 @@ Item {
                 onClicked: {
                     var id = screen.confirmingId
                     var volume = screen.showingVolumes
-                    screen.confirmingId = ""
-                    screen.confirmingMessage = ""
+                    screen.closeConfirm()
                     if (volume)
                         screen.volumeDownloadConfirmed(id)
                     else
                         screen.downloadConfirmed(id)
+                }
+            }
+        }
+
+        // The delete question's answers. Two buttons rather than one, because
+        // this is the destructive question on the screen and "not this one"
+        // must be as easy to tap as the thing it is protecting. The way out is
+        // the wider of the two and sits under the thumb that just tapped
+        // Delete.
+        Row {
+            anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
+            spacing: Style.gap
+            visible: screen.confirmingKind === "delete"
+
+            Rectangle {
+                id: keepButton
+                objectName: "keepDownloadButton"
+                width: 160
+                height: Style.buttonHeight
+                color: keepArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Keep"
+                    font.pointSize: Style.smallSize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: keepArea
+                    anchors.fill: parent
+                    onClicked: screen.closeConfirm()
+                }
+            }
+
+            Rectangle {
+                id: confirmDeleteButton
+                objectName: "confirmDeleteButton"
+                width: 200
+                height: Style.buttonHeight
+                color: confirmDeleteArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.rule
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Move to Trash"
+                    font.pointSize: Style.smallSize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: confirmDeleteArea
+                    anchors.fill: parent
+                    onClicked: {
+                        var uuid = screen.confirmingId
+                        screen.closeConfirm()
+                        screen.deleteConfirmed(uuid)
+                    }
                 }
             }
         }
