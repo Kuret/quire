@@ -44,6 +44,10 @@ Item {
     signal toggleRequested(string sourceId, bool enabled)
     signal removeRequested(string sourceId)
     signal renameRequested(string sourceId, string name)
+    // PLAN §12.3's per-source override. mode is "auto", "never" or "always" —
+    // the schema's own spellings, sent as data. The words the user reads are
+    // chosen below and never travel.
+    signal splitStripsRequested(string sourceId, string mode)
     signal noticeDismissed()
 
     // A quiet line from the backend, above the list. Composed there, not here.
@@ -60,6 +64,45 @@ Item {
     // it.
     property string confirmingId: ""
     property string confirmingName: ""
+    // The open row's current splitting mode, carried for the same reason the
+    // name is: the strip is drawn outside the delegate that knows it.
+    property string confirmingSplit: "auto"
+
+    // The source whose splitting panel is open, and the mode shown as chosen.
+    // Kept as a plain string rather than read back through the model on each
+    // paint: an e-ink screen must not repaint on an unchanged value, and
+    // assigning the same string to a QML property emits no change signal.
+    property string splittingId: ""
+    property string splittingName: ""
+    property string splittingMode: "auto"
+
+    // The words for each mode, in one place. The backend never sends these —
+    // it sends "auto", "never", "always" — because PLAN §2 keeps the wording
+    // on the side that shows it, and because a mode is a value, not a sentence.
+    function splitModeLabel(mode) {
+        if (mode === "never")
+            return "Never"
+        if (mode === "always")
+            return "Always"
+        return "Automatic"
+    }
+
+    function startSplitting(sourceId, name, mode) {
+        screen.confirmingId = ""
+        screen.confirmingName = ""
+        screen.splittingId = sourceId
+        screen.splittingName = name
+        screen.splittingMode = mode ? mode : "auto"
+    }
+
+    function chooseSplitMode(mode) {
+        // Sending an unchanged value would make the backend rewrite the store
+        // and push a fresh source list for nothing, which on e-ink is a visible
+        // repaint of the whole screen.
+        if (mode !== screen.splittingMode)
+            screen.splitStripsRequested(screen.splittingId, mode)
+        screen.splittingMode = mode
+    }
 
     // The source being renamed, and the name being typed. Renaming is here
     // rather than on a screen of its own because it is one field: the name is
@@ -72,6 +115,7 @@ Item {
     function startRename(sourceId, name) {
         screen.confirmingId = ""
         screen.confirmingName = ""
+        screen.splittingId = ""
         screen.renamingId = sourceId
         screen.renameText = name
     }
@@ -205,6 +249,8 @@ Item {
                             var open = screen.confirmingId !== model.sourceId
                             screen.confirmingId = open ? model.sourceId : ""
                             screen.confirmingName = open ? model.name : ""
+                            screen.confirmingSplit = open && model.splitStrips
+                                                   ? model.splitStrips : "auto"
                         }
                     }
 
@@ -299,7 +345,7 @@ Item {
         Text {
             anchors {
                 left: parent.left; leftMargin: Style.margin
-                right: renameButton.left; rightMargin: Style.gap
+                right: splitButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
             elide: Text.ElideRight
@@ -307,6 +353,39 @@ Item {
                   "? Downloaded volumes stay in your library."
             font.pointSize: Style.smallSize
             color: Style.muted
+        }
+
+        // The splitting setting reads its current value on the button, so the
+        // answer to "is this source splitting my pages?" costs a long press
+        // rather than opening anything.
+        Rectangle {
+            id: splitButton
+            objectName: "splitButton"
+            anchors {
+                right: renameButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 300
+            height: Style.buttonHeight - Style.gap
+            color: splitArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                objectName: "splitButtonLabel"
+                anchors.centerIn: parent
+                text: "Splitting: " + screen.splitModeLabel(screen.confirmingSplit)
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: splitArea
+                anchors.fill: parent
+                onClicked: screen.startSplitting(screen.confirmingId, screen.confirmingName,
+                                                 screen.confirmingSplit)
+            }
         }
 
         Rectangle {
@@ -568,6 +647,138 @@ Item {
             onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
             onClearAll: screen.renameText = ""
             onSubmit: screen.commitRename()
+        }
+    }
+
+    // ---- strip splitting ---------------------------------------------------
+    //
+    // PLAN §12.3. Detection decides; the user overrules. It is a panel rather
+    // than a cycling button because three states on one button cannot say what
+    // any of them mean, and the explanation is the load-bearing part: the worry
+    // this feature answers is "an actual manga gets recognised as a webtoon and
+    // weirdly split", so the screen has to say plainly that that is what
+    // automatic avoids.
+    //
+    // No animation and no repaint on an unchanged value: taps that re-choose
+    // the current mode send nothing (see chooseSplitMode).
+    Rectangle {
+        id: splitPanel
+        objectName: "splitPanel"
+        anchors.fill: parent
+        color: Style.paper
+        visible: screen.splittingId.length > 0
+
+        MouseArea { anchors.fill: parent }
+
+        Column {
+            anchors {
+                top: parent.top; topMargin: Style.margin
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+            spacing: Style.gap
+
+            Text {
+                objectName: "splitHeading"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Split tall strip images into pages"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Text {
+                objectName: "splitExplanation"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Some sites publish a chapter as one very tall image meant " +
+                      "for scrolling. On a page it shrinks to an unreadable strip " +
+                      "down the middle, so Quire cuts it into page-shaped pieces.\n\n" +
+                      "Automatic only splits images far taller than a page, and " +
+                      "only when the rest of the chapter is the same shape. " +
+                      "Ordinary comic pages are left alone."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Repeater {
+                model: [
+                    {"mode": "auto",   "label": "Automatic",
+                     "note": "Split only what is clearly a scrolling strip. The usual choice."},
+                    {"mode": "never",  "label": "Never",
+                     "note": "Leave every image whole, even a tall one."},
+                    {"mode": "always", "label": "Always",
+                     "note": "Split any image taller than a page, without checking the chapter."}
+                ]
+
+                Rectangle {
+                    objectName: "splitOption-" + modelData.mode
+                    width: splitPanel.width - Style.margin * 2
+                    height: Style.rowHeight
+                    // The chosen row is drawn heavier rather than tinted: a fill
+                    // change is a full-row repaint on e-ink, and a border is
+                    // legible without one.
+                    color: optionArea.pressed ? Style.pressed : Style.paper
+                    border.width: screen.splittingMode === modelData.mode ? 4 : 2
+                    border.color: screen.splittingMode === modelData.mode ? Style.ink : Style.rule
+                    radius: 6
+
+                    Column {
+                        anchors {
+                            left: parent.left; leftMargin: Style.gap
+                            right: parent.right; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
+
+                        Text {
+                            objectName: "splitOptionLabel-" + modelData.mode
+                            text: screen.splittingMode === modelData.mode
+                                  ? modelData.label + " (chosen)" : modelData.label
+                            font.pointSize: Style.bodySize
+                            color: Style.ink
+                        }
+
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: modelData.note
+                            font.pointSize: Style.smallSize
+                            color: Style.muted
+                        }
+                    }
+
+                    MouseArea {
+                        id: optionArea
+                        anchors.fill: parent
+                        onClicked: screen.chooseSplitMode(modelData.mode)
+                    }
+                }
+            }
+
+            Rectangle {
+                objectName: "splitDoneButton"
+                width: 220
+                height: Style.buttonHeight
+                color: splitDoneArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Done"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: splitDoneArea
+                    objectName: "splitDoneArea"
+                    anchors.fill: parent
+                    onClicked: screen.splittingId = ""
+                }
+            }
         }
     }
 }

@@ -21,7 +21,10 @@ Window {
     ListModel {
         id: sourcesModel
         ListElement { sourceId: "s1"; name: "Example Reader"; baseUrl: "https://example.invalid"
-                      theme: "madara"; lang: "en"; enabled: true; status: "Working"; statusDetail: "" }
+                      theme: "madara"; lang: "en"; enabled: true; status: "Working"; statusDetail: ""
+                      splitStrips: "never" }
+        // No splitStrips at all: a source stored before PLAN §12.3 existed. It
+        // has to read as Automatic rather than blank.
         ListElement { sourceId: "s2"; name: "Another"; baseUrl: "https://other.invalid"
                       theme: "mangadex"; lang: "en"; enabled: false; status: "Off"; statusDetail: "" }
     }
@@ -44,6 +47,10 @@ Window {
     }
 
     property var typed: []
+
+    property int splitAsks: 0
+    property string splitAskedFor: ""
+    property string splitAskedAbout: ""
 
     property int robotsWrites: 0
     property int robotsAsks: 0
@@ -109,7 +116,17 @@ Window {
         return null
     }
 
-    SourceList  { id: sourceList;  objectName: "sourceList";  anchors.fill: parent; model: sourcesModel }
+    SourceList {
+        id: sourceList
+        objectName: "sourceList"
+        anchors.fill: parent
+        model: sourcesModel
+        onSplitStripsRequested: {
+            win.splitAsks++
+            win.splitAskedFor = mode
+            win.splitAskedAbout = sourceId
+        }
+    }
     AddSource   { id: addSource;   objectName: "addSource";   anchors.fill: parent }
     SeriesGrid  { id: seriesGrid;  objectName: "seriesGrid";  anchors.fill: parent; model: seriesModel }
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
@@ -435,6 +452,63 @@ Window {
         lonePager.busy = true; lonePager.pendingPage = 4
         win.want("label while fetching", win.findChild(lonePager, "pagerLabel").text, "Fetching page 4…")
         win.want("both controls dead while fetching", lonePager.canGoBack || lonePager.canGoOn, false)
+
+        // ---- PLAN §12.3: the per-source strip-splitting override --------
+        //
+        // The worry this feature answers is an ordinary manga being mistaken
+        // for a webtoon, so the control exists to be *found* and *understood*,
+        // not merely to exist. These check the two things a user would notice:
+        // that a source with nothing set reads as Automatic rather than blank,
+        // and that choosing a mode sends the schema's spelling exactly once.
+        var splitPanel = win.findChild(sourceList, "splitPanel")
+        win.want("the splitting panel is closed until asked for", splitPanel.visible, false)
+
+        // A source stored before the feature existed, opened from the row strip.
+        sourceList.confirmingId = "s2"
+        sourceList.confirmingName = "Another"
+        sourceList.confirmingSplit = ""
+        var splitLabel = win.findChild(sourceList, "splitButtonLabel")
+        win.want("an unset source reads as automatic, not blank",
+                 splitLabel.text, "Splitting: Automatic")
+
+        sourceList.confirmingSplit = "never"
+        win.want("the button says what is set", splitLabel.text, "Splitting: Never")
+        sourceList.confirmingSplit = "always"
+        win.want("and for always", splitLabel.text, "Splitting: Always")
+
+        // Opening the panel closes the row strip, so two things are never open.
+        sourceList.confirmingSplit = "never"
+        sourceList.startSplitting("s2", "Another", sourceList.confirmingSplit)
+        win.want("the panel opens", splitPanel.visible, true)
+        win.want("opening it closes the row strip", sourceList.confirmingId, "")
+        win.want("the chosen mode is marked",
+                 win.findChild(sourceList, "splitOptionLabel-never").text, "Never (chosen)")
+        win.want("the others are not",
+                 win.findChild(sourceList, "splitOptionLabel-auto").text, "Automatic")
+
+        // Re-choosing what is already chosen must send nothing: the reply is a
+        // fresh source list, which on e-ink repaints the whole screen.
+        win.splitAsks = 0
+        sourceList.chooseSplitMode("never")
+        win.want("re-choosing the current mode sends nothing", win.splitAsks, 0)
+
+        // A real change sends the schema's own spelling, once.
+        sourceList.chooseSplitMode("always")
+        win.want("choosing a mode asks once", win.splitAsks, 1)
+        win.want("it sends the schema spelling, not the label", win.splitAskedFor, "always")
+        win.want("it names the source", win.splitAskedAbout, "s2")
+        win.want("the panel follows the choice",
+                 win.findChild(sourceList, "splitOptionLabel-always").text, "Always (chosen)")
+
+        // And every mode the schema offers is reachable from the panel.
+        win.want("automatic is offered", win.findChild(sourceList, "splitOption-auto") !== null, true)
+        win.want("never is offered", win.findChild(sourceList, "splitOption-never") !== null, true)
+        win.want("always is offered", win.findChild(sourceList, "splitOption-always") !== null, true)
+
+        // Tapped for real, not closed by assignment: the assertion is about the
+        // button, so reaching past it would be testing nothing.
+        win.findChild(sourceList, "splitDoneArea").clicked(null)
+        win.want("done closes the panel", splitPanel.visible, false)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)

@@ -212,6 +212,9 @@ Rectangle {
                 "theme": s.theme,
                 "lang": s.lang,
                 "enabled": s.enabled,
+                // The backend resolves "unset" to "auto", so this is never
+                // blank; the fallback is for a reply from an older backend.
+                "splitStrips": s.splitStrips ? s.splitStrips : "auto",
                 "status": s.status,
                 "statusDetail": s.statusDetail ? s.statusDetail : ""
             })
@@ -511,6 +514,8 @@ Rectangle {
             onToggleRequested: root.send(Msg.SetSourceEnabled, {"sourceId": sourceId, "enabled": enabled})
             onRemoveRequested: root.send(Msg.RemoveSource, {"sourceId": sourceId})
             onRenameRequested: root.send(Msg.RenameSource, {"sourceId": sourceId, "name": name})
+            onSplitStripsRequested: root.send(Msg.SetSourceSplitStrips,
+                                              {"sourceId": sourceId, "splitStrips": mode})
         }
 
         AddSource {
