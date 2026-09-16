@@ -336,6 +336,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.openInReader(out, req)
 
+	case appload.MessageDeleteDownload:
+		var req deleteRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.deleteDownload(out, req)
+
 	case appload.MessageRenameSource:
 		var req struct {
 			SourceID string `json:"sourceId"`
