@@ -151,8 +151,8 @@ Item {
         Text {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "Type the site's web address. Quire will check what it can read " +
-                  "before adding anything."
+            text: "Type the site's address — the name is enough, no https:// needed. " +
+                  "Quire will check what it can read before adding anything."
             font.pointSize: Style.bodySize
             color: Style.muted
         }
@@ -186,7 +186,9 @@ Item {
 
             Text {
                 anchors { left: parent.left; leftMargin: Style.gap; verticalCenter: parent.verticalCenter }
-                text: "https://"
+                // An example rather than "https://": the probe fills the scheme
+                // in, and every character not typed on a touch keyboard counts.
+                text: "weebcentral.com"
                 font.pointSize: Style.bodySize
                 color: Style.rule
                 visible: screen.url.length === 0
