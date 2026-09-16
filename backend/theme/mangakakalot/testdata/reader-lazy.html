@@ -1,0 +1,36 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  The same reader page as testdata/reader.html, on a mirror whose skin
+  lazy-loads: the <img> tags carry a shared placeholder and no usable source,
+  so the DOM yields no pages and the inline arrays are the only real answer.
+
+  This is the case the Pages() fallback exists for. Without it the theme would
+  return an empty page list for such a mirror while the page it just fetched
+  plainly contained the images — a failure we could see and chose not to look
+  at. The test pins that the fallback happens without the source having to be
+  reconfigured.
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper Chapter 4 — Example Comics</title>
+</head>
+<body>
+<div class="body-site">
+  <div class="container-chapter-reader">
+    <img class="lazy" alt="The Lantern Keeper Chapter 4 page 1">
+    <img class="lazy" alt="The Lantern Keeper Chapter 4 page 2">
+    <img class="lazy" alt="The Lantern Keeper Chapter 4 page 3">
+  </div>
+
+  <script type="text/javascript">
+    var cdns = ["https:\/\/images.example.invalid\/"];
+    var chapterImages = ["the-lantern-keeper\/4\/0.webp","the-lantern-keeper\/4\/1.webp","the-lantern-keeper\/4\/2.webp"];
+  </script>
+</div>
+</body>
+</html>

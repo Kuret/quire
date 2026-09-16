@@ -1,0 +1,59 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "Reproduces the response shape of the mangakakalot-family chapter API:",
+    "GET /api/manga/{slug}/chapters?limit=-1 -> {success, data:{chapters:[...]}}.",
+    "Why synthetic: see testdata/home.html. No real host or title appears here.",
+    "ADVERSARIAL ON PURPOSE: the list is **descending**, newest chapter first,",
+    "which is the order the real API answers in. PLAN §7.2 requires Chapters()",
+    "to return ascending reading order, so a theme that forgot to reverse this",
+    "would assemble a volume that reads backwards — and this fixture makes that",
+    "a red test rather than a silent ruined PDF.",
+    "Other variations the test exercises: a decorative title carrying a second",
+    "number ('Chapter 4: Four Lamps'), a half chapter, an entry whose",
+    "chapter_num is null so the number has to come from the title, and an",
+    "entry with no slug at all, which must be skipped rather than stored as a",
+    "chapter with no URL."
+  ],
+  "success": true,
+  "data": {
+    "chapters": [
+      {
+        "chapter_name": "Chapter 4: Four Lamps",
+        "chapter_slug": "chapter-4",
+        "chapter_num": 4,
+        "updated_at": "2026-03-04T11:02:00.000000Z",
+        "view": 501
+      },
+      {
+        "chapter_name": "Chapter 3.5: Between Rounds",
+        "chapter_slug": "chapter-3-5",
+        "chapter_num": 3.5,
+        "updated_at": "2026-02-27T08:00:00.000000Z",
+        "view": 480
+      },
+      {
+        "chapter_name": "Chapter 3",
+        "chapter_slug": "chapter-3",
+        "chapter_num": null,
+        "updated_at": "2026-02-20T08:00:00.000000Z",
+        "view": 470
+      },
+      {
+        "chapter_name": "Chapter 2",
+        "chapter_slug": "",
+        "chapter_num": 2,
+        "updated_at": "2026-02-13T08:00:00.000000Z",
+        "view": 460
+      },
+      {
+        "chapter_name": "Chapter 1",
+        "chapter_slug": "chapter-1",
+        "chapter_num": 1,
+        "updated_at": "2026-02-06T08:00:00.000000Z",
+        "view": 900
+      }
+    ],
+    "pagination": { "total": 5, "per_page": -1, "current_page": 1 }
+  }
+}

@@ -1,0 +1,67 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a mangakakalot-family *listing* page generates — the
+  page an empty query browses, since this family's text search has nothing to
+  say about an empty string (PLAN §7.5, M3 correction 1).
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+
+  Deliberate variations exercised by the test:
+    - every card links to the series *twice* (cover and <h3>) and to its newest
+      chapter once; the chapter link must not be returned as a series
+    - the second card has no title attribute on its anchor, so the title has to
+      come from the link text
+    - covers are on a separate image host, which is this family's normal
+      arrangement and the reason the theme declares AllowedHosts at all
+    - the pager is present, so a future paging change has something to break
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Latest — Example Comics</title>
+</head>
+<body>
+<div class="leftCol listCol">
+  <div class="comic-list">
+    <div class="list-comic-item-wrap">
+      <a data-id="1001" class="list-story-item bookmark_check cover"
+         href="https://example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">
+        <img alt="The Lantern Keeper" class="lazy"
+             src="https://images.example.invalid/thumb/the-lantern-keeper.webp"
+             data-src="https://images.example.invalid/thumb/the-lantern-keeper.webp"
+             width="120" height="170" loading="lazy">
+      </a>
+      <h3>
+        <a href="https://example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">The Lantern Keeper</a>
+      </h3>
+      <a class="list-story-item-wrap-chapter" title="Chapter 4"
+         href="https://example.invalid/manga/the-lantern-keeper/chapter-4">Chapter 4</a>
+      <div><span class="aye_icon">12,345</span></div>
+    </div>
+
+    <div class="list-comic-item-wrap">
+      <a data-id="1002" class="list-story-item bookmark_check cover"
+         href="/manga/paper-birds">
+        <img alt="Paper Birds" class="lazy"
+             data-src="https://images.example.invalid/thumb/paper-birds.webp"
+             width="120" height="170" loading="lazy">
+      </a>
+      <h3>
+        <a href="/manga/paper-birds">Paper Birds</a>
+      </h3>
+      <a class="list-story-item-wrap-chapter" title="Chapter 11"
+         href="/manga/paper-birds/chapter-11">Chapter 11</a>
+    </div>
+  </div>
+
+  <div class="group_page">
+    <a href="https://example.invalid/manga-list/latest-manga?page=1" class="page_blue">First(1)</a>
+    <a class="page_select">1</a>
+    <a href="https://example.invalid/manga-list/latest-manga?page=2">2</a>
+    <a href="https://example.invalid/manga-list/latest-manga?page=9" class="page_blue page_last">Last(9)</a>
+  </div>
+</div>
+</body>
+</html>

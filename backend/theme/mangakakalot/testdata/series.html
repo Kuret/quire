@@ -1,0 +1,71 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a mangakakalot-family series page generates, and with it
+  the structural difference that makes this family a theme of its own rather
+  than a skin of an existing one: **there is no chapter list in this document
+  at all**. What ships instead is an empty #chapter-list-container carrying the
+  API endpoint in data-api-url and the reader URL shape in
+  data-chapter-url-template, which the page fills in client-side. Parsing this
+  file for chapters finds nothing — not a short list, nothing — which is why
+  Chapters() goes to the JSON API in testdata/chapters.json.
+
+  Metadata is a flat <ul class="manga-info-text"> of "Label : value" rows,
+  matched on the label rather than on position.
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+
+  Deliberate variations exercised by the test:
+    - the Author row is two linked names, and the Genres row several
+    - the Artist row is the "Updating" placeholder these sites leave behind and
+      must yield no artist
+    - the rows are in an order no other fixture uses, because position must not
+      matter
+    - the summary sits under a decorative "<title> summary:" heading which must
+      not end up in the description
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper — Example Comics</title>
+</head>
+<body>
+<div class="body-site">
+  <div class="manga-info-top">
+    <div class="manga-info-pic">
+      <img src="https://images.example.invalid/thumb/the-lantern-keeper.webp" alt="The Lantern Keeper">
+    </div>
+    <ul class="manga-info-text">
+      <li><h1>The Lantern Keeper</h1><h2 class="story-alternative">Alternative : Der Laternenwaerter, 灯守り</h2></li>
+      <li>Status : Ongoing</li>
+      <li class="genres">Genres :
+        <a href="https://example.invalid/genre/drama">Drama</a>,
+        <a href="https://example.invalid/genre/fantasy">Fantasy</a>
+      </li>
+      <li>Author(s) :
+        <a href="https://example.invalid/author/a-hollow">A. Hollow</a>,
+        <a href="https://example.invalid/author/b-vane">B. Vane</a>
+      </li>
+      <li>Artist(s) : Updating</li>
+      <li>Last updated : Mar-04-2026 11:02:00 PM</li>
+      <li>View : 12,345</li>
+    </ul>
+  </div>
+
+  <div id="contentBox">
+    <h2><p style="color: red;">The Lantern Keeper summary: </p></h2>
+    A lamplighter inherits a round nobody else will walk, and finds out why.
+  </div>
+
+  <div class="chapter-list-wrapper">
+    <div id="chapter-list-container" class="chapter-list-loading"
+         data-comic-slug="the-lantern-keeper"
+         data-api-url="https://example.invalid/api/manga/__SLUG__/chapters"
+         data-chapter-url-template="https://example.invalid/manga/__MANGA__/__CHAPTER__">
+      <p class="chapter-loading-text">Loading chapters...</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

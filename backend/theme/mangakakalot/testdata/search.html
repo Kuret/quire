@@ -1,0 +1,69 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a mangakakalot-family *search results* page generates in
+  the family's older row-per-result rendering: a .panel_story_list of
+  .story_item rows, each with the cover on the left and the title, author and
+  newest chapter beside it.
+
+  Both renderings are covered on purpose — this one and the grid in
+  testdata/browse.html — because this family is a long tail of mirrors running
+  different vintages of the same software, and a theme that only handled the
+  newest one would work on some mirrors and silently return nothing on others.
+
+  Provenance note, so this is not overclaimed: the grid was confirmed against a
+  live listing page while developing. The row rendering was not — every mirror
+  tried answered the search path with a browser challenge (PLAN §7.6: we take
+  that for an answer), so its shape here follows the selector set an existing
+  Apache-2.0 extension for the family documents. That is a fact about the
+  software, read and re-implemented, not copied expression (PLAN §1.4).
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+
+  Deliberate variations exercised by the test:
+    - a result whose row links to the series and to a chapter; only the series
+      may come back
+    - a result with no cover at all, which must not be dropped
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search — Example Comics</title>
+</head>
+<body>
+<div class="panel_story_list">
+  <div class="story_item">
+    <a href="https://example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">
+      <img src="https://images.example.invalid/thumb/the-lantern-keeper.webp" alt="The Lantern Keeper" width="90" height="120">
+    </a>
+    <div class="story_item_right">
+      <h3 class="story_name">
+        <a href="https://example.invalid/manga/the-lantern-keeper" title="The Lantern Keeper">The Lantern Keeper</a>
+      </h3>
+      <span class="story_chapter">
+        <a href="https://example.invalid/manga/the-lantern-keeper/chapter-4">Chapter 4</a>
+      </span>
+      <span>Author(s) : A. Hollow</span>
+    </div>
+  </div>
+
+  <div class="story_item">
+    <a href="/manga/lantern-keeper-side-stories" title="Lantern Keeper: Side Stories"></a>
+    <div class="story_item_right">
+      <h3 class="story_name">
+        <a href="/manga/lantern-keeper-side-stories">Lantern Keeper: Side Stories</a>
+      </h3>
+      <span class="story_chapter">
+        <a href="/manga/lantern-keeper-side-stories/chapter-2">Chapter 2</a>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="group_page">
+  <a class="page_select">1</a>
+  <a href="https://example.invalid/search/story/lantern?page=2">2</a>
+</div>
+</body>
+</html>

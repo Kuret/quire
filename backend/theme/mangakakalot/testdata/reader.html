@@ -1,0 +1,56 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape a mangakakalot-family reader page generates: the images
+  are **server-rendered** into .container-chapter-reader with absolute URLs on
+  a separate image host, and the same list is *also* present in inline
+  `cdns = [...]` / `chapterImages = [...]` arrays.
+
+  Both are reproduced because both are really there, and the theme reads one
+  with the other as its fallback. The arrays are written with escaped slashes
+  ("https:\/\/...") exactly as the real page writes them, because that escaping
+  is valid JavaScript and not a valid URL, and unescaping it is the theme's job.
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606),
+  images on images.example.invalid — a separate host, as on the real family,
+  which is what AllowedHosts exists for.
+
+  Deliberate variations exercised by the test:
+    - the DOM and the arrays agree, so either source yields the same pages and
+      the override has something meaningful to switch between
+    - each <img> carries an onerror fallback to a second image host, which must
+      not be mistaken for another page
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Lantern Keeper Chapter 4 — Example Comics</title>
+</head>
+<body>
+<div class="body-site">
+  <div class="panel-chapter-info-top">
+    <h1>The Lantern Keeper Chapter 4: Four Lamps</h1>
+  </div>
+
+  <div class="container-chapter-reader">
+    <img src="https://images.example.invalid/the-lantern-keeper/4/0.webp"
+         alt="The Lantern Keeper Chapter 4 page 1"
+         onerror="this.onerror=null;this.src='https://images-2.example.invalid/the-lantern-keeper/4/0.webp';"
+         loading="lazy"><img src="https://images.example.invalid/the-lantern-keeper/4/1.webp"
+         alt="The Lantern Keeper Chapter 4 page 2"
+         onerror="this.onerror=null;this.src='https://images-2.example.invalid/the-lantern-keeper/4/1.webp';"
+         loading="lazy"><img src="https://images.example.invalid/the-lantern-keeper/4/2.webp"
+         alt="The Lantern Keeper Chapter 4 page 3"
+         onerror="this.onerror=null;this.src='https://images-2.example.invalid/the-lantern-keeper/4/2.webp';"
+         loading="lazy">
+  </div>
+
+  <script type="text/javascript">
+    var cdns = ["https:\/\/images.example.invalid\/"];
+    var backupImage = [];
+    var chapterImages = ["the-lantern-keeper\/4\/0.webp","the-lantern-keeper\/4\/1.webp","the-lantern-keeper\/4\/2.webp"];
+  </script>
+</div>
+</body>
+</html>
