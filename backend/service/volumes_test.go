@@ -20,7 +20,7 @@ func TestGroupUsesTheSourcesVolumeLabels(t *testing.T) {
 		{ID: "c2", Title: "Chapter 2", Number: 2, Volume: "1"},
 		{ID: "c3", Title: "Chapter 3", Number: 3, Volume: "2"},
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingVolume, 0)
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingVolume)
 	if len(plans) != 2 {
 		t.Fatalf("%d volumes, want 2 — one per source label", len(plans))
 	}
@@ -35,14 +35,89 @@ func TestGroupUsesTheSourcesVolumeLabels(t *testing.T) {
 	}
 }
 
-// With no labels at all, runs of ten — and the volume must not claim to be the
-// source's "Volume 1".
-func TestGroupFallsBackToRunsWhenTheSourceHasNoVolumes(t *testing.T) {
+// With no labels at all there are no volumes to build, whatever was asked for:
+// PLAN §6 M4's volume view is offered only where volumes genuinely exist, and
+// runs of ten with numbers Quire invented are not volumes. The legacy path
+// keeps them — see TestLegacyGroupingStillCountsRunsForAnUnlabelledSource —
+// because records written before today were grouped that way.
+func TestAnUnlabelledSourceHasNoVolumesToGroupInto(t *testing.T) {
 	var chapters []theme.Chapter
 	for i := 1; i <= 12; i++ {
 		chapters = append(chapters, theme.Chapter{ID: string(rune('a' + i)), Number: float64(i)})
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingVolume, 0)
+	if volumesAvailable(chapters) {
+		t.Error("a source with no labels must not be offered a volume view; an empty tab is worse than no tab")
+	}
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingVolume)
+	if len(plans) != len(chapters) {
+		t.Fatalf("%d documents for %d chapters, want one each", len(plans), len(chapters))
+	}
+	for i, p := range plans {
+		if len(p.Chapters) != 1 {
+			t.Errorf("document %d holds %d chapters", i, len(p.Chapters))
+		}
+		if p.SourceLabelled {
+			t.Errorf("document %d claims to be the source's own volume", i)
+		}
+	}
+}
+
+// The tail of a labelled series carries no label of its own: labels appear once
+// a print edition exists, and the newest chapters are ahead of it. Those still
+// become a volume, because the series genuinely has volumes — they are just
+// grouped by counting, and must not claim a number the site never used.
+func TestTheUnlabelledTailOfALabelledSeriesStillGroups(t *testing.T) {
+	var chapters []theme.Chapter
+	for i := 1; i <= 16; i++ {
+		c := theme.Chapter{ID: fmt.Sprintf("c%d", i), Number: float64(i)}
+		if i <= 6 {
+			c.Volume = "1"
+		}
+		chapters = append(chapters, c)
+	}
+	if !volumesAvailable(chapters) {
+		t.Fatal("a series with a labelled run has volumes worth offering")
+	}
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingVolume)
+	if len(plans) != 2 {
+		t.Fatalf("%d documents, want the labelled 6 and a run of the remaining 10", len(plans))
+	}
+	if len(plans[0].Chapters) != 6 || !plans[0].SourceLabelled {
+		t.Errorf("labelled volume holds %d chapters, sourceLabelled=%v",
+			len(plans[0].Chapters), plans[0].SourceLabelled)
+	}
+	if len(plans[1].Chapters) != assemble.DefaultChaptersPerVolume {
+		t.Errorf("the unlabelled tail holds %d chapters, want %d",
+			len(plans[1].Chapters), assemble.DefaultChaptersPerVolume)
+	}
+	if plans[1].SourceLabelled {
+		t.Error("a run we counted must not be presented as the source's own volume")
+	}
+}
+
+// A label on every single chapter is not a volume structure, it is the chapter
+// list with different words on it. Offering it is the empty tab one step in.
+func TestALabelPerChapterIsNotAVolumeView(t *testing.T) {
+	var chapters []theme.Chapter
+	for i := 1; i <= 8; i++ {
+		chapters = append(chapters, theme.Chapter{
+			ID: fmt.Sprintf("c%d", i), Number: float64(i), Volume: fmt.Sprintf("%d", i),
+		})
+	}
+	if volumesAvailable(chapters) {
+		t.Error("a volume view that is one row per chapter says nothing the chapter list does not")
+	}
+}
+
+// Records written before 2026-09-16 were grouped with no such questions asked,
+// so the legacy path must keep counting runs for an unlabelled source. Without
+// this, Read silently stops working on everything downloaded before today.
+func TestLegacyGroupingStillCountsRunsForAnUnlabelledSource(t *testing.T) {
+	var chapters []theme.Chapter
+	for i := 1; i <= 12; i++ {
+		chapters = append(chapters, theme.Chapter{ID: string(rune('a' + i)), Number: float64(i)})
+	}
+	plans := legacyGrouping("Snotgirl", chapters)
 	if len(plans) != 2 {
 		t.Fatalf("%d volumes, want 2 runs of %d", len(plans), assemble.DefaultChaptersPerVolume)
 	}
@@ -51,6 +126,10 @@ func TestGroupFallsBackToRunsWhenTheSourceHasNoVolumes(t *testing.T) {
 	}
 	if len(plans[0].Chapters) != assemble.DefaultChaptersPerVolume {
 		t.Errorf("first run holds %d chapters", len(plans[0].Chapters))
+	}
+	if plans[0].Label != "1" || plans[1].Label != "2" {
+		t.Errorf("labels %q and %q; these are the keys a stored record is found by",
+			plans[0].Label, plans[1].Label)
 	}
 }
 
@@ -62,7 +141,7 @@ func TestGroupRefusesToBuildAVolumeFromAnUnorderedList(t *testing.T) {
 		{ID: "c2", Title: "Finale", Number: -1, OrderUnknown: true},
 		{ID: "c3", Title: "Prologue", Number: -1, OrderUnknown: true},
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingChapter, 0)
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingChapter)
 	if len(plans) != len(chapters) {
 		t.Fatalf("%d volumes, want one per chapter", len(plans))
 	}
@@ -91,7 +170,7 @@ func TestAPerChapterFileIsNamedAfterItsChapter(t *testing.T) {
 		{ID: "c1", Title: "Interlude", Number: -1, OrderUnknown: true},
 		{ID: "c2", Title: "Finale", Number: -1, OrderUnknown: true},
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingChapter, 0)
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingChapter)
 	name := documentName(plans[0], &assemble.Manifest{})
 	if !strings.Contains(name, "Interlude") {
 		t.Errorf("name %q does not name the chapter", name)
@@ -110,7 +189,7 @@ func TestAVolumeIsNamedSeriesAndVolume(t *testing.T) {
 	plans := groupVolumes("Snotgirl", []theme.Chapter{
 		{ID: "c1", Number: 1, Volume: "3"},
 		{ID: "c2", Number: 2, Volume: "3"},
-	}, theme.GroupingVolume, 0)
+	}, assemble.GroupingVolume)
 	if got := documentName(plans[0], &assemble.Manifest{}); got != "Snotgirl — Vol 3.pdf" {
 		t.Errorf("name %q", got)
 	}
@@ -123,7 +202,7 @@ func TestAVolumeIsNamedSeriesAndVolume(t *testing.T) {
 // reversed 2026-09-16), so PerChapter no longer means "something went wrong"
 // and OrderUnknown is the field that does. The claim is unchanged.
 func TestASingleChapterIsNotTreatedAsUnordered(t *testing.T) {
-	plans := groupVolumes("Snotgirl", []theme.Chapter{{ID: "c1", Title: "Only", Number: 1}}, theme.GroupingChapter, 0)
+	plans := groupVolumes("Snotgirl", []theme.Chapter{{ID: "c1", Title: "Only", Number: 1}}, assemble.GroupingChapter)
 	if len(plans) != 1 {
 		t.Fatalf("%d volumes", len(plans))
 	}
@@ -141,7 +220,7 @@ func TestVolumeContainingFindsEveryChapter(t *testing.T) {
 		{ID: "c3", Number: 3, Volume: "2"},
 	}
 	for _, c := range chapters {
-		vol, ok := volumeContaining("Snotgirl", chapters, c.ID, theme.GroupingVolume, 0)
+		vol, ok := volumeContaining("Snotgirl", chapters, c.ID, assemble.GroupingVolume)
 		if !ok {
 			t.Fatalf("%s is in no volume", c.ID)
 		}
@@ -149,7 +228,7 @@ func TestVolumeContainingFindsEveryChapter(t *testing.T) {
 			t.Errorf("%s landed in volume %q, want %q", c.ID, vol.Label, c.Volume)
 		}
 	}
-	if _, ok := volumeContaining("Snotgirl", chapters, "gone", theme.GroupingVolume, 0); ok {
+	if _, ok := volumeContaining("Snotgirl", chapters, "gone", assemble.GroupingVolume); ok {
 		t.Error("a chapter that is not in the list must not resolve")
 	}
 }
@@ -168,10 +247,10 @@ func TestTheDefaultIsOnePDFPerChapterEvenWithVolumeLabels(t *testing.T) {
 		{ID: "c2", Title: "Chapter 2", Number: 2, Volume: "1"},
 		{ID: "c3", Title: "Chapter 3", Number: 3, Volume: "2"},
 	}
-	// An untouched source: no grouping set at all, which is what every source
-	// added before this setting existed looks like.
-	var src theme.Source
-	plans := groupVolumes("Snotgirl", chapters, src.Group(), src.Size())
+	// A request that says nothing about grouping, which is what an older
+	// frontend — and every replayed message — sends.
+	var req downloadRequest
+	plans := groupVolumes("Snotgirl", chapters, req.grouping())
 
 	if len(plans) != len(chapters) {
 		t.Fatalf("%d documents for %d chapters; the default is one each", len(plans), len(chapters))
@@ -206,7 +285,7 @@ func TestGroupingVolumeStillGroupsByTheSourcesVolumes(t *testing.T) {
 		{ID: "c2", Number: 2, Volume: "1"},
 		{ID: "c3", Number: 3, Volume: "2"},
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingVolume, theme.DefaultGroupSize)
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingVolume)
 	if len(plans) != 2 {
 		t.Fatalf("%d documents, want one per source label", len(plans))
 	}
@@ -219,40 +298,16 @@ func TestGroupingVolumeStillGroupsByTheSourcesVolumes(t *testing.T) {
 	}
 }
 
-// A fixed count ignores the labels, which is the point of choosing it: a source
-// whose volumes are forty chapters long is exactly why someone would.
-func TestGroupingCountIgnoresVolumeLabels(t *testing.T) {
-	var chapters []theme.Chapter
-	for i := 1; i <= 5; i++ {
-		chapters = append(chapters, theme.Chapter{
-			ID: fmt.Sprintf("c%d", i), Number: float64(i), Volume: "1",
-		})
-	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingCount, 2)
-	if len(plans) != 3 {
-		t.Fatalf("%d documents, want 3 runs of 2 (2+2+1)", len(plans))
-	}
-	sizes := []int{2, 2, 1}
-	for i, want := range sizes {
-		if len(plans[i].Chapters) != want {
-			t.Errorf("run %d holds %d chapters, want %d", i+1, len(plans[i].Chapters), want)
-		}
-		if plans[i].SourceLabelled {
-			t.Error("a run we counted must not be presented as the source's own volume")
-		}
-	}
-}
-
-// Whatever the setting says, a series whose order the theme could not work out
-// is still one chapter per file — and still says why. PLAN §7.2's ordering
-// contract does not become negotiable because a grouping setting exists.
-func TestAnUnknownOrderOverridesTheGroupingSetting(t *testing.T) {
+// Whatever the request asks for, a series whose order the theme could not work
+// out is still one chapter per file — and still says why. PLAN §7.2's ordering
+// contract does not become negotiable because the user tapped a volume.
+func TestAnUnknownOrderOverridesTheRequestedGrouping(t *testing.T) {
 	chapters := []theme.Chapter{
 		{ID: "c1", Title: "Interlude", Number: -1, Volume: "1", OrderUnknown: true},
 		{ID: "c2", Title: "Finale", Number: -1, Volume: "1", OrderUnknown: true},
 	}
-	for _, mode := range []string{theme.GroupingVolume, theme.GroupingCount} {
-		plans := groupVolumes("Snotgirl", chapters, mode, 10)
+	for _, mode := range assemble.GroupingValues {
+		plans := groupVolumes("Snotgirl", chapters, mode)
 		if len(plans) != len(chapters) {
 			t.Fatalf("grouping=%s: %d documents, want one per chapter", mode, len(plans))
 		}
@@ -274,7 +329,7 @@ func TestPerChapterDocumentsSortInAFlatFolder(t *testing.T) {
 		{ID: "c3", Title: "Chapter 12.5", Number: 12.5},
 		{ID: "c4", Title: "Chapter 100", Number: 100},
 	}
-	plans := groupVolumes("Snotgirl", chapters, theme.GroupingChapter, 0)
+	plans := groupVolumes("Snotgirl", chapters, assemble.GroupingChapter)
 
 	var names []string
 	for _, p := range plans {
@@ -303,7 +358,7 @@ func TestPerChapterDocumentsSortInAFlatFolder(t *testing.T) {
 func TestAnUnnumberedChapterIsNamedAfterItself(t *testing.T) {
 	plans := groupVolumes("Snotgirl", []theme.Chapter{
 		{ID: "extra-1", Title: "Extra", Number: -1},
-	}, theme.GroupingChapter, 0)
+	}, assemble.GroupingChapter)
 	got := documentName(plans[0], &assemble.Manifest{})
 	if got != "Snotgirl — Extra.pdf" {
 		t.Errorf("document name %q", got)

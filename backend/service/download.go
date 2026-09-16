@@ -42,19 +42,41 @@ const (
 //
 // VolumeID is the chapter the user tapped. It names the *document* that
 // chapter belongs to, which by default (PLAN §6 M4, reversed 2026-09-16) is
-// that chapter on its own, and is a whole volume when the source's grouping
-// setting says so. The field keeps its name because it keys library.Record and
-// renaming it would orphan every download already on the tablet.
+// that chapter on its own, and is a whole volume when the request asks for one.
+// The field keeps its name because it keys library.Record and renaming it would
+// orphan every download already on the tablet.
 type downloadRequest struct {
 	SourceID string `json:"sourceId"`
 	SeriesID string `json:"seriesId"`
 	VolumeID string `json:"volumeId"`
+
+	// Grouping is what this download wants: assemble.GroupingChapter, the
+	// default, or assemble.GroupingVolume when the user tapped a row in the
+	// volume view (PLAN §6 M4, revised 2026-09-16).
+	//
+	// It rides on the request rather than on the source because the question
+	// it answers is situational — whether the user is about to be without a
+	// connection — and not a property of a website. Empty means chapter, so an
+	// older frontend that does not send it still gets the default.
+	Grouping string `json:"grouping,omitempty"`
 
 	// Confirmed is set on the second send, after the user has been told what
 	// the volume covers. A tap that quietly queues ten chapters and a few
 	// hundred megabytes is not the UI saying what it is doing (PLAN §6 M3), so
 	// the first send answers with a question instead of starting work.
 	Confirmed bool `json:"confirmed"`
+}
+
+// grouping is the request's grouping with the default filled in.
+//
+// Anything unrecognised resolves to one PDF per chapter rather than being
+// refused: a bad value costs the user a download they asked for, and the
+// default is the safe answer in every case.
+func (r downloadRequest) grouping() string {
+	if r.Grouping == assemble.GroupingVolume {
+		return assemble.GroupingVolume
+	}
+	return assemble.GroupingChapter
 }
 
 // downloadProgress is the MessageDownloadProgress payload.
@@ -246,9 +268,9 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 //
 // Since PLAN §6 M4 was reversed on 2026-09-16 that is the *common* case, not
 // an edge one — one PDF per chapter is the default — so this path is now
-// mostly the early return below. It stays because the grouping setting still
-// exists, and a tap that quietly queues ten chapters and a few hundred
-// megabytes is exactly what it was written for.
+// mostly the early return below. It stays for the volume view: a tap there
+// queues ten chapters and a few hundred megabytes, which is exactly what it
+// was written for.
 func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequest) {
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
 
@@ -267,7 +289,7 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 		_ = s.sendError(out, "chapters_failed", plain(err))
 		return
 	}
-	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, src.Group(), src.Size())
+	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, req.grouping())
 	if !ok {
 		_ = s.sendError(out, "not_found",
 			fmt.Sprintf("That chapter is no longer in %s's chapter list.", series.Title))
@@ -287,14 +309,17 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 	n := len(vol.Chapters)
 
 	// Name the source's own volume when there is one: "Volume 3" is something
-	// the reader recognises from the site. A number Quire made up by counting
-	// chapters is not, so that case says what it actually did instead.
+	// the reader recognises from the site. The chapters past the last label —
+	// the ones no print edition has reached yet — are grouped by counting
+	// instead, and saying so is better than calling them a volume number the
+	// site has never used.
 	var what string
 	if vol.SourceLabelled {
 		what = fmt.Sprintf("Volume %s of %s is %d chapters, %s to %s.", vol.Label, vol.Series, n, first, last)
 	} else {
-		what = fmt.Sprintf("%s doesn’t number its volumes, so Quire groups it into runs of %d. "+
-			"This one is %s to %s.", vol.Series, assemble.DefaultChaptersPerVolume, first, last)
+		what = fmt.Sprintf("%s hasn’t given these chapters a volume number yet, so Quire groups "+
+			"them into runs of %d. This one is %s to %s.",
+			vol.Series, assemble.DefaultChaptersPerVolume, first, last)
 	}
 
 	p.Phase = phaseConfirm
@@ -302,8 +327,8 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 	p.ChapterCount = n
 	p.FirstChapter, p.LastChapter = first, last
 	p.VolumeLabel = vol.Label
-	p.Message = fmt.Sprintf("%s Quire downloads a whole volume at a time, so your place in the "+
-		"reader carries across chapters. Download all %d?", what, n)
+	p.Message = fmt.Sprintf("%s It becomes one file, so your place in the reader carries "+
+		"across chapters. Download all %d?", what, n)
 	_ = send(out, appload.MessageDownloadProgress, p)
 }
 
@@ -419,7 +444,7 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		return
 	}
 
-	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, src.Group(), src.Size())
+	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, req.grouping())
 	if !ok {
 		fail("That chapter is no longer in %s's chapter list.", series.Title)
 		return
@@ -727,9 +752,9 @@ func documentName(vol volumePlan, manifest *assemble.Manifest) string {
 // user is looking at in the chapter list, so the volume they get is the one
 // the chapter they tapped appears to be in.
 func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID string,
-	mode string, size int) (volumePlan, bool) {
+	mode string) (volumePlan, bool) {
 
-	for _, v := range groupVolumes(seriesTitle, chapters, mode, size) {
+	for _, v := range groupVolumes(seriesTitle, chapters, mode) {
 		for _, c := range v.Chapters {
 			if c.ID == chapterID {
 				return v, true
@@ -796,14 +821,80 @@ const UnorderedSeriesNote = "Quire couldn’t work out what order this series’
 // requires to be ascending reading order. This deliberately does not sort: two
 // places normalising order is how order drifts.
 //
-// mode is theme.Source.Grouping — "chapter" (the default), "volume" or
-// "count" — and size is theme.Source.GroupSize. PLAN §6 M4 was reversed on
+// mode is what the *download request* asked for — assemble.GroupingChapter,
+// the default, or assemble.GroupingVolume. PLAN §6 M4 was revised on
 // 2026-09-16: the source's volume labels are information, not an instruction,
-// so a label no longer decides anything unless the user has asked it to.
-func groupVolumes(seriesTitle string, chapters []theme.Chapter, mode string, size int) []volumePlan {
+// so a label decides nothing until the user picks the volume view.
+//
+// Two things override the request, both of them silently, because both are
+// cases where the volume view was never offered in the first place and the
+// request could only have come from an older frontend or a replayed message:
+// an unknowable reading order, and a source that publishes no labels.
+func groupVolumes(seriesTitle string, chapters []theme.Chapter, mode string) []volumePlan {
 	if seriesTitle == "" {
 		seriesTitle = "Series"
 	}
+	flat := flattenChapters(chapters)
+
+	// An unknowable reading order overrides whatever was asked for. A volume
+	// is a *run* of chapters, so building one from a list the theme admits it
+	// could not order produces a silently scrambled book.
+	if !theme.OrderIsKnown(chapters) {
+		return perChapterVolumes(seriesTitle, flat, true)
+	}
+	if mode != assemble.GroupingVolume || !volumesAvailable(chapters) {
+		return perChapterVolumes(seriesTitle, flat, false)
+	}
+
+	return labelledVolumes(seriesTitle, flat)
+}
+
+// labelledVolumes groups on the source's own volume labels, with runs of
+// DefaultChaptersPerVolume across the stretch it has not labelled. It asks no
+// questions: the caller has already decided this series has volumes worth
+// building.
+func labelledVolumes(seriesTitle string, flat []assemble.Chapter) []volumePlan {
+	grouped := assemble.GroupIntoVolumes(seriesTitle, flat, assemble.DefaultChaptersPerVolume)
+	plans := make([]volumePlan, 0, len(grouped))
+	for _, v := range grouped {
+		plans = append(plans, volumePlan{
+			Volume:         v,
+			SourceLabelled: len(v.Chapters) > 0 && v.Chapters[0].Volume != "",
+		})
+	}
+	return plans
+}
+
+// legacyGrouping redoes the grouping **the way it was done before 2026-09-16**,
+// for the sole benefit of library records written back then.
+//
+// It is deliberately not groupVolumes. A record already on the tablet was
+// written when the source's volume labels decided the grouping on their own —
+// with no volume view to opt into and no check that the labels were worth
+// offering — so re-deriving it through today's rules would look for "Vol 3"
+// among documents grouped some other way, find nothing, and quietly stop
+// offering Read on a volume sitting on the tablet. Changing how grouping is
+// chosen must not orphan what is already downloaded.
+//
+// The one thing it keeps from today is the ordering contract, because that was
+// true then too: a list whose order the theme could not establish was never
+// assembled into a volume, so there is no legacy volume to find.
+func legacyGrouping(seriesTitle string, chapters []theme.Chapter) []volumePlan {
+	if seriesTitle == "" {
+		seriesTitle = "Series"
+	}
+	flat := flattenChapters(chapters)
+	if !theme.OrderIsKnown(chapters) {
+		return perChapterVolumes(seriesTitle, flat, true)
+	}
+	return labelledVolumes(seriesTitle, flat)
+}
+
+// flattenChapters converts a theme's chapter list into the assembler's, in the
+// order the theme gave it. PLAN §7.2 requires that order to be ascending
+// reading order, and nothing here re-sorts: two places normalising order is how
+// order drifts.
+func flattenChapters(chapters []theme.Chapter) []assemble.Chapter {
 	flat := make([]assemble.Chapter, 0, len(chapters))
 	for _, c := range chapters {
 		flat = append(flat, assemble.Chapter{
@@ -813,38 +904,41 @@ func groupVolumes(seriesTitle string, chapters []theme.Chapter, mode string, siz
 			Volume: c.Volume,
 		})
 	}
+	return flat
+}
 
-	// An unknowable reading order overrides whatever was asked for. A volume
-	// is a *run* of chapters, so building one from a list the theme admits it
-	// could not order produces a silently scrambled book.
-	if !theme.OrderIsKnown(chapters) {
-		return perChapterVolumes(seriesTitle, flat, true)
+// volumesAvailable reports whether this series has volumes worth offering as a
+// view of its own (PLAN §6 M4, revised 2026-09-16).
+//
+// The affordance is decided from the data, not from a setting, because an empty
+// tab is a worse answer than no tab. Three things have to hold:
+//
+//  1. **The reading order is known.** §7.2's contract: a list we could not
+//     order must never be assembled into a multi-chapter PDF, so offering to
+//     is offering a scrambled book.
+//  2. **The source publishes at least one real label.** Numbers Quire made up
+//     by counting to ten are not volumes, and "the second group of ten" means
+//     nothing to a reader looking at a site that has no volumes.
+//  3. **Grouping by those labels actually groups.** A series whose every
+//     chapter carries a distinct label produces a volume view that is the
+//     chapter list with different words on it — the same emptiness as an empty
+//     tab, one step further in.
+func volumesAvailable(chapters []theme.Chapter) bool {
+	if len(chapters) == 0 || !theme.OrderIsKnown(chapters) {
+		return false
 	}
-
-	var grouped []assemble.Volume
-	switch mode {
-	case theme.GroupingVolume:
-		// The source's own Volume label wherever there is one, runs of size
-		// where there is not. This was the default until 2026-09-16 and is
-		// now something the user asks for.
-		grouped = assemble.GroupIntoVolumes(seriesTitle, flat, size)
-	case theme.GroupingCount:
-		grouped = assemble.GroupIntoRuns(seriesTitle, flat, size)
-	default:
-		// theme.GroupingChapter, and anything a hand-edited source smuggled
-		// past validation: one PDF per chapter. Falling back to the default
-		// rather than refusing keeps a bad value from costing a download.
-		return perChapterVolumes(seriesTitle, flat, false)
+	labelled := false
+	for _, c := range chapters {
+		if strings.TrimSpace(c.Volume) != "" {
+			labelled = true
+			break
+		}
 	}
-
-	plans := make([]volumePlan, 0, len(grouped))
-	for _, v := range grouped {
-		plans = append(plans, volumePlan{
-			Volume:         v,
-			SourceLabelled: mode == theme.GroupingVolume && len(v.Chapters) > 0 && v.Chapters[0].Volume != "",
-		})
+	if !labelled {
+		return false
 	}
-	return plans
+	return len(assemble.GroupIntoVolumes("", flattenChapters(chapters),
+		assemble.DefaultChaptersPerVolume)) < len(chapters)
 }
 
 // splitToBudget splits a downloaded volume into parts that each fit inside

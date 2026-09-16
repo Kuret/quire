@@ -14,22 +14,23 @@ import (
 	"testing"
 
 	"github.com/rickl/quire/backend/appload"
-	"github.com/rickl/quire/backend/theme"
 )
 
 // doneMessage returns the done phase's payload for a strip download.
 func doneMessage(t *testing.T, mode string) map[string]any {
 	t.Helper()
 	svc, store, _, _, rec := newDownloadServiceWith(t, stripRoutes(t))
-	// Grouped by volume, so one download covers the whole fixture and the
+	// Downloaded as a volume, so one document covers the whole fixture and the
 	// counts below are the whole fixture's. Per chapter — the default since
 	// PLAN §6 M4 was reversed on 2026-09-16 — would report a quarter of it,
-	// which is true but a weaker test of the sentence.
-	addSourceWithSplitStrips(t, store, mode, theme.GroupingVolume)
+	// which is true but a weaker test of the sentence. The source's theme is
+	// the labelled one, because since the 2026-09-16 revision a volume is only
+	// available where the source publishes volume labels.
+	addVolumeSourceWithSplitStrips(t, store, mode)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	return waitForPhase(t, rec, "done")
 }

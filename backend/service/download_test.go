@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -149,6 +150,7 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
 	f := themetest.New(t, routes)
 	reg := theme.NewRegistry()
 	reg.MustRegister(madara.NewWithClock(f, func() time.Time { return fixedNow }))
+	reg.MustRegister(volumeTheme{madara.NewWithClock(f, func() time.Time { return fixedNow })})
 
 	dir := t.TempDir()
 	store, err := state.Open(dir, reg)
@@ -457,7 +459,7 @@ func TestFirstTapAsksBeforeDownloadingAVolume(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
 
 	ask := waitForPhase(t, rec, "confirm")
 
@@ -490,11 +492,11 @@ func TestConfirmingRunsTheDownload(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
 	waitForPhase(t, rec, "confirm")
 
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	waitForPhase(t, rec, "done")
 }
@@ -507,7 +509,7 @@ func TestTheDocumentIsNamedSeriesAndVolume(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	waitForPhase(t, rec, "done")
 
@@ -573,7 +575,7 @@ func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	done := waitForPhase(t, rec, "done")
 
@@ -637,20 +639,45 @@ func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
 	}
 }
 
-// addVolumeSource is addSource with PLAN §6 M4's grouping set to "volume":
-// one document per volume the source labels, runs of ten where it labels none.
+// volumeTheme is the fixture theme with volume labels on its chapter list.
 //
-// That was the default until it was reversed on 2026-09-16 in favour of one
-// PDF per chapter, so the tests that are about volumes — the confirm step, the
-// "<Series> — Vol N" name, splitting to the upload cap, a chapter list where
-// every row of a volume offers Read — now have to ask for it. They still test
-// the same behaviour; it is a setting rather than the default.
+// It exists because PLAN §6 M4 was revised on 2026-09-16: a volume view is
+// offered only where the *source* publishes real volume labels, so a theme that
+// publishes none — which the Madara fixture, marked `no-volumn`, deliberately
+// does not — now has no volume to download and no view to reach one from. The
+// tests that are about volumes need a source that has some.
+//
+// It wraps the real Madara theme rather than faking one, so everything else
+// those tests lean on — the referer policy, the page parser, the clock — is the
+// theme's own behaviour and not a stub's.
+type volumeTheme struct{ *madara.Theme }
+
+const volumeThemeID = "madara-volumes"
+
+func (volumeTheme) ID() string { return volumeThemeID }
+
+// Chapters puts every chapter of the fixture series in volume 1. One volume of
+// four is the same shape the tests had before the revision, when a source with
+// no labels was grouped into runs of ten.
+func (v volumeTheme) Chapters(ctx context.Context, s *theme.Source, id string) ([]theme.Chapter, error) {
+	chs, err := v.Theme.Chapters(ctx, s, id)
+	for i := range chs {
+		chs[i].Volume = "1"
+	}
+	return chs, err
+}
+
+// addVolumeSource adds a source whose theme publishes volume labels, which is
+// what makes a volume download available at all.
+//
+// The grouping itself is not here: it moved off the source and onto the
+// download request, so the tests that want a volume ask for it in the message
+// they send, with `"grouping":"volume"`.
 func addVolumeSource(t *testing.T, store *state.Store) {
 	t.Helper()
 	if _, err := store.Add(&theme.Source{
-		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		Name: "Example Reader", Lang: "en", Theme: volumeThemeID,
 		BaseURL: "https://example.invalid", AddedAt: fixedNow,
-		Grouping: theme.GroupingVolume,
 	}); err != nil {
 		t.Fatal(err)
 	}

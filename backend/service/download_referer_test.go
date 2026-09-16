@@ -54,10 +54,14 @@ func perChapterRoutes(t *testing.T) map[string]themetest.Route {
 	return r
 }
 
-// refererTheme is the madara theme plus PLAN §7.6's side interface, standing in
-// for webtoons, fanfox and comick — whose image hosts answer 403 without a
+// refererTheme is the fixture theme plus PLAN §7.6's side interface, standing
+// in for webtoons, fanfox and comick — whose image hosts answer 403 without a
 // Referer. It names the chapter page the theme itself reads, per chapter.
-type refererTheme struct{ *madara.Theme }
+//
+// It wraps volumeTheme rather than madara directly because the volume labels
+// are what make runVolumeDownload's volume download available at all (PLAN §6
+// M4, revised 2026-09-16). The Referer is what this file is about.
+type refererTheme struct{ volumeTheme }
 
 func (refererTheme) PageReferer(s *theme.Source, chapterID string) string {
 	if strings.HasPrefix(chapterID, "http") {
@@ -99,7 +103,7 @@ func runVolumeDownload(t *testing.T, newTheme func(*themetest.Fetcher) theme.The
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	waitForPhase(t, rec, "done")
 	return f
@@ -107,7 +111,7 @@ func runVolumeDownload(t *testing.T, newTheme func(*themetest.Fetcher) theme.The
 
 func TestDownloadedPagesCarryTheirOwnChaptersReferer(t *testing.T) {
 	f := runVolumeDownload(t, func(f *themetest.Fetcher) theme.Theme {
-		return refererTheme{madara.NewWithClock(f, func() time.Time { return fixedNow })}
+		return refererTheme{volumeTheme{madara.NewWithClock(f, func() time.Time { return fixedNow })}}
 	})
 
 	got := imageReferers(t, f)
@@ -138,7 +142,7 @@ func TestDownloadedPagesCarryTheirOwnChaptersReferer(t *testing.T) {
 
 func TestDownloadedPagesCarryNoRefererWhenTheThemeHasNone(t *testing.T) {
 	f := runVolumeDownload(t, func(f *themetest.Fetcher) theme.Theme {
-		return madara.NewWithClock(f, func() time.Time { return fixedNow })
+		return volumeTheme{madara.NewWithClock(f, func() time.Time { return fixedNow })}
 	})
 
 	got := imageReferers(t, f)

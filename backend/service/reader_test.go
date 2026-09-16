@@ -16,7 +16,7 @@ func TestSeriesDetailCarriesTheStoredUUID(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)

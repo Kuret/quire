@@ -132,7 +132,7 @@ func TestWifiDroppingMidVolumeLeavesNothingBroken(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 
 	failed := waitForPhase(t, rec, "failed")
@@ -180,7 +180,7 @@ func TestASiteChangingShapeMidSeriesFailsHonestly(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
 			`","confirmed":true}`)
 
 	failed := waitForPhase(t, rec, "failed")
