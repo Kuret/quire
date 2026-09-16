@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
 )
@@ -281,7 +282,9 @@ func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		step.Note = fmt.Sprintf("the image host answered %d.", resp.StatusCode)
+		// Not a bare code: a status the user can act on (PLAN §6 M3). The
+		// challenge check above has already run, so this is a plain refusal.
+		step.Note = fetch.StatusSentence("the image host", resp.StatusCode) + "."
 		return step, nil, host
 	}
 	if !looksLikeImage(resp.Header.Get("Content-Type"), resp.Body) {
@@ -337,6 +340,9 @@ func plausibleImageURL(raw string) bool {
 // plainError turns a fetch-layer error into something a person can read. It
 // deliberately does not leak Go error wrapping into the UI (PLAN §6 M3: plain
 // language, not error codes), but keeps enough to be actionable.
+// A theme's error for a refusal reduces to "HTTP 444" once the wrapping is
+// gone, which is exactly the bare code PLAN §6 M3 forbids, so a trailing
+// status is expanded into something the reader can act on.
 func plainError(err error) string {
 	msg := err.Error()
 	if i := strings.LastIndex(msg, ": "); i > 0 && i < len(msg)-2 {
@@ -345,5 +351,5 @@ func plainError(err error) string {
 	if msg == "" {
 		return "the site didn't answer as expected."
 	}
-	return msg + "."
+	return fetch.ExplainStatus(msg, "the site") + "."
 }

@@ -531,8 +531,17 @@ func (r *run) stageReachable(ctx context.Context, base *url.URL) (Result, bool, 
 		if res, blocked := r.stageChallenge(); blocked {
 			return res, false, nil
 		}
-		return r.result(theme.VerdictUnreachable,
-			fmt.Sprintf("The site answered with HTTP %d, so Quire couldn't read it.", r.page.Status)), false, nil
+		// Plain language, not an error code (PLAN §6 M3). Stage 3 has already
+		// had its look, so whatever this is, it is not a challenge.
+		//
+		// 404 is the one status that means something different here than it
+		// does later: no theme has been chosen yet, so this is the address the
+		// *user* typed not existing, not a path one of our themes expected.
+		detail := "Quire couldn't read this site: " + fetch.StatusSentence("the site", r.page.Status) + "."
+		if r.page.Status == 404 {
+			detail = "There's nothing at that address — the site answered HTTP 404. Check the address, or try the site's home page."
+		}
+		return r.result(theme.VerdictUnreachable, detail), false, nil
 	}
 	return Result{}, true, nil
 }
