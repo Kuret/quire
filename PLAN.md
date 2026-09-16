@@ -1963,3 +1963,61 @@ energy fallback); a single panel taller than a page; and an ordinary 3:4 manga
 page that must come through untouched. §9's warning applies with force — a
 generated strip that is *convenient* proves nothing, so make the awkward cases
 genuinely awkward.
+
+### 12.4 Deleting a downloaded volume — proven reachable
+
+**Requested 2026-09-16: a delete button on a chapter, so removing a download
+does not mean hunting for it in `Comics`.**
+
+§6 M5 established that xochitl's *web interface* has no delete route — the whole
+surface is `/documents/`, `/download/`, `/upload`. But the **QML** side does,
+and it is reachable the same way M6's reader handoff is:
+
+```qml
+import com.remarkable
+var ex = NavigationManager.treeExplorerForNavigation;  // C++ singleton
+ex.selection.clear();
+ex.selection.add(documentId);                          // an ID STRING
+ex.selectionMoveToTrash();
+```
+
+Proven on hardware, step by step:
+
+```
+READ:   size=0 folder=root addType=function trashType=function
+SELECT: size after add = 1
+TRASH:  size before=1 after=0
+```
+
+The document's `.metadata` then reads `"parent": "trash"` — **moved to xochitl's
+own Trash, not destroyed**, which is the right behaviour: recoverable by the
+user, and it is what the stock UI does.
+
+> ### ⚠️ There are TWO selections. Using the wrong one wedges the UI.
+>
+> A first attempt used `Library.documentSelection` and **broke the navigator** —
+> the side menu became unreachable until xochitl was restarted.
+>
+> | object | API | role |
+> |---|---|---|
+> | **`explorer.selection`** | `.clear()` `.add(id)` `.remove(id)` `.size` | what `selectionMoveToTrash()` acts on |
+> | `Library.documentSelection` | `.clear()` `.toggle()` `.hasContent` `.ids` | tags and document-view state; **`Navigator.qml:67,395` bind their enabled state to it** |
+>
+> Writing `Library.documentSelection` from outside leaves the navigator's own
+> view of the selection inconsistent with the binding driving its UI. **Never
+> touch it.** `explorer.selection.add` also takes an **id string**, not a
+> `Document` object (`Navigator.qml:733`).
+>
+> **Method lesson, and it generalises:** "can I reach this API" and "is it safe
+> to drive this API from outside" are different questions. The M6 probe was safe
+> because it only *read* singletons and *called* a function. This one *wrote to
+> state another component owns*, and the first attempt chained three writes
+> behind one button so nothing could be inspected between them. Probe writes one
+> at a time, verify after each (`selection.size` is the observable here), and
+> provide a reset.
+
+**Implementation notes:** clear the selection afterwards so nothing is left
+selected under the user; the document is in Trash rather than gone, so the
+wording should say so; and a stored `library.Record` for a trashed document
+should be dropped, since §6 M6 already handles `entryForId` returning null with
+an offer to download again.
