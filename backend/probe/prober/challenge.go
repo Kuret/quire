@@ -37,27 +37,81 @@ type challengeSignal struct {
 	Detail string
 }
 
-// bodyChallengeMarkers are strings that only appear on a challenge page. Each
-// is a vendor's own asset path or script identifier: a site that is merely
-// *behind* a CDN does not serve these, only one actively interstitialling does.
+// conclusiveBodyMarkers are strings that exist *only* on an interstitial, and
+// are therefore allowed to fire alone.
+//
+// CORRECTED 2026-09-16 — this list used to be twice as long, and the premise
+// written above it ("a site that is merely behind a CDN does not serve these,
+// only one actively interstitialling does") was **false for half its entries**.
+// It cost a user a site: a real comic site answered 200 with 168 KB of markup
+// and 71 series links, carrying one `/cdn-cgi/challenge-platform/` script tag —
+// which Cloudflare injects on *ordinary served pages* when bot management is
+// on — and Quire refused it as `blocked_challenge`, which is terminal, so the
+// capability check never ran. A false refusal is as much a lie as a false `ok`.
+//
+// The governing rule, which is what the split below encodes:
+//
+//	**A response that served us real content is not a challenge, whatever
+//	markers it carries.** An interstitial's whole purpose is to withhold
+//	content. If we got the content, we were not interstitialled.
+//
+// Each entry here is justified against that rule individually, in the comment
+// beside it. A marker that cannot be justified as interstitial-only belongs in
+// corroboratedBodyMarkers, not here — when in doubt, demote it: the cost of a
+// demotion is that one challenge shape needs a status code to be caught, and
+// the cost of a wrong promotion is a working site the user cannot add.
 //
 // Matched through Page.Contains, which strips HTML comments first — a marker in
 // a comment is not evidence (see probe.Page).
-var bodyChallengeMarkers = []struct {
+var conclusiveBodyMarkers = []struct {
 	marker string
 	vendor string
 }{
-	{"/cdn-cgi/challenge-platform/", "a Cloudflare browser challenge"},
+	// The challenge page's own options blob (`window._cf_chl_opt = {...}`).
+	// It configures the widget; there is nothing for it to configure on a page
+	// that is not one.
 	{"__cf_chl_", "a Cloudflare browser challenge"},
+	// The class the challenge page puts on <body> while it runs.
 	{"cf-challenge-running", "a Cloudflare browser challenge"},
-	{"challenge-platform/h/b/orchestrate", "a Cloudflare browser challenge"},
+	// DDoS-Guard's challenge document itself. Note that its *ordinary* script
+	// (check.ddos-guard.net) is not here: that one is injected on served pages
+	// and was one of the wrong entries.
+	{"/ddos-guard/js-challenge", "a DDoS-Guard browser challenge"},
+	// Sucuri's challenge loader, which exists to reload the page once solved.
+	{"sucuri_cloudproxy_js", "a Sucuri browser challenge"},
+	// Incapsula's resource endpoint with the challenge query parameters. The
+	// bare path is used for ordinary instrumentation, so the parameters are
+	// load-bearing and must stay in the string.
 	{"/_incapsula_resource?swcgh", "an Imperva/Incapsula browser challenge"},
 	{"_incapsula_resource?swjsv", "an Imperva/Incapsula browser challenge"},
-	{"sucuri_cloudproxy_js", "a Sucuri browser challenge"},
-	{"/ddos-guard/js-challenge", "a DDoS-Guard browser challenge"},
-	{"check.ddos-guard.net", "a DDoS-Guard browser challenge"},
-	{"/.well-known/captcha/", "a CAPTCHA gate"},
+}
+
+// corroboratedBodyMarkers are strings that appear on challenge pages **and on
+// ordinary served pages**. They fire only alongside a refusal status or a
+// response with nothing recognisable in it — the same shape challengeCookies
+// has always used, and correctly.
+//
+// This is not a weaker version of the list above; it is the honest home for
+// every marker whose presence proves a vendor is *involved*, not that content
+// was *withheld*.
+var corroboratedBodyMarkers = []struct {
+	marker string
+	vendor string
+}{
+	// Injected on served pages whenever a site turns on bot management. This
+	// is the exact string that cost us a working site.
+	{"/cdn-cgi/challenge-platform/", "a Cloudflare browser challenge"},
+	// Same script family, same problem.
+	{"challenge-platform/h/b/orchestrate", "a Cloudflare browser challenge"},
+	// Turnstile is routinely embedded in a login or comment form on a page
+	// that is otherwise served in full. A widget on a page is not a gate in
+	// front of it.
 	{"challenges.cloudflare.com/turnstile", "a Cloudflare Turnstile gate"},
+	// A CAPTCHA endpoint a page *references* may equally be one a form posts
+	// to. Only a refusal makes it a gate.
+	{"/.well-known/captcha/", "a CAPTCHA gate"},
+	// DDoS-Guard's ordinary client script, present on pages it serves normally.
+	{"check.ddos-guard.net", "a DDoS-Guard browser challenge"},
 }
 
 // titleChallengeMarkers are interstitial <title> strings. A title is a much
@@ -169,11 +223,39 @@ func (r *run) challengeSignalFor(p *probe.Page, genericGate bool) (challengeSign
 	refusal := p.Status == http.StatusForbidden || p.Status == http.StatusServiceUnavailable ||
 		p.Status == http.StatusTooManyRequests
 
-	// 1. A vendor's own challenge asset or script. Conclusive on its own: this
-	//    markup is only emitted by the interstitial itself.
-	for _, m := range bodyChallengeMarkers {
+	// corroborated is the answer to "is there any reason to read a marker on
+	// this response as an interstitial rather than as a script on a page that
+	// was served to us?"
+	//
+	// Two things can supply it: the site refused us, or there is nothing here
+	// that any theme recognises and barely a page at all. A 200 carrying real
+	// content supplies neither, which is the governing rule of this file (see
+	// conclusiveBodyMarkers) expressed as one boolean.
+	//
+	// The content half is asked only of the probed document. A non-document
+	// response — stage 5's page image — has no theme to fingerprint and no
+	// markup to be missing, so for it only a refusal corroborates anything.
+	corroborated := refusal || (genericGate && r.noRecognisableContent())
+
+	// 1. A vendor's own challenge asset or script, of the kind that exists only
+	//    on an interstitial. Conclusive on its own — see the list for the audit
+	//    behind that claim, and for what happened when it was assumed rather
+	//    than audited.
+	for _, m := range conclusiveBodyMarkers {
 		if p.Contains(m.marker) {
 			return challengeSignal{Name: "body-marker", Detail: m.vendor}, true
+		}
+	}
+
+	// 1b. Markers that also appear on served pages. These need corroboration,
+	//     and without it their presence means only that a vendor is involved —
+	//     which is true of much of the web and is not a reason to refuse a
+	//     site that just handed us its content.
+	if corroborated {
+		for _, m := range corroboratedBodyMarkers {
+			if p.Contains(m.marker) {
+				return challengeSignal{Name: "body-marker-corroborated", Detail: m.vendor}, true
+			}
 		}
 	}
 
@@ -199,7 +281,12 @@ func (r *run) challengeSignalFor(p *probe.Page, genericGate bool) (challengeSign
 	}
 
 	// 4. A meta refresh pointing at a challenge endpoint.
-	if dest, ok := metaRefreshTarget(p); ok {
+	//
+	//    Corroboration required here too, for the same reason as 1b and found
+	//    by the same audit: a served page may carry a refresh to almost
+	//    anything, and an interstitial that redirects is a 403 or a body with
+	//    nothing in it. Requiring it costs no true positive we know of.
+	if dest, ok := metaRefreshTarget(p); ok && corroborated {
 		d := strings.ToLower(dest)
 		for _, frag := range []string{"/cdn-cgi/", "challenge", "captcha", "__ddg", "_incapsula_resource"} {
 			if strings.Contains(d, frag) {
@@ -209,7 +296,7 @@ func (r *run) challengeSignalFor(p *probe.Page, genericGate bool) (challengeSign
 	}
 
 	// 5. A clearance cookie being issued where we can see no content.
-	if refusal || (genericGate && r.noRecognisableContent()) {
+	if corroborated {
 		for _, c := range setCookieNames(p.Header) {
 			for _, want := range challengeCookies {
 				if strings.HasPrefix(c, want.name) {
@@ -371,8 +458,11 @@ func containsString(xs []string, want string) bool {
 // DescribeSignals is used by the tests and by docs/THEME-NOTES.md's table to
 // keep the two in step: every marker we ship is listed somewhere a human reads.
 func DescribeSignals() []string {
-	out := make([]string, 0, len(bodyChallengeMarkers))
-	for _, m := range bodyChallengeMarkers {
+	out := make([]string, 0, len(conclusiveBodyMarkers)+len(corroboratedBodyMarkers))
+	for _, m := range conclusiveBodyMarkers {
+		out = append(out, fmt.Sprintf("%s → %s", m.marker, m.vendor))
+	}
+	for _, m := range corroboratedBodyMarkers {
 		out = append(out, fmt.Sprintf("%s → %s", m.marker, m.vendor))
 	}
 	return out
