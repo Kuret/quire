@@ -794,10 +794,15 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		go s.maybeReprobe(ctx, out, src, reasonEmptyChapters)
 	}
 
+	// The volume view, when there is one to show (PLAN §6 M4, revised
+	// 2026-09-16). An empty list means the screen offers chapters and nothing
+	// else: the affordance is decided here, from the data, because an empty tab
+	// is a worse answer than no tab and the frontend has no way to tell.
 	_ = send(out, appload.MessageSeriesDetailResult, map[string]any{
 		"sourceId": sourceID,
 		"series":   series,
 		"chapters": rows,
+		"volumes":  volumeRows(series.Title, chapters, stored),
 	})
 
 	// PLAN §12.2. Serving the chapter list is the one moment Quire can honestly

@@ -865,6 +865,110 @@ func labelledVolumes(seriesTitle string, flat []assemble.Chapter) []volumePlan {
 	return plans
 }
 
+// volumeRow is one row of the chapter screen's volume view.
+//
+// Every string on it is finished (PLAN §2). What a volume *contains* is the
+// whole reason the view is worth having — seven chapters is what tells the user
+// whether it is worth taking before a journey — so Detail says so rather than
+// leaving the frontend to pluralise a count.
+type volumeRow struct {
+	// ID is the chapter a download request should name. A request carries the
+	// chapter the user tapped, and the backend works out the volume around it,
+	// so any chapter in the volume would do; the first is the stable choice.
+	ID string `json:"id"`
+
+	Label  string `json:"label"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+
+	ChapterCount int `json:"chapterCount"`
+
+	// DocumentUUID is set when this whole volume is already one document on the
+	// tablet, which is what turns the row's button into "Read". A volume whose
+	// chapters are on the tablet as separate per-chapter files is *not* that
+	// document, and the row goes on offering the volume.
+	DocumentUUID string `json:"documentUuid,omitempty"`
+}
+
+// volumeRows is the chapter screen's second view, or nil when there is none.
+//
+// nil rather than an empty slice, and decided here rather than in QML, because
+// the rule is about the data: see volumesAvailable.
+func volumeRows(seriesTitle string, chapters []theme.Chapter,
+	stored map[string]library.Record) []volumeRow {
+
+	if !volumesAvailable(chapters) {
+		return nil
+	}
+
+	plans := groupVolumes(seriesTitle, chapters, assemble.GroupingVolume)
+	rows := make([]volumeRow, 0, len(plans))
+	for _, p := range plans {
+		if len(p.Chapters) == 0 {
+			continue
+		}
+		first := chapterLabel(p.Chapters[0])
+		last := chapterLabel(p.Chapters[len(p.Chapters)-1])
+		n := len(p.Chapters)
+
+		r := volumeRow{
+			ID:           p.Chapters[0].ID,
+			Label:        p.Label,
+			ChapterCount: n,
+		}
+		if p.SourceLabelled {
+			r.Title = fmt.Sprintf("Volume %s", p.Label)
+		} else {
+			// Quire counted these; calling them "Volume 4" would claim a number
+			// the site has never used. They are the chapters past the last
+			// label, which is where a series that is still running always ends.
+			r.Title = fmt.Sprintf("%s to %s", first, last)
+		}
+		switch {
+		case n == 1:
+			r.Detail = fmt.Sprintf("1 chapter: %s", first)
+		default:
+			r.Detail = fmt.Sprintf("%d chapters, %s to %s", n, first, last)
+		}
+		r.DocumentUUID = volumeDocument(p, stored)
+		rows = append(rows, r)
+	}
+	return rows
+}
+
+// volumeDocument is the document holding this whole volume, if one is on the
+// tablet.
+//
+// Every chapter has to resolve to the same document. A volume whose chapters
+// were downloaded one at a time is several documents, not this one, and
+// offering "Read" on it would open whichever of them happened to be found
+// first — a row that says it will open the volume and opens a chapter.
+//
+// A volume split into parts to fit the upload cap is likewise not one document,
+// and its rows keep offering the download. The download itself is close to free
+// in that case: §6 M4's resume skips page files already on disk, so the pages
+// are not fetched twice.
+func volumeDocument(p volumePlan, stored map[string]library.Record) string {
+	if len(stored) == 0 {
+		return ""
+	}
+	uuid := ""
+	for _, c := range p.Chapters {
+		rec, ok := stored[c.ID]
+		if !ok || rec.DocumentUUID == "" {
+			return ""
+		}
+		if uuid == "" {
+			uuid = rec.DocumentUUID
+			continue
+		}
+		if rec.DocumentUUID != uuid {
+			return ""
+		}
+	}
+	return uuid
+}
+
 // legacyGrouping redoes the grouping **the way it was done before 2026-09-16**,
 // for the sole benefit of library records written back then.
 //
