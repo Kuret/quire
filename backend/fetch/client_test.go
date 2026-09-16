@@ -26,9 +26,26 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// testClient builds a Client pointed at an httptest server. AllowLoopback is a
-// test-only hook (export_test.go); production has no path to it.
+// testClient builds a Client pointed at an httptest server with the robots.txt
+// consultation **on**. AllowLoopback is a test-only hook (export_test.go);
+// production has no path to it.
+//
+// The consultation is off in production since 2026-09-16 (PLAN §7.4), but the
+// machinery it switches is not going anywhere and everything this file asserts
+// about it — the Allow/Disallow precedence, the one-fetch-per-host cache, the
+// three-way outcome of an unreadable file — is what has to keep working for
+// turning it back on to be a setting rather than a rewrite. So these tests
+// exercise the on-state, and TestRobotsOffByDefault and its neighbours below
+// cover the off-state and the default itself.
 func testClient(t *testing.T, srv *httptest.Server, opts fetch.Options) (*fetch.Client, *fetch.Policy) {
+	t.Helper()
+	opts.ConsultRobots = true
+	return rawTestClient(t, srv, opts)
+}
+
+// rawTestClient is testClient without the robots consultation forced on, so a
+// test can pin what NewClient does by default.
+func rawTestClient(t *testing.T, srv *httptest.Server, opts fetch.Options) (*fetch.Client, *fetch.Policy) {
 	t.Helper()
 	base, err := url.Parse(srv.URL)
 	if err != nil {

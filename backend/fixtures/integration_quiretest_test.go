@@ -68,6 +68,12 @@ func start(t *testing.T, opts fixtures.Options) (*fixtures.Server, *fetch.Client
 	var slept []time.Duration
 	c := fetch.NewClient(fetch.AllowLoopbackForTests(fetch.Options{
 		Version: "integration",
+		// The consultation is off in production since 2026-09-16 (PLAN §7.4),
+		// but these tests are what pin the machinery behind the switch: the
+		// real parser, over a real socket, with a real cache. Turning it back
+		// on has to stay a setting rather than a rewrite, and that is only true
+		// while something still exercises the on-state end to end.
+		ConsultRobots: true,
 		Sleep: func(_ context.Context, d time.Duration) error {
 			slept = append(slept, d)
 			return nil

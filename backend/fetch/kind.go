@@ -3,6 +3,15 @@ package fetch
 // Kind says what a request *is for*. It is the one input that decides whether
 // robots.txt gates a request, and it is the caller's to state explicitly.
 //
+// **Since 2026-09-16 it gates nothing by default**, because the robots.txt
+// consultation itself is off unless the global setting turns it on (PLAN §7.4,
+// Options.ConsultRobots). The type stays, for two reasons the plan allows for:
+// it is the documentation of intent at every call site — "this is a listing we
+// are crawling" versus "this is the chapter the user opened" — and it is what
+// the gate reads the moment the setting is on. It also names the kind in the
+// info line logged for every suppressed check, which is the only thing that
+// tells a later reader whether a request was user-driven or unattended.
+//
 // PLAN §7.4, decided 2026-09-15: robots.txt is the Robots **Exclusion**
 // Protocol, and RFC 9309 scopes it to "automatic clients known as crawlers".
 // The line is not program-versus-human — a browser is a program too — it is

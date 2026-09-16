@@ -7,7 +7,12 @@
 //     per host (limiter.go);
 //   - robots.txt fetched, cached and honoured for *discovery* requests
 //     (robots.go), which is what RFC 9309 scopes it to; a page the user asked
-//     for by name is retrieval, not crawling (kind.go);
+//     for by name is retrieval, not crawling (kind.go). **Since 2026-09-16 the
+//     consultation is off by default** and is turned on by a single global
+//     setting — Options.ConsultRobots and SetConsultRobots. See the comment on
+//     Options.ConsultRobots for the decision and PLAN §7.4 for the reasoning;
+//     every other invariant in this list is unaffected and stays
+//     non-configurable;
 //   - Retry-After honoured, exponential backoff with jitter on 429/5xx;
 //   - an honest User-Agent naming Quire, its version and the project URL —
 //     never a browser string (PLAN §7.6);
@@ -25,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -163,6 +169,27 @@ type Options struct {
 	// server. It is unexported and has no JSON or flag surface, so no
 	// configuration file can ever reach it.
 	allowLoopback bool
+
+	// ConsultRobots turns the robots.txt consultation on. It is **off by
+	// default** (PLAN §7.4, superseded 2026-09-16): RFC 9309 scopes robots.txt
+	// to "automatic clients known as crawlers", a person searching and tapping
+	// is driving every request, and no comparable reader consults it at all.
+	//
+	// It is one global switch rather than a per-source flag, so there is one
+	// behaviour and nothing to reason about per site. The parser, the cache and
+	// the three-way handling of an unreadable robots.txt are all still here and
+	// still tested: turning this back on is a setting, not a rewrite.
+	//
+	// It narrows nothing else. The limiter, the per-host delay, the honest
+	// User-Agent, Retry-After, the size cap, the byte budget and the SSRF guard
+	// apply identically either way, and PLAN §7.6 is untouched — a challenge is
+	// a site actively refusing us, which is a different thing from an advisory
+	// file aimed at crawlers, and there is still no bypass path here.
+	ConsultRobots bool
+
+	// Logger receives the info line written every time the robots consultation
+	// is skipped. Nil means slog.Default().
+	Logger *slog.Logger
 }
 
 // Client is a polite, guarded HTTP client shared by every theme.
@@ -176,9 +203,13 @@ type Client struct {
 	budget     int64
 	maxAttempt int
 	totalBytes atomic.Int64
-	sleep      func(context.Context, time.Duration) error
-	now        func() time.Time
-	rand       func() float64
+	// consultRobots is atomic because the setting is user-visible: it can be
+	// toggled while requests are in flight, and the next request should see it.
+	consultRobots atomic.Bool
+	log           *slog.Logger
+	sleep         func(context.Context, time.Duration) error
+	now           func() time.Time
+	rand          func() float64
 }
 
 // NewClient builds a Client. Caps are clamped against DefaultCaps so the
@@ -204,8 +235,13 @@ func NewClient(opts Options) *Client {
 		maxBody = opts.MaxResponseBytes
 	}
 
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+
 	guard := &Guard{resolve: opts.resolve, allowLoopback: opts.allowLoopback}
 	c := &Client{
+		log:        opts.Logger,
 		lim:        NewLimiter(DefaultCaps.narrowedBy(opts.Caps), opts.Now, opts.Sleep),
 		guard:      guard,
 		ua:         fmt.Sprintf("Quire/%s (+%s)", opts.Version, ProjectURL),
@@ -234,9 +270,21 @@ func NewClient(opts Options) *Client {
 			return guard.CheckURL(req.Context(), req.URL, pol)
 		},
 	}
+	c.consultRobots.Store(opts.ConsultRobots)
 	c.robots = NewRobotsCache(c)
 	return c
 }
+
+// SetConsultRobots turns the robots.txt consultation on or off. It is the one
+// global switch of PLAN §7.4; there is deliberately no per-source equivalent,
+// because two overlapping mechanisms would be worse than either.
+//
+// It takes effect on the next request. Requests already past the check are not
+// recalled, which matters only for a toggle flipped mid-probe.
+func (c *Client) SetConsultRobots(on bool) { c.consultRobots.Store(on) }
+
+// ConsultRobots reports whether robots.txt is currently consulted.
+func (c *Client) ConsultRobots() bool { return c.consultRobots.Load() }
 
 func defaultTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
@@ -321,12 +369,28 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 	// make. Note what is *not* skipped — the guard above and the limiter
 	// below both still run.
 	if kind.gatedByRobots() && !isRobotsURL(u) {
-		ok, err := c.robots.Allowed(ctx, p, u)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("fetch: %s: %w", u.Path, ErrRobotsDenied)
+		if c.consultRobots.Load() {
+			ok, err := c.robots.Allowed(ctx, p, u)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("fetch: %s: %w", u.Path, ErrRobotsDenied)
+			}
+		} else {
+			// PLAN §7.4 requires this line. A safeguard that is off silently is
+			// worse than one that was never there, so every suppressed check
+			// leaves a record naming the path it would have covered.
+			//
+			// The wording is deliberately neutral about *why* the request is
+			// being made. The owner's argument is that a person searching and
+			// tapping is browsing rather than crawling, and for those requests
+			// it holds — but the probe and the watch checks run unattended, so
+			// a line claiming every suppressed check was user-driven would be
+			// untrue. The request kind is logged instead: it is cheap, it is a
+			// fact, and it lets a reader tell the two apart.
+			c.log.Info("robots.txt not consulted; the check is off (PLAN §7.4)",
+				"host", u.Host, "path", u.Path, "kind", kind.String(), "method", method)
 		}
 	}
 
