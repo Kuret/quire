@@ -429,8 +429,22 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 			fail("%s has no pages Quire can read.", ch.Title)
 			return
 		}
+		// The Referer these page images will be fetched with, resolved here
+		// because here is the only place the chapter is still in hand: the
+		// queue fetches a whole volume and could only guess (PLAN §7.6). A
+		// theme with nothing to name yields "", and the request then carries
+		// no header at all.
+		ref, err := theme.PageRefererFor(th, src, ch.ID)
+		if err != nil {
+			// A theme naming a page address Quire cannot use is a theme bug.
+			// Log it and send nothing, which is the honest header for "we do
+			// not know" — inventing a substitute is what §7.6 forbids.
+			s.log.Warn("theme named an unusable page referer",
+				"source", src.ID, "theme", src.Theme, "chapter", ch.ID, "err", err)
+		}
 		chs = append(chs, download.Chapter{
 			ID: ch.ID, Title: ch.Title, Number: ch.Number, Volume: ch.Volume, PageURLs: urls,
+			Referer: ref.String(),
 		})
 	}
 
