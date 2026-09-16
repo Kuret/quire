@@ -36,11 +36,13 @@
 package download
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -164,6 +166,10 @@ type Chapter struct {
 }
 
 // Progress is reported after each page completes.
+//
+// PagesDone and PagesTotal count *source images*, not output pages: one strip
+// that becomes eight pages is one of them. PagesFromSplit is the number that
+// differs, and it is there so the two can be told apart.
 type Progress struct {
 	PagesDone        int   // pages on disk, including ones skipped as already present
 	PagesTotal       int   // pages in this run
@@ -172,6 +178,13 @@ type Progress struct {
 	PagesGuarded     int   // pages box-downscaled first to bound the resize's memory
 	BytesStored      int64 // bytes written to disk this run
 	BytesFetched     int64 // bytes read from the fetcher this run
+
+	// PagesSplit is the number of source images detected as vertical-scroll
+	// strips and cut up (PLAN §12.3), and PagesFromSplit the number of PDF
+	// pages they produced. Splitting that happens silently is splitting nobody
+	// can report, so it is counted beside PagesGuarded and PagesRequantised.
+	PagesSplit     int
+	PagesFromSplit int
 }
 
 // Options configures a Queue. The zero value is usable and implies the
@@ -188,6 +201,20 @@ type Options struct {
 	// Image controls normalisation. The zero value means
 	// imageproc.DefaultOptions.
 	Image imageproc.Options
+
+	// SplitStrips is the per-source override from PLAN §12.3. The zero value is
+	// imageproc.SplitAuto: detect per image, and leave every ambiguous case
+	// alone. Detection will be wrong eventually and the user should not have to
+	// wait for us, so `never` and `always` are here to be set per source.
+	SplitStrips imageproc.SplitMode
+
+	// Split tunes the splitter itself. The zero value is the defaults in
+	// imageproc: a ±20% search window, a 5% overlap across each cut.
+	Split imageproc.SplitOptions
+
+	// OnSplit, if set, is called once per source image that was cut up, with
+	// the number of pages it became.
+	OnSplit func(url string, pages int)
 
 	// WarnBytes triggers OnWarn once, when stored bytes first cross it. Zero
 	// disables the warning.
@@ -314,7 +341,7 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 	start := time.Now()
 	var stats Stats
 
-	jobs, out, err := q.planJobs(dir, chapters)
+	jobs, meta, results, err := q.planJobs(dir, chapters)
 	if err != nil {
 		return nil, stats, err
 	}
@@ -323,6 +350,10 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, stats, fmt.Errorf("download: %w", err)
 	}
+	// Raw strips parked by a run that did not finish are not resumable state —
+	// the page they belong to was never committed — so clear them out rather
+	// than leaving a source image's worth of bytes lying around per interrupt.
+	sweepParked(dir)
 
 	r := &run{
 		q:       q,
@@ -330,9 +361,18 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 		total:   len(jobs),
 		warned:  q.opts.WarnBytes <= 0,
 		encoder: make(chan struct{}, q.opts.EncodeWorkers),
+		results: results,
 	}
 
 	err = r.execute(ctx, jobs)
+	if err == nil {
+		// Detection's second half: the strips that needed the rest of their
+		// chapter before they could be judged.
+		err = r.resolveDeferred(ctx)
+	}
+	if err != nil {
+		r.dropParked()
+	}
 
 	stats.Progress = r.snapshot()
 	stats.MaxInFlight = int(r.maxInFlight.Load())
@@ -341,7 +381,23 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 	if err != nil {
 		return nil, stats, err
 	}
+
+	out, err := buildChapters(meta, r.results)
+	if err != nil {
+		return nil, stats, err
+	}
 	return out, stats, nil
+}
+
+// dropParked discards raw strips held for a run that failed.
+func (r *run) dropParked() {
+	r.mu.Lock()
+	pending := r.deferred
+	r.deferred = nil
+	r.mu.Unlock()
+	for _, d := range pending {
+		os.Remove(d.raw)
+	}
 }
 
 // job is one page to fetch.
@@ -353,40 +409,83 @@ type job struct {
 	referer string
 	// skip is set when the page is already on disk from an earlier run.
 	skip bool
+
+	// chapter and page locate this source image in run.results: chapter is the
+	// index into the chapter list, page the index of the URL within it. A
+	// source image no longer maps to exactly one output page, so the two are
+	// carried rather than derived from the filename.
+	chapter, page int
 }
 
 // planJobs decides the on-disk layout and works out what is left to do.
-func (q *Queue) planJobs(dir string, chapters []Chapter) ([]job, []assemble.Chapter, error) {
+//
+// It returns the chapter metadata without pages: how many pages a chapter has
+// is not known until every strip in it has been split, so the assemble.Chapter
+// values are finished by buildChapters after the run.
+func (q *Queue) planJobs(dir string, chapters []Chapter) ([]job, []assemble.Chapter, [][]pageFiles, error) {
 	var (
-		jobs []job
-		out  []assemble.Chapter
+		jobs    []job
+		out     []assemble.Chapter
+		results [][]pageFiles
 	)
 	seen := map[string]bool{}
-	for _, ch := range chapters {
+	for c, ch := range chapters {
 		if len(ch.PageURLs) == 0 {
-			return nil, nil, fmt.Errorf("%w: %s", ErrNoPages, ch.ID)
+			return nil, nil, nil, fmt.Errorf("%w: %s", ErrNoPages, ch.ID)
 		}
 		sub := slug(ch.ID)
 		if seen[sub] {
-			return nil, nil, fmt.Errorf("download: two chapters map to the directory %q; chapter IDs must be unique", sub)
+			return nil, nil, nil, fmt.Errorf("download: two chapters map to the directory %q; chapter IDs must be unique", sub)
 		}
 		seen[sub] = true
 
-		ac := assemble.Chapter{ID: ch.ID, Title: ch.Title, Number: ch.Number, Volume: ch.Volume}
+		chDir := filepath.Join(dir, sub)
+		found := make([]pageFiles, len(ch.PageURLs))
 		for i, u := range ch.PageURLs {
-			path := filepath.Join(dir, sub, fmt.Sprintf("%04d.jpg", i))
-			st, err := os.Stat(path)
+			existing, ok := existingPages(chDir, i)
+			if ok {
+				found[i] = existing
+			}
 			jobs = append(jobs, job{
 				url:     u,
-				path:    path,
+				path:    filepath.Join(chDir, wholeName(i)),
 				referer: ch.Referer,
-				skip:    err == nil && st.Size() > 0,
+				skip:    ok,
+				chapter: c,
+				page:    i,
 			})
-			ac.Pages = append(ac.Pages, assemble.Page{Path: path, Index: i})
 		}
-		out = append(out, ac)
+		results = append(results, found)
+		out = append(out, assemble.Chapter{ID: ch.ID, Title: ch.Title, Number: ch.Number, Volume: ch.Volume})
 	}
-	return jobs, out, nil
+	return jobs, out, results, nil
+}
+
+// buildChapters flattens the per-source-image results into pages.
+//
+// This is where PLAN §12.3's page-count constraint is honoured: pages are
+// renumbered from 0 across the whole chapter, in source order and then piece
+// order, so a chapter whose third image became eight pages still presents
+// Index 0..n-1 in order. assemble rejects anything else, and the
+// chapter→(PDF, page offset) map assemble derives from these counts is M6's
+// input — a splitter that did not do this would break "Read" silently.
+func buildChapters(meta []assemble.Chapter, results [][]pageFiles) ([]assemble.Chapter, error) {
+	out := make([]assemble.Chapter, len(meta))
+	for c := range meta {
+		ch := meta[c]
+		idx := 0
+		for p, files := range results[c] {
+			if len(files.paths) == 0 {
+				return nil, fmt.Errorf("download: chapter %s: page %d produced no file", ch.ID, p)
+			}
+			for _, path := range files.paths {
+				ch.Pages = append(ch.Pages, assemble.Page{Path: path, Index: idx})
+				idx++
+			}
+		}
+		out[c] = ch
+	}
+	return out, nil
 }
 
 // run holds one Run's mutable state.
@@ -402,8 +501,19 @@ type run struct {
 	pagesFetched     atomic.Int64
 	pagesRequantised atomic.Int64
 	pagesGuarded     atomic.Int64
+	pagesSplit       atomic.Int64
+	pagesFromSplit   atomic.Int64
 	bytesStored      atomic.Int64
 	bytesFetched     atomic.Int64
+
+	// results[chapter][page] is what each source image became on disk. Workers
+	// own distinct slots, so it needs no lock; resolveDeferred reads it whole,
+	// after every worker has finished.
+	results [][]pageFiles
+
+	// deferred holds strips awaiting the chapter-wide corroboration check. It
+	// is guarded by mu.
+	deferred []*deferredStrip
 
 	inFlight    atomic.Int64
 	maxInFlight atomic.Int64
@@ -421,9 +531,45 @@ func (r *run) snapshot() Progress {
 		PagesFetched:     int(r.pagesFetched.Load()),
 		PagesRequantised: int(r.pagesRequantised.Load()),
 		PagesGuarded:     int(r.pagesGuarded.Load()),
+		PagesSplit:       int(r.pagesSplit.Load()),
+		PagesFromSplit:   int(r.pagesFromSplit.Load()),
 		BytesStored:      r.bytesStored.Load(),
 		BytesFetched:     r.bytesFetched.Load(),
 	}
+}
+
+// countResult folds one normalisation's diagnostics into the run's counters,
+// and reports a requantised page to the caller. Every page written by this
+// package goes through here, whether it is a whole page or one piece of a
+// split strip, so the counters cannot drift apart from what was written.
+func (r *run) countResult(url string, res imageproc.Result) {
+	if res.GuardFactor > 1 {
+		r.pagesGuarded.Add(1)
+	}
+	if res.Requantised {
+		r.pagesRequantised.Add(1)
+		if cb := r.q.opts.OnRequantise; cb != nil {
+			r.mu.Lock()
+			cb(url, res)
+			r.mu.Unlock()
+		}
+	}
+}
+
+// withEncoder runs fn under the encode semaphore, so a large fetch fan-out
+// cannot put more decoders on the CPU than configured.
+func (r *run) withEncoder(ctx context.Context, fn func() error) error {
+	select {
+	case r.encoder <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-r.encoder }()
+
+	observeMax(&r.maxEncoding, r.encoding.Add(1))
+	defer r.encoding.Add(-1)
+
+	return fn()
 }
 
 // execute runs the bounded worker pool. The first hard failure cancels the
@@ -535,8 +681,13 @@ func (r *run) do(ctx context.Context, j job) error {
 
 // fetchPage fetches one page and writes it, normalised, via temp-and-rename.
 // It returns the stored and fetched byte counts.
+//
+// The image header is inspected before anything is decoded, so a strip can be
+// recognised while its bytes are still streaming (PLAN §12.3). An ordinary page
+// takes exactly the path it always did: peeking does not consume the body.
 func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err error) {
-	if err := os.MkdirAll(filepath.Dir(j.path), 0o755); err != nil {
+	dir := filepath.Dir(j.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, 0, fmt.Errorf("download: %w", err)
 	}
 
@@ -546,8 +697,39 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 	}
 	defer body.Close()
 	counted := &countingReader{r: body}
+	br := bufio.NewReaderSize(counted, peekBytes)
 
-	tmp, err := os.CreateTemp(filepath.Dir(j.path), ".page-*.tmp")
+	w, h, ok := peekConfig(br)
+	switch classify(r.q.opts.SplitStrips, w, h, ok) {
+	case verdictDefer:
+		d, n, err := r.parkStrip(j, w, h, br)
+		if err != nil {
+			return 0, n, err
+		}
+		r.mu.Lock()
+		r.deferred = append(r.deferred, d)
+		r.mu.Unlock()
+		return 0, n, nil
+
+	case verdictSplit:
+		var files pageFiles
+		err := r.withEncoder(ctx, func() error {
+			img, _, derr := image.Decode(br)
+			if derr != nil {
+				return fmt.Errorf("imageproc: decode: %w", derr)
+			}
+			files, stored, derr = r.writePages(j, img, true)
+			return derr
+		})
+		if err != nil {
+			return 0, counted.n, err
+		}
+		files.tall = imageproc.IsSplitCandidate(w, h)
+		r.results[j.chapter][j.page] = files
+		return stored, counted.n, nil
+	}
+
+	tmp, err := os.CreateTemp(dir, ".page-*.tmp")
 	if err != nil {
 		return 0, 0, fmt.Errorf("download: %w", err)
 	}
@@ -560,48 +742,38 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 		}
 	}()
 
-	res, err := r.normalise(ctx, tmp, counted)
+	res, err := r.normalise(ctx, tmp, br)
 	if err != nil {
 		return 0, counted.n, err
 	}
-	if res.GuardFactor > 1 {
-		r.pagesGuarded.Add(1)
-	}
-	if res.Requantised {
-		r.pagesRequantised.Add(1)
-		if r.q.opts.OnRequantise != nil {
-			r.mu.Lock()
-			r.q.opts.OnRequantise(j.url, res)
-			r.mu.Unlock()
-		}
-	}
+	r.countResult(j.url, res)
 	if err := tmp.Sync(); err != nil {
 		return 0, counted.n, fmt.Errorf("download: sync: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return 0, counted.n, fmt.Errorf("download: close: %w", err)
 	}
+	// An earlier run may have split this page; if it is not being split now,
+	// its pieces must not be left behind to be picked up as extra pages.
+	removePageFiles(dir, j.page)
 	if err := os.Rename(name, j.path); err != nil {
 		return 0, counted.n, fmt.Errorf("download: rename: %w", err)
 	}
 	committed = true
+	r.results[j.chapter][j.page] = pageFiles{paths: []string{j.path}}
 	return res.Bytes, counted.n, nil
 }
 
 // normalise runs the CPU-heavy half under the encode semaphore, so a large
 // fetch fan-out cannot put more decoders on the CPU than configured.
 func (r *run) normalise(ctx context.Context, dst io.Writer, src io.Reader) (imageproc.Result, error) {
-	select {
-	case r.encoder <- struct{}{}:
-	case <-ctx.Done():
-		return imageproc.Result{}, ctx.Err()
-	}
-	defer func() { <-r.encoder }()
-
-	observeMax(&r.maxEncoding, r.encoding.Add(1))
-	defer r.encoding.Add(-1)
-
-	return imageproc.Normalise(dst, src, r.q.opts.Image)
+	var res imageproc.Result
+	err := r.withEncoder(ctx, func() error {
+		var err error
+		res, err = imageproc.Normalise(dst, src, r.q.opts.Image)
+		return err
+	})
+	return res, err
 }
 
 // observeMax raises m to n if n is larger.
