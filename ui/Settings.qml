@@ -39,10 +39,44 @@ Item {
         screen.logLines ? screen.logLines.length : 0,
         Paging.rowsPerPage(logViewport.height, logPanel.rowHeight))
 
+    // The download cache (PLAN §12.4). The size and every sentence about it are
+    // the backend's; this screen renders them and never formats a size of its
+    // own, so "636 MB" is spelled one way in the whole application.
+    property string cacheSummary: ""
+
+    // The question, while it is being asked. Non-empty *is* the asking: there
+    // is one question on this screen at a time and nowhere else to put it.
+    property string cacheQuestion: ""
+
     signal pingRequested()
     signal logRequested()
     signal clearErrorRequested()
     signal consultRobotsRequested(bool on)
+
+    // Clearing is two steps, like deleting a download: the first asks the
+    // backend for the question, the second answers it. Hundreds of megabytes
+    // and no way back but refetching is not something to do on one tap.
+    signal cacheSizeRequested()
+    signal clearCacheRequested()
+    signal clearCacheConfirmed()
+
+    // Asked for whenever the screen comes up, so the number on it is the number
+    // now. The screen that shows a figure is the one that should ask for it —
+    // with the caller asking instead, a new way onto this screen arrives with a
+    // stale size and nothing to say it is stale.
+    onVisibleChanged: {
+        if (screen.visible)
+            screen.cacheSizeRequested()
+    }
+
+    function askToClearCache() {
+        screen.cacheQuestion = ""
+        screen.clearCacheRequested()
+    }
+
+    function closeCacheQuestion() {
+        screen.cacheQuestion = ""
+    }
 
     // toggleRobots asks for the opposite of what is currently stored. It does
     // not flip the property: the backend persists and applies, and the value
@@ -221,6 +255,140 @@ Item {
                 id: clearArea
                 anchors.fill: parent
                 onClicked: screen.clearErrorRequested()
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        // The download cache — PLAN §12.4.
+        //
+        // Page images stay on disk after a download so a repeat can skip them,
+        // and deleting a document reclaims the ones behind it. What it cannot
+        // reclaim is pages a delete had to skip because that chapter was
+        // downloading at the time, or pages a failed download left before any
+        // record existed: nothing names those again, so without this they stay
+        // for good. One button, no schedule — a cache that empties itself is a
+        // download that vanished the night before a flight.
+        Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "Downloads cache"
+            font.pointSize: Style.headingSize
+            color: Style.ink
+        }
+
+        // The size, in the backend's words. A button to clear something whose
+        // size you cannot see is a button nobody dares press, and this is also
+        // how the user checks it worked.
+        Text {
+            objectName: "cacheSummary"
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: screen.cacheSummary.length > 0 ? screen.cacheSummary : "Asking how much is cached…"
+            font.pointSize: Style.bodySize
+            color: Style.muted
+        }
+
+        Rectangle {
+            objectName: "clearCacheButton"
+            width: parent.width
+            height: Style.buttonHeight
+            color: clearCacheArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+            visible: screen.cacheQuestion.length === 0
+
+            Text {
+                anchors.centerIn: parent
+                text: "Clear the cache"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: clearCacheArea
+                objectName: "clearCacheArea"
+                anchors.fill: parent
+                enabled: parent.visible
+                onClicked: screen.askToClearCache()
+            }
+        }
+
+        // The question, and its two answers. The same shape as the delete
+        // confirmation: the way out is as easy to tap as the thing it protects.
+        Column {
+            objectName: "cacheConfirm"
+            width: parent.width
+            spacing: Style.gap
+            visible: screen.cacheQuestion.length > 0
+
+            Text {
+                objectName: "cacheQuestion"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: screen.cacheQuestion
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Row {
+                spacing: Style.gap
+
+                Rectangle {
+                    objectName: "keepCacheButton"
+                    width: 220
+                    height: Style.buttonHeight
+                    color: keepCacheArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Keep it"
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: keepCacheArea
+                        objectName: "keepCacheArea"
+                        anchors.fill: parent
+                        onClicked: screen.closeCacheQuestion()
+                    }
+                }
+
+                Rectangle {
+                    objectName: "confirmClearCacheButton"
+                    width: 260
+                    height: Style.buttonHeight
+                    color: confirmClearArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.rule
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Clear it"
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: confirmClearArea
+                        objectName: "confirmClearArea"
+                        anchors.fill: parent
+                        onClicked: {
+                            screen.closeCacheQuestion()
+                            screen.clearCacheConfirmed()
+                        }
+                    }
+                }
             }
         }
 

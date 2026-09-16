@@ -232,6 +232,18 @@ Rectangle {
             root.applyDownloadProgress(msg)
             return
 
+        case Msg.CacheStatus:
+            // The size, and after a clear the sentence about what went. Both
+            // land in the same place: the screen shows one line about the
+            // cache, and it is always the most recent true thing said about it.
+            settingsScreen.cacheSummary = msg && msg.message ? msg.message : ""
+            settingsScreen.closeCacheQuestion()
+            return
+
+        case Msg.CacheConfirm:
+            settingsScreen.cacheQuestion = msg && msg.message ? msg.message : ""
+            return
+
         case Msg.QueueResult:
             // Only says anything when something did not fit. Every row that did
             // says "Queued." for itself, and a summary of what the list already
@@ -267,6 +279,9 @@ Rectangle {
             // is about a different row and is not what failed.
             if (chapterListScreen.confirmingKind === "delete")
                 chapterListScreen.closeConfirm()
+            // A question whose answer failed is a question to put away: leaving
+            // it open invites tapping it again.
+            settingsScreen.closeCacheQuestion()
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
             seriesGridScreen.busy = false
@@ -759,6 +774,13 @@ Rectangle {
                 root.send(Msg.Ping)
             }
             onClearErrorRequested: root.lastError = ""
+
+            // The cache: its size on arrival, and two steps to clear it. Every
+            // sentence comes back from the backend (PLAN §2), including the
+            // size, so nothing here formats a number.
+            onCacheSizeRequested: root.send(Msg.GetCacheSize)
+            onClearCacheRequested: root.send(Msg.ClearCache)
+            onClearCacheConfirmed: root.send(Msg.ClearCache, {"confirmed": true})
         }
     }
 }
