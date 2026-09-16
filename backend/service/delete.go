@@ -49,11 +49,16 @@ const DeleteFailedRemedy = "Quire could not remove that document from your reMar
 // Quire could not update its own record of it.
 //
 // Saying so matters more than it looks: the row will still offer "Read" on a
-// document that is now in the Trash, and a user who knows why can put it right
-// by restoring it or by leaving Quire to notice on the next tap (§6 M6 already
-// handles a UUID that no longer resolves).
-const DeleteNotForgottenRemedy = "That document is in your reMarkable's Trash, but Quire could not update " +
-	"its own record of it. Tapping Read will sort itself out."
+// document that is not there any more, and a user who knows why can put it
+// right by leaving Quire to notice on the next tap (§6 M6 already handles a
+// UUID that no longer resolves).
+//
+// It does not mention the Trash. On this path the delete itself worked, which
+// since PLAN §12.4's emptying means the document is gone rather than sitting
+// somewhere it could be fetched back from. Only DeleteNotEmptiedNote may talk
+// about the Trash, because that is the one path where the document is in it.
+const DeleteNotForgottenRemedy = "That download is deleted, but Quire could not update its own record of " +
+	"it. Tapping Read will sort itself out."
 
 // DeleteUnknownRemedy answers a delete for a document Quire has no record of.
 //

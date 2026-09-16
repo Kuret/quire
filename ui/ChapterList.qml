@@ -1112,7 +1112,12 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Move to Trash"
+                    // What the button does, in the words the question next to
+                    // it uses. It stopped being a move to the Trash when the
+                    // Trash started being emptied behind it (PLAN §12.4): the
+                    // document is destroyed, and a label promising somewhere to
+                    // recover it from would be the one lie on the screen.
+                    text: "Delete for good"
                     font.pointSize: Style.smallSize
                     color: Style.ink
                 }
