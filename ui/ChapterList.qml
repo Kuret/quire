@@ -191,6 +191,36 @@ Item {
             screen.selectedIds = []
     }
 
+    // pruneSelection drops ids the list no longer offers, and is called
+    // whenever the model is refilled.
+    //
+    // A refresh of the same series refills the rows, and a selection that
+    // survives it does so only because the ids happen to match again. Two
+    // things break that: a refresh that no longer lists a row, and a row that
+    // comes back already downloaded. Either leaves an id selected with nothing
+    // on screen carrying it — the count says 5, the user can see 4, and the
+    // one they cannot see is the one they cannot take back off.
+    //
+    // It re-reads canSelect rather than only checking presence, so a row that
+    // finished downloading while the mode was open leaves the selection the
+    // same way it loses its box.
+    function pruneSelection() {
+        if (screen.selectedIds.length === 0)
+            return
+        var live = screen.showingVolumes ? screen.volumeModel : screen.model
+        var kept = []
+        // Built by walking the model, so what survives keeps list order — the
+        // order the queue will work through.
+        for (var i = 0; live && i < live.count; ++i) {
+            var row = live.get(i)
+            if (screen.selectedIds.indexOf(row.chapterId) >= 0
+                    && screen.canSelect(row.downloadState, row.documentUuid))
+                kept.push(row.chapterId)
+        }
+        if (kept.length !== screen.selectedIds.length)
+            screen.selectedIds = kept
+    }
+
     // enterSelection and leaveSelection are the only two doors. Leaving always
     // clears: a selection the user cannot see is a selection they will act on
     // by accident, which is the same rule the confirm strip follows.

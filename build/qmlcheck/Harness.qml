@@ -834,6 +834,41 @@ Window {
         win.want("and takes the selection with it", chapterList.selectedCount, 0)
         chapterList.showView("chapters")
 
+        // A refresh of the same series refills the model, and the selection
+        // survives that only if the rows it names are still there and still
+        // have something to queue. Both ways of losing one are checked,
+        // because the failure is silent either way: a count that says 2 with
+        // one row on screen carrying it.
+        // Each case starts from its own selection rather than carrying on from
+        // the one before: chained state is how an assertion ends up passing
+        // for a reason that has nothing to do with what it claims to test.
+        chapterList.enterSelection()
+        chapterList.toggleSelected("c0", "", "")
+        chapterList.toggleSelected("c2", "", "")
+        win.want("two rows picked before a refresh", chapterList.selectedCount, 2)
+        chaptersModel.setProperty(2, "downloadState", "done")
+        chapterList.pruneSelection()
+        win.want("a picked row that came back downloaded drops out",
+                 chapterList.selectedCount, 1)
+        win.want("and the one still offering a download stays",
+                 chapterList.selectedIds[0], "c0")
+        chaptersModel.setProperty(2, "downloadState", "")
+        chapterList.leaveSelection()
+
+        chapterList.enterSelection()
+        chapterList.toggleSelected("c0", "", "")
+        chapterList.toggleSelected("c2", "", "")
+        win.want("two rows picked before a shorter refresh", chapterList.selectedCount, 2)
+        chaptersModel.remove(2)
+        chapterList.pruneSelection()
+        win.want("a picked row the refresh no longer lists drops out",
+                 chapterList.selectedCount, 1)
+        win.want("and the row still listed stays", chapterList.selectedIds[0], "c0")
+        chaptersModel.insert(2, {"chapterId": "c2", "title": "Chapter 2", "number": 2,
+                                 "published": "2026-01-01", "scanlator": "Group",
+                                 "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+        chapterList.leaveSelection()
+
         // Put the rows back as they were found.
         chaptersModel.setProperty(1, "downloadState", "")
         chaptersModel.setProperty(3, "documentUuid", "")

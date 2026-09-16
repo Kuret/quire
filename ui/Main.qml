@@ -384,6 +384,11 @@ Rectangle {
         chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
         chapterListScreen.synopsis = msg && msg.series && msg.series.description
             ? msg.series.description : ""
+
+        // The rows are new objects even when they describe the same chapters,
+        // so anything picked before this refill has to be checked against what
+        // is actually on screen now.
+        chapterListScreen.pruneSelection()
     }
 
     // ---- watched series (PLAN §12.2) ---------------------------------------
