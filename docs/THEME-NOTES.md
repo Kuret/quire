@@ -348,6 +348,7 @@ a source of that shape should carry by default; `""` means "no opinion" and
 | Theme | Suggestion | Why |
 |---|---|---|
 | `mangadex` | `"MangaDex"` | One site, which knows what it is called. Without this, adding `https://api.mangadex.org` produced a source named **"MangaDex API documentation"** — exactly what that page's `<title>` says, and meaningless in a source list. |
+| `weebcentral` | `"Weeb Central"` | One site, and one that spells its own name with a space the theme ID does not. The page `<title>` would in fact have done here — but only by luck, which is the case §7.5's stage-6 correction is about: a theme that knows its site's name should say so rather than leave the default to whatever the site puts in a `<title>` this week. |
 | `mangakakalot` | `""` | A family of mirrors carrying different names and no shared branding. There is no one name to lend them, so the page title is the better default and a rename is one tap away. |
 | `madara`, `mangathemesia`, `generic` | `""` | Families of hundreds of independently branded sites, or an escape hatch pointed at a site nobody has themed. For these the page title genuinely *is* the best available default; inventing a name would be worse than the title ever is. |
 
@@ -940,6 +941,173 @@ search that worked; an unmarked 403 is `partial` naming page fetching.
 **Author rows are messy by nature.** The `Author(s)` row often carries a list of
 romanisations of one name. They are returned as the site gives them; picking a
 canonical one is a guess, and a wrong guess looks like a different author.
+
+---
+
+### `weebcentral` — an htmx fragment application, and the first single site that is not an API
+
+Implemented in `backend/theme/weebcentral/`. Not in PLAN §7.3's list, and added
+for the same structural reason `mangakakalot` was: nothing already here fits it.
+No `wp-manga`, no `ts_reader.run(`, no `admin-ajax.php`, no WordPress at all —
+and no JSON API either. It is a server-rendered **fragment** application: named
+endpoints answer HTML snippets and htmx swaps them into the page. `mangadex` is
+the only other single-site theme, and it is an API; this is the first theme
+where the interesting endpoints are markup that no browser ever shows whole.
+
+#### Fingerprint signals
+
+The site is built on a utility-CSS framework, so its class names are
+`flex items-center gap-2` and describe half the web. Class-name signals are
+worthless here. What is distinctive is *where it fetches from*: the fragment
+endpoints named in `hx-get` attributes, and the two element IDs those fragments
+are swapped into.
+
+| Page | Signal | Weight | What it is |
+|---|---|---|---|
+| Reader | `#chapter-images` | 45 | The defining one. The ID the page images are swapped into; nothing else emits it |
+| Any | `#quick-search-input, #quick-search-result` | 20 | The header type-ahead, present site-wide |
+| Series / chapters | `#chapter-list` | 15 | The chapter-list container |
+| Series / chapters | `checkNewChapter(` | 20 | The Alpine expression every chapter row carries |
+| Search | `/search/data` | 25 | The search fragment endpoint, in the next-page button's `hx-get` |
+| Search | `display_mode=` | 20 | Its row-layout parameter, alongside |
+| Home | `/hot-series` | 15 | A home-page panel endpoint |
+| Home | `/latest-updates/` | 10 | Another |
+| Home | `/recently-added/` | 10 | Another |
+| Series | `/full-chapter-list` | 20 | The chapter-list fragment endpoint |
+| Any | `/static/images/chapter-badge` | 20 | The badge on every chapter row |
+| Reader | `/static/images/broken_image` | 15 | The `onerror` placeholder every page image carries |
+| Any | `hx-get=` | 10 | htmx itself — weak on purpose, plenty of sites use it |
+| Any | `a[href*="/chapters/"]` | 10 | The chapter link shape |
+| **Negative** | `/wp-content/` | **→ 0** | WordPress. This site is not, and shares no lineage with the two themes that are |
+| **Negative** | `ts_reader.run(` | **→ 0** | mangathemesia's reader bootstrap |
+| **Negative** | `data-chapter-url-template` | **→ 0** | mangakakalot's client-rendered chapter list |
+
+The negatives here **zero the score outright** rather than subtracting, which is
+stronger than `mangakakalot`'s −40 and is warranted by a stronger fact: those
+three markers belong to software this site has nothing to do with, so there is
+no legitimate page of this theme on which any of them can appear. A page
+carrying one is that theme's page whatever else it contains.
+
+A `/series/` link signal was considered and **left out**. It would have been the
+easiest signal to add and is the one most likely to leak: a series path is
+common enough that scoring it would put points on other families' pages for
+nothing. Against the committed corpus this theme scores 65–95 on its own pages
+and **0 on every other theme's**, with every other theme scoring **0** on its.
+
+#### Endpoint shapes
+
+| What | Shape |
+|---|---|
+| Search / Browse | `GET /search/data?text=&sort=&order=Descending&adult=False&limit=32&offset=N&display_mode=Full+Display` → rows fragment |
+| Series | `GET /series/{id}/{slug}` → whole page |
+| Chapter list | `GET /series/{id}/full-chapter-list` → rows fragment, **newest first** |
+| Reader | `GET /chapters/{id}/images?is_prev=False&reading_style=long_strip` → images fragment |
+
+Four things are worth dwelling on.
+
+**Identifiers are opaque, and the slug is decoration.** A series is
+`/series/{26-character token}/{slug}`, and the token alone is the identity. The
+chapter-list endpoint takes **the bare token** —
+`/series/{id}/full-chapter-list`, with no slug in between. Appending the suffix
+to the full path answers 404, which costs an afternoon to find because
+everything else about the ID works. `urls.go` keeps the two forms apart on
+purpose.
+
+**The series page's chapter list is truncated.** It renders the most recent
+entries server-side and hides the rest behind the fragment endpoint. Parsing the
+series page for chapters therefore returns a plausible *short* list rather than
+an error — the newest few, looking entirely healthy — which is the worst kind of
+wrong. `Chapters()` never fetches the series page, and
+`TestChaptersNeverReadsTheSeriesPage` asserts it.
+
+**`display_mode` is not cosmetic.** The compact row layout omits the title
+element entirely. Drop the parameter and the search comes back as a list of
+unnamed results.
+
+**The chapter list is newest-first**, which is why `Chapters` reverses it.
+`testdata/chapters.html` is descending on purpose, and carries an unnumbered
+"Special Chapter" between 5 and 4, so that both halves of the ordering contract
+are load-bearing: forgetting to sort is a red test, and *sorting by number* is
+also a red test, because it flings the unnumbered entry to one end.
+
+#### `overrides` keys, and why each exists
+
+Two, and both are about *what to show* rather than where things live — the same
+shape `mangadex`'s take, and for the same reason: this is one deployment, so
+there is no second site to rename a path segment. An override nobody can
+usefully set is a knob that only ever gets typed wrong, so the path segments are
+constants.
+
+| Key | Default | Why |
+|---|---|---|
+| `browseSort` | `Popularity` | Browse is a search with an empty query (§7.5, M3 correction 1). The site's default sort is relevance, and relevance against an empty query orders nothing — the browse list comes back meaningless rather than useful. A query, by contrast, always sorts by `Best Match`; the override only applies when there is no query |
+| `includeAdultContent` | `false` | The site includes adult-flagged series by default. Quire does not, for the same reason `mangadex` caps its content rating: the device's library is visible from the stock UI, and a browse list is not a place to be surprised. Opt-in, never inferred |
+
+#### `AllowedHosts`
+
+`*.lastation.us`, `*.planeptune.us`, `*.lowee.us`, `*.leanbox.us`,
+`*.compsci88.com`.
+
+The third theme to declare anything, and the broadest list so far — five
+domains, because this site shards its images across a set of sibling hosts
+rather than using one CDN. Every entry is the `*.` form: the apexes serve
+nothing, and the hostnames that do are per-shard labels (`scans`, `scans-hot`,
+`official`) on domains that exist for no purpose but this.
+
+**What was observed and what was inferred**, because the distinction matters and
+the guard makes it invisible once it works:
+
+| Host | Status |
+|---|---|
+| `*.lastation.us` | **Observed** serving pages, 2026-09-16 |
+| `*.planeptune.us` | **Observed** serving pages, 2026-09-16 |
+| `*.lowee.us` | **Observed** serving pages (official translations), 2026-09-16 |
+| `*.leanbox.us` | **Inferred.** Not seen in the sample taken; included because the four are plainly one deliberately-named family and a missing member is a download that fails with an SSRF rejection naming a host the user has never heard of |
+| `*.compsci88.com` | **Observed** serving covers, 2026-09-16 |
+
+Covers are included here, unlike `mangadex`'s, because here they are genuinely
+off-domain: search rows and series pages both point their thumbnails at a
+separate host, so leaving it out would mean a browse list of empty frames.
+
+#### Quirks
+
+**The page images carry a same-site placeholder in `onerror`.** Every `<img>` in
+the reader fragment has
+`onerror="...this.src='/static/images/broken_image.jpg'"`. It is a string in an
+attribute, not a `src`, but a helper looking for "any image URL on this node" —
+which is what `theme.ImageURL` does, and what every WordPress theme here needs —
+would pick some of them up. `Pages()` reads `src` and only `src`, and skips
+anything under `/static/`. A chapter of broken-image icons is a silent failure;
+a missing page is a loud one.
+
+**Covers come in several renditions and the first `<source>` is the best one.**
+The markup is a `<picture>` with a `<source>` per breakpoint and an `<img>`
+fallback in a lower-quality format. Preferring the source is preferring the
+better image, which matters because M4 resizes for a 1620×2160 screen and cannot
+add back detail that was never fetched.
+
+**Dates are machine-readable.** Chapter rows carry `<time datetime="...">` in
+RFC 3339, so there is no `dateFormat` override here and no locale to get wrong —
+the one theme so far where that whole class of bug does not exist. A row without
+a `<time>` yields the zero time, which §7.2 says is fine.
+
+**What was actually measured, 2026-09-16.** Run by hand with the honest
+`User-Agent`, so nobody has to repeat it:
+
+| Step | Result |
+|---|---|
+| Home page | **200**, 168 KB. Behind a CDN, **no challenge** — one injected script tag and nothing else |
+| Search fragment | **200**, rows parsed, covers and series IDs extracted |
+| Series page | **200**, title, cover, authors, tags, status, description, associated names all parsed |
+| Chapter-list fragment | **200**, whole list, descending, ascending after the reversal |
+| Reader fragment | **200**, page URLs extracted |
+| **Page image** on the image host | **200, `image/*`** — fetched, with no `Referer` and no cookie |
+
+That last row is the one that matters and the one the `mangakakalot` family
+failed. This is, as of today, **the only theme in the registry whose §7.5
+stage-5 image fetch succeeds against a live site with Quire's fetch layer as it
+stands.** See "The `Referer` wall" below for why that sentence needs the
+qualifier.
 
 ---
 
