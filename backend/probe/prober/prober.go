@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -275,6 +276,12 @@ type run struct {
 	page     *probe.Page
 	scores   []theme.Score
 	warnings []string
+
+	// assumedHTTPS records that stage 1 supplied the scheme because the user
+	// typed none. Stage 2 says so when the site cannot be reached: Quire
+	// guessed, and a guess that failed has to be admitted rather than quietly
+	// retried over an unencrypted connection.
+	assumedHTTPS bool
 }
 
 func (r *run) start(stage int) {
@@ -355,20 +362,26 @@ func (r *run) result(verdict, detail string) Result {
 func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, bool) {
 	raw := strings.TrimSpace(rawurl)
 	if raw == "" {
-		return nil, r.result(theme.VerdictInvalidURL, "That address is empty. Paste the site's web address, starting with https://."), false
+		return nil, r.result(theme.VerdictInvalidURL, "That address is empty. Type the site's address, like weebcentral.com."), false
 	}
-	// "Normalise" is the first word of the stage's name: a user pasting
-	// example.com from a browser's address bar has not made a mistake, so the
-	// missing scheme is filled in rather than thrown back at them. Anything
-	// that *does* carry a scheme keeps it, so a typed http:// or ftp:// is
-	// judged on its own merits below.
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
+	raw, assumed, problem := normaliseScheme(raw)
+	if problem != "" {
+		return nil, r.result(theme.VerdictInvalidURL, problem), false
 	}
+	r.assumedHTTPS = assumed
 
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, r.result(theme.VerdictInvalidURL, fmt.Sprintf("That doesn't look like a web address: %v", err)), false
+	}
+	// A typed scheme is the user being specific, so credentials in it are the
+	// guard's business (PLAN §7.4). When Quire supplied the scheme, an "@" is
+	// far more likely to be an email address than a URL, and saying so beats
+	// reporting "credentials in URL are not allowed" at somebody who typed
+	// their address book.
+	if assumed && u.User != nil {
+		return nil, r.result(theme.VerdictInvalidURL,
+			"That looks like an email address, not a site. Type just the site's address, like weebcentral.com."), false
 	}
 	// The probe only ever wants the site root. A pasted deep link is trimmed
 	// back to it rather than being probed as if it were the homepage.
@@ -379,6 +392,78 @@ func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, 
 		return nil, r.result(verdict, detail), false
 	}
 	return u, Result{}, true
+}
+
+// schemeLike matches the "scheme:" of RFC 3986, and schemeSlashes the same
+// token with the colon left out — the shape `https//example.com` has, which is
+// a typo rather than a host.
+var (
+	schemeLike    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]*:`)
+	schemeSlashes = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]*//`)
+)
+
+// normaliseScheme is the "normalise" half of PLAN §7.5 stage 1. It returns the
+// address to parse, whether Quire supplied the scheme itself, and — when the
+// input is a near-miss rather than an address — the plain-language reason to
+// refuse it.
+//
+// Typing on an e-ink display is slow, so a bare weebcentral.com is treated as
+// what the user plainly meant rather than thrown back at them. Two rules keep
+// that from becoming a guessing game:
+//
+//   - The scheme is only ever filled in as https. A failure is reported as a
+//     failure (see reachError), never retried over plain http — silently
+//     downgrading somebody to an unencrypted connection is not a convenience.
+//   - Anything that *carries* a scheme keeps it untouched, so a typed http://
+//     is respected and an ftp://, file:// or javascript: still reaches the
+//     scheme check in the guard and is refused there.
+//
+// A scheme that is *nearly* right is refused with the typo named, because
+// https:/example.com could be read as either a missing slash or a host called
+// "https:", and choosing between them for the user is exactly the guessing this
+// avoids.
+func normaliseScheme(raw string) (out string, assumedHTTPS bool, problem string) {
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return raw, false, ""
+	}
+	if loc := schemeLike.FindStringIndex(raw); loc != nil && !hasPortAfterColon(raw) {
+		scheme := strings.ToLower(raw[:loc[1]-1])
+		if scheme == "http" || scheme == "https" {
+			typed := raw[:loc[1]] + strings.Repeat("/", len(raw[loc[1]:])-len(strings.TrimLeft(raw[loc[1]:], "/")))
+			return "", false, fmt.Sprintf(
+				"%q isn't quite right — it should be %q. Try again, or leave the scheme off and type just the site, like weebcentral.com.",
+				typed, scheme+"://")
+		}
+		// Some other scheme, typo or not. Keep it: the guard names it.
+		return raw, false, ""
+	}
+	if schemeSlashes.MatchString(raw) {
+		return "", false, "That address is missing its \":\" — a web address starts https:// or http://, or you can leave the scheme off and type just the site, like weebcentral.com."
+	}
+	return "https://" + raw, true, ""
+}
+
+// hasPortAfterColon reports whether raw's first colon is followed only by
+// digits, which makes it example.com:8080 rather than a scheme.
+func hasPortAfterColon(raw string) bool {
+	i := strings.IndexByte(raw, ':')
+	if i < 0 {
+		return false
+	}
+	rest := raw[i+1:]
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	if rest == "" {
+		return false
+	}
+	for _, c := range rest {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // guardVerdict maps a guard or fetch error onto the §7.5 enum, in plain
@@ -469,8 +554,15 @@ func (r *run) reachError(base *url.URL, err error) Result {
 	if verdict, detail := guardVerdict(err); verdict != "" {
 		return r.result(verdict, detail)
 	}
-	return r.result(theme.VerdictUnreachable,
-		fmt.Sprintf("Quire couldn't reach %s: %v", base.Hostname(), err))
+	detail := fmt.Sprintf("Quire couldn't reach %s: %v", base.Hostname(), err)
+	// Stage 1 filled in the scheme, so the guess is part of why this failed and
+	// the user is owed it. Quire does not retry over plain http by itself: an
+	// unencrypted connection is the user's decision to make, not a fallback to
+	// slip past them.
+	if r.assumedHTTPS {
+		detail += fmt.Sprintf(" You didn't type a scheme, so Quire assumed https://. If this site only works without encryption, type http://%s and try again.", base.Host)
+	}
+	return r.result(theme.VerdictUnreachable, detail)
 }
 
 // stageFingerprint is PLAN §7.5 stage 4. A nil theme with a nil error means the
