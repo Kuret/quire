@@ -103,6 +103,15 @@ QtObject {
 
             return left === 0 ? "ok" : "failed"
         } catch (e) {
+            // Every early return above clears the selection before it leaves,
+            // and a throw must not be the one path that does not: a half-made
+            // selection left behind is exactly what made the navigator
+            // disagree with itself the first time (PLAN §12.4).
+            try {
+                var ex2 = NavigationManager.treeExplorerForNavigation
+                if (ex2 && ex2.selection)
+                    ex2.selection.clear()
+            } catch (ignored) {}
             console.log("[quire] trash failed: " + e)
             return "failed"
         }
