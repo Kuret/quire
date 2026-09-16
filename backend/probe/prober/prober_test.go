@@ -84,9 +84,9 @@ func (u *recordUI) Ask(_ context.Context, q prober.Question) (prober.Answer, err
 // four requests stage 5 makes.
 func madaraRoutes() map[string]themetest.Route {
 	return map[string]themetest.Route{
-		"GET /":                                         {File: "home-madara.html"},
-		"GET /?post_type=wp-manga&s=a":                  {File: "search.html"},
-		"GET /manga/the-lantern-keeper/":                {File: "series.html"},
+		"GET /":                          {File: "home-madara.html"},
+		"GET /?post_type=wp-manga&s=":    {File: "search.html"},
+		"GET /manga/the-lantern-keeper/": {File: "series.html"},
 		"POST /manga/the-lantern-keeper/ajax/chapters/": {File: "chapters-ajax.html"},
 		"GET /manga/the-lantern-keeper/chapter-4/":      {File: "reader.html"},
 		// PLAN §7.5 stage 5 fetches one page image rather than only extracting
@@ -535,7 +535,7 @@ func TestRedirectOffDomainAsksFirst(t *testing.T) {
 		// like, and is why the series routes below are the relative entry.
 		routes := map[string]themetest.Route{
 			"GET /":                                      {File: "home-madara.html", FinalURL: "https://elsewhere.invalid/"},
-			"GET /?post_type=wp-manga&s=a":               {File: "search.html"},
+			"GET /?post_type=wp-manga&s=":                {File: "search.html"},
 			"GET /manga/salt-and-cedar/":                 {File: "series.html"},
 			"POST /manga/salt-and-cedar/ajax/chapters/":  {File: "chapters-ajax.html"},
 			"GET /manga/the-lantern-keeper/chapter-3-5/": {File: "reader.html"},
