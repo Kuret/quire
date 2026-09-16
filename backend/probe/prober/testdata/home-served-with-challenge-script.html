@@ -20,723 +20,1089 @@
   status, a few KB, and nothing in it.
 
   Why synthetic: PLAN §1.3 forbids this repository from naming a real site.
-  The markup shape is madara's, as in home-madara.html, so the probe's stage 4
-  has something to recognise; the host is example.invalid (RFC 2606) and every
-  title here is invented.
+  The markup shape is madara's, as in home-madara.html — and as of the fidelity
+  correction of 2026-09-16 that shape is the one a live install really serves,
+  so this page scores what a real one scores. The host is example.invalid
+  (RFC 2606) and every title here is invented.
+
+  FIDELITY CORRECTION 2026-09-16 — the asset path in this fixture used to be
+  /wp-content/plugins/madara/, which no live install serves. Madara is
+  distributed as a WordPress *theme*, so its assets come from
+  /wp-content/themes/madara/, and its companion plugin registers as
+  `madara-core`. The old string was invented here and then "verified" against
+  these fixtures, which is how a fingerprint that scored 88 on our own pages
+  came to score 43 on a real one.
 -->
 <!DOCTYPE html>
 <html lang="en-GB">
 <head>
     <meta charset="utf-8">
     <title>Example Reader - Read comics online, free and updated daily</title>
-    <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css?ver=1.7.3">
+    <link rel='stylesheet' id='madara-css-css' href='https://example.invalid/wp-content/themes/madara/style.css?ver=1.6.6' type='text/css' media='all'/>
+    <script src="https://example.invalid/wp-content/plugins/madara-core/js/manga.js?ver=1.6.6"></script>
     <link rel="https://api.w.org/" href="https://example.invalid/wp-json/">
 </head>
 <body class="home blog post-type-archive-wp-manga">
-<header class="c-blog__heading">
-    <h1 class="h4">Latest updates</h1>
+<header class="site-header">
+    <nav class="main-navigation">
+        <ul>
+            <li class="menu-item menu-item-type-taxonomy menu-item-object-wp-manga-genre"><a href="https://example.invalid/manga-genre/fantasy/">Fantasy</a></li>
+            <li class="menu-item menu-item-type-taxonomy menu-item-object-wp-manga-genre"><a href="https://example.invalid/manga-genre/drama/">Drama</a></li>
+        </ul>
+    </nav>
 </header>
+<div class="c-blog__heading style-2 font-heading">
+    <h2 class="h4"><i class="icon ion-ios-star"></i> LATEST MANGA RELEASES</h2>
+</div>
 <div class="c-page-content">
     <div class="main-col-inner">
-        <div class="tab-content-wrap">
-            <div class="c-tabs-item">
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-lantern-keeper-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-lantern-keeper/chapter-3/">Chapter 3</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/salt-and-cedar/" title="Salt and Cedar">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/salt-and-cedar-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/salt-and-cedar/">Salt and Cedar</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/salt-and-cedar/chapter-4/">Chapter 4</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+        <div id="loop-content" class="page-content-listing item-default">
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-82951" class="item-thumb c-image-hover" data-post-id="82951">
+                                <a href="https://example.invalid/manga/the-lantern-keeper/" title="The Lantern Keeper">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-lantern-keeper-110x150.jpg"
+                                         class="img-responsive" alt="The Lantern Keeper"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-lantern-keeper/chapter-3/">Chapter 3</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/paper-birds/" title="Paper Birds">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/paper-birds-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/paper-birds/">Paper Birds</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/paper-birds/chapter-5/">Chapter 5</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/nine-quiet-rooms/" title="Nine Quiet Rooms">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/nine-quiet-rooms-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/nine-quiet-rooms/">Nine Quiet Rooms</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/nine-quiet-rooms/chapter-6/">Chapter 6</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-53197" class="item-thumb c-image-hover" data-post-id="53197">
+                                <a href="https://example.invalid/manga/salt-and-cedar/" title="Salt and Cedar">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/salt-and-cedar-110x150.jpg"
+                                         class="img-responsive" alt="Salt and Cedar"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/salt-and-cedar/">Salt and Cedar</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/salt-and-cedar/chapter-4/">Chapter 4</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-tin-orchard/" title="The Tin Orchard">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-tin-orchard-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-tin-orchard/">The Tin Orchard</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-tin-orchard/chapter-7/">Chapter 7</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/winter-tenants/" title="Winter Tenants">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/winter-tenants-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/winter-tenants/">Winter Tenants</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/winter-tenants/chapter-8/">Chapter 8</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-79573" class="item-thumb c-image-hover" data-post-id="79573">
+                                <a href="https://example.invalid/manga/paper-birds/" title="Paper Birds">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/paper-birds-110x150.jpg"
+                                         class="img-responsive" alt="Paper Birds"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/paper-birds/">Paper Birds</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/paper-birds/chapter-5/">Chapter 5</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/a-map-of-small-rivers/" title="A Map of Small Rivers">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/a-map-of-small-rivers-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/a-map-of-small-rivers/">A Map of Small Rivers</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/a-map-of-small-rivers/chapter-9/">Chapter 9</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-glasshouse-year/" title="The Glasshouse Year">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-glasshouse-year-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-glasshouse-year/">The Glasshouse Year</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-glasshouse-year/chapter-10/">Chapter 10</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-39579" class="item-thumb c-image-hover" data-post-id="39579">
+                                <a href="https://example.invalid/manga/nine-quiet-rooms/" title="Nine Quiet Rooms">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/nine-quiet-rooms-110x150.jpg"
+                                         class="img-responsive" alt="Nine Quiet Rooms"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/nine-quiet-rooms/">Nine Quiet Rooms</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/nine-quiet-rooms/chapter-6/">Chapter 6</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/low-tide-bureau/" title="Low Tide Bureau">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/low-tide-bureau-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/low-tide-bureau/">Low Tide Bureau</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/low-tide-bureau/chapter-11/">Chapter 11</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/ash-and-almanac/" title="Ash and Almanac">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/ash-and-almanac-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/ash-and-almanac/">Ash and Almanac</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/ash-and-almanac/chapter-12/">Chapter 12</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-33486" class="item-thumb c-image-hover" data-post-id="33486">
+                                <a href="https://example.invalid/manga/the-tin-orchard/" title="The Tin Orchard">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-tin-orchard-110x150.jpg"
+                                         class="img-responsive" alt="The Tin Orchard"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-tin-orchard/">The Tin Orchard</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-tin-orchard/chapter-7/">Chapter 7</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-second-kitchen/" title="The Second Kitchen">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-second-kitchen-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-second-kitchen/">The Second Kitchen</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-second-kitchen/chapter-13/">Chapter 13</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/rope-and-rushlight/" title="Rope and Rushlight">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/rope-and-rushlight-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/rope-and-rushlight/">Rope and Rushlight</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/rope-and-rushlight/chapter-14/">Chapter 14</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-23381" class="item-thumb c-image-hover" data-post-id="23381">
+                                <a href="https://example.invalid/manga/winter-tenants/" title="Winter Tenants">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/winter-tenants-110x150.jpg"
+                                         class="img-responsive" alt="Winter Tenants"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/winter-tenants/">Winter Tenants</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/winter-tenants/chapter-8/">Chapter 8</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/every-third-thursday/" title="Every Third Thursday">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/every-third-thursday-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/every-third-thursday/">Every Third Thursday</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/every-third-thursday/chapter-15/">Chapter 15</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-borrowed-coast/" title="The Borrowed Coast">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-borrowed-coast-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-borrowed-coast/">The Borrowed Coast</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-borrowed-coast/chapter-16/">Chapter 16</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-60445" class="item-thumb c-image-hover" data-post-id="60445">
+                                <a href="https://example.invalid/manga/a-map-of-small-rivers/" title="A Map of Small Rivers">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/a-map-of-small-rivers-110x150.jpg"
+                                         class="img-responsive" alt="A Map of Small Rivers"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/a-map-of-small-rivers/">A Map of Small Rivers</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/a-map-of-small-rivers/chapter-9/">Chapter 9</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/milk-glass/" title="Milk Glass">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/milk-glass-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/milk-glass/">Milk Glass</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/milk-glass/chapter-17/">Chapter 17</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/chalk-harbour/" title="Chalk Harbour">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/chalk-harbour-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/chalk-harbour/">Chalk Harbour</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/chalk-harbour/chapter-18/">Chapter 18</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-51401" class="item-thumb c-image-hover" data-post-id="51401">
+                                <a href="https://example.invalid/manga/the-glasshouse-year/" title="The Glasshouse Year">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-glasshouse-year-110x150.jpg"
+                                         class="img-responsive" alt="The Glasshouse Year"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-glasshouse-year/">The Glasshouse Year</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-glasshouse-year/chapter-10/">Chapter 10</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-understudy/" title="The Understudy">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-understudy-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-understudy/">The Understudy</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-understudy/chapter-19/">Chapter 19</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/long-division/" title="Long Division">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/long-division-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/long-division/">Long Division</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/long-division/chapter-20/">Chapter 20</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-20754" class="item-thumb c-image-hover" data-post-id="20754">
+                                <a href="https://example.invalid/manga/low-tide-bureau/" title="Low Tide Bureau">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/low-tide-bureau-110x150.jpg"
+                                         class="img-responsive" alt="Low Tide Bureau"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/low-tide-bureau/">Low Tide Bureau</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/low-tide-bureau/chapter-11/">Chapter 11</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-quarry-sisters/" title="The Quarry Sisters">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-quarry-sisters-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-quarry-sisters/">The Quarry Sisters</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-quarry-sisters/chapter-21/">Chapter 21</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/blue-hour-postal/" title="Blue Hour Postal">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/blue-hour-postal-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/blue-hour-postal/">Blue Hour Postal</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/blue-hour-postal/chapter-22/">Chapter 22</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-75053" class="item-thumb c-image-hover" data-post-id="75053">
+                                <a href="https://example.invalid/manga/ash-and-almanac/" title="Ash and Almanac">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/ash-and-almanac-110x150.jpg"
+                                         class="img-responsive" alt="Ash and Almanac"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/ash-and-almanac/">Ash and Almanac</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/ash-and-almanac/chapter-12/">Chapter 12</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-kettle-line/" title="The Kettle Line">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-kettle-line-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-kettle-line/">The Kettle Line</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-kettle-line/chapter-23/">Chapter 23</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/fern-and-filament/" title="Fern and Filament">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/fern-and-filament-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/fern-and-filament/">Fern and Filament</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/fern-and-filament/chapter-24/">Chapter 24</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-12748" class="item-thumb c-image-hover" data-post-id="12748">
+                                <a href="https://example.invalid/manga/the-second-kitchen/" title="The Second Kitchen">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-second-kitchen-110x150.jpg"
+                                         class="img-responsive" alt="The Second Kitchen"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-second-kitchen/">The Second Kitchen</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-second-kitchen/chapter-13/">Chapter 13</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/thirteen-lamps/" title="Thirteen Lamps">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/thirteen-lamps-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/thirteen-lamps/">Thirteen Lamps</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/thirteen-lamps/chapter-25/">Chapter 25</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-slow-ferry/" title="The Slow Ferry">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-slow-ferry-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-slow-ferry/">The Slow Ferry</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-slow-ferry/chapter-26/">Chapter 26</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-33658" class="item-thumb c-image-hover" data-post-id="33658">
+                                <a href="https://example.invalid/manga/rope-and-rushlight/" title="Rope and Rushlight">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/rope-and-rushlight-110x150.jpg"
+                                         class="img-responsive" alt="Rope and Rushlight"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/rope-and-rushlight/">Rope and Rushlight</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/rope-and-rushlight/chapter-14/">Chapter 14</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/copper-weather/" title="Copper Weather">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/copper-weather-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/copper-weather/">Copper Weather</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/copper-weather/chapter-27/">Chapter 27</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/house-of-small-repairs/" title="House of Small Repairs">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/house-of-small-repairs-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/house-of-small-repairs/">House of Small Repairs</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/house-of-small-repairs/chapter-28/">Chapter 28</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-58296" class="item-thumb c-image-hover" data-post-id="58296">
+                                <a href="https://example.invalid/manga/every-third-thursday/" title="Every Third Thursday">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/every-third-thursday-110x150.jpg"
+                                         class="img-responsive" alt="Every Third Thursday"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/every-third-thursday/">Every Third Thursday</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/every-third-thursday/chapter-15/">Chapter 15</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-nightingale-office/" title="The Nightingale Office">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-nightingale-office-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-nightingale-office/">The Nightingale Office</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-nightingale-office/chapter-29/">Chapter 29</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/gravel-songs/" title="Gravel Songs">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/gravel-songs-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/gravel-songs/">Gravel Songs</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/gravel-songs/chapter-30/">Chapter 30</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-86491" class="item-thumb c-image-hover" data-post-id="86491">
+                                <a href="https://example.invalid/manga/the-borrowed-coast/" title="The Borrowed Coast">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-borrowed-coast-110x150.jpg"
+                                         class="img-responsive" alt="The Borrowed Coast"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-borrowed-coast/">The Borrowed Coast</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-borrowed-coast/chapter-16/">Chapter 16</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-last-allotment/" title="The Last Allotment">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-last-allotment-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-last-allotment/">The Last Allotment</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-last-allotment/chapter-31/">Chapter 31</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/sable-and-sons/" title="Sable & Sons">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/sable-and-sons-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/sable-and-sons/">Sable & Sons</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/sable-and-sons/chapter-32/">Chapter 32</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-95889" class="item-thumb c-image-hover" data-post-id="95889">
+                                <a href="https://example.invalid/manga/milk-glass/" title="Milk Glass">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/milk-glass-110x150.jpg"
+                                         class="img-responsive" alt="Milk Glass"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/milk-glass/">Milk Glass</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/milk-glass/chapter-17/">Chapter 17</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-wireless-club/" title="The Wireless Club">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-wireless-club-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-wireless-club/">The Wireless Club</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-wireless-club/chapter-33/">Chapter 33</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/cold-frame/" title="Cold Frame">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/cold-frame-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/cold-frame/">Cold Frame</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/cold-frame/chapter-34/">Chapter 34</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-28697" class="item-thumb c-image-hover" data-post-id="28697">
+                                <a href="https://example.invalid/manga/chalk-harbour/" title="Chalk Harbour">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/chalk-harbour-110x150.jpg"
+                                         class="img-responsive" alt="Chalk Harbour"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/chalk-harbour/">Chalk Harbour</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/chalk-harbour/chapter-18/">Chapter 18</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-inkwell-years/" title="The Inkwell Years">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-inkwell-years-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-inkwell-years/">The Inkwell Years</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-inkwell-years/chapter-35/">Chapter 35</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
-                        </div>
-                    </div>
-                </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/bramble-court/" title="Bramble Court">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/bramble-court-193x278.jpg" alt="">
-                        </a>
-                    </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/bramble-court/">Bramble Court</a></h3>
-                        </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/bramble-court/chapter-36/">Chapter 36</a></span>
-                        </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-30704" class="item-thumb c-image-hover" data-post-id="30704">
+                                <a href="https://example.invalid/manga/the-understudy/" title="The Understudy">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-understudy-110x150.jpg"
+                                         class="img-responsive" alt="The Understudy"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-understudy/">The Understudy</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-understudy/chapter-19/">Chapter 19</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="c-tabs-item__content">
-                    <div class="tab-thumb c-image-hover">
-                        <a href="https://example.invalid/manga/the-cartographers-niece/" title="The Cartographer's Niece">
-                            <img src="https://example.invalid/wp-content/uploads/2026/01/the-cartographers-niece-193x278.jpg" alt="">
-                        </a>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-66758" class="item-thumb c-image-hover" data-post-id="66758">
+                                <a href="https://example.invalid/manga/long-division/" title="Long Division">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/long-division-110x150.jpg"
+                                         class="img-responsive" alt="Long Division"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/long-division/">Long Division</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/long-division/chapter-20/">Chapter 20</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="tab-summary">
-                        <div class="post-title">
-                            <h3><a href="https://example.invalid/manga/the-cartographers-niece/">The Cartographer's Niece</a></h3>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-31548" class="item-thumb c-image-hover" data-post-id="31548">
+                                <a href="https://example.invalid/manga/the-quarry-sisters/" title="The Quarry Sisters">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-quarry-sisters-110x150.jpg"
+                                         class="img-responsive" alt="The Quarry Sisters"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-quarry-sisters/">The Quarry Sisters</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-quarry-sisters/chapter-21/">Chapter 21</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="meta-item latest-chap">
-                            <span class="font-meta chapter"><a href="https://example.invalid/manga/the-cartographers-niece/chapter-37/">Chapter 37</a></span>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-37747" class="item-thumb c-image-hover" data-post-id="37747">
+                                <a href="https://example.invalid/manga/blue-hour-postal/" title="Blue Hour Postal">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/blue-hour-postal-110x150.jpg"
+                                         class="img-responsive" alt="Blue Hour Postal"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/blue-hour-postal/">Blue Hour Postal</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/blue-hour-postal/chapter-22/">Chapter 22</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="summary-content">
-                            A short standfirst of the kind these listings carry, long enough that this
-                            page is a page rather than a placeholder, repeated for every card because
-                            that is what the real markup does.
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-44577" class="item-thumb c-image-hover" data-post-id="44577">
+                                <a href="https://example.invalid/manga/the-kettle-line/" title="The Kettle Line">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-kettle-line-110x150.jpg"
+                                         class="img-responsive" alt="The Kettle Line"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-kettle-line/">The Kettle Line</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-kettle-line/chapter-23/">Chapter 23</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-56029" class="item-thumb c-image-hover" data-post-id="56029">
+                                <a href="https://example.invalid/manga/fern-and-filament/" title="Fern and Filament">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/fern-and-filament-110x150.jpg"
+                                         class="img-responsive" alt="Fern and Filament"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/fern-and-filament/">Fern and Filament</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/fern-and-filament/chapter-24/">Chapter 24</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-66652" class="item-thumb c-image-hover" data-post-id="66652">
+                                <a href="https://example.invalid/manga/thirteen-lamps/" title="Thirteen Lamps">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/thirteen-lamps-110x150.jpg"
+                                         class="img-responsive" alt="Thirteen Lamps"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/thirteen-lamps/">Thirteen Lamps</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/thirteen-lamps/chapter-25/">Chapter 25</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-61070" class="item-thumb c-image-hover" data-post-id="61070">
+                                <a href="https://example.invalid/manga/the-slow-ferry/" title="The Slow Ferry">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-slow-ferry-110x150.jpg"
+                                         class="img-responsive" alt="The Slow Ferry"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-slow-ferry/">The Slow Ferry</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-slow-ferry/chapter-26/">Chapter 26</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-42025" class="item-thumb c-image-hover" data-post-id="42025">
+                                <a href="https://example.invalid/manga/copper-weather/" title="Copper Weather">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/copper-weather-110x150.jpg"
+                                         class="img-responsive" alt="Copper Weather"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/copper-weather/">Copper Weather</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/copper-weather/chapter-27/">Chapter 27</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-95859" class="item-thumb c-image-hover" data-post-id="95859">
+                                <a href="https://example.invalid/manga/house-of-small-repairs/" title="House of Small Repairs">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/house-of-small-repairs-110x150.jpg"
+                                         class="img-responsive" alt="House of Small Repairs"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/house-of-small-repairs/">House of Small Repairs</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/house-of-small-repairs/chapter-28/">Chapter 28</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-65302" class="item-thumb c-image-hover" data-post-id="65302">
+                                <a href="https://example.invalid/manga/the-nightingale-office/" title="The Nightingale Office">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-nightingale-office-110x150.jpg"
+                                         class="img-responsive" alt="The Nightingale Office"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-nightingale-office/">The Nightingale Office</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-nightingale-office/chapter-29/">Chapter 29</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-14467" class="item-thumb c-image-hover" data-post-id="14467">
+                                <a href="https://example.invalid/manga/gravel-songs/" title="Gravel Songs">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/gravel-songs-110x150.jpg"
+                                         class="img-responsive" alt="Gravel Songs"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/gravel-songs/">Gravel Songs</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/gravel-songs/chapter-30/">Chapter 30</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-56141" class="item-thumb c-image-hover" data-post-id="56141">
+                                <a href="https://example.invalid/manga/the-last-allotment/" title="The Last Allotment">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-last-allotment-110x150.jpg"
+                                         class="img-responsive" alt="The Last Allotment"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-last-allotment/">The Last Allotment</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-last-allotment/chapter-31/">Chapter 31</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-15978" class="item-thumb c-image-hover" data-post-id="15978">
+                                <a href="https://example.invalid/manga/sable-and-sons/" title="Sable and Sons">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/sable-and-sons-110x150.jpg"
+                                         class="img-responsive" alt="Sable and Sons"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/sable-and-sons/">Sable and Sons</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/sable-and-sons/chapter-32/">Chapter 32</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-11939" class="item-thumb c-image-hover" data-post-id="11939">
+                                <a href="https://example.invalid/manga/the-wireless-club/" title="The Wireless Club">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-wireless-club-110x150.jpg"
+                                         class="img-responsive" alt="The Wireless Club"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-wireless-club/">The Wireless Club</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-wireless-club/chapter-33/">Chapter 33</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-58903" class="item-thumb c-image-hover" data-post-id="58903">
+                                <a href="https://example.invalid/manga/cold-frame/" title="Cold Frame">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/cold-frame-110x150.jpg"
+                                         class="img-responsive" alt="Cold Frame"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/cold-frame/">Cold Frame</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/cold-frame/chapter-34/">Chapter 34</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-96328" class="item-thumb c-image-hover" data-post-id="96328">
+                                <a href="https://example.invalid/manga/the-inkwell-years/" title="The Inkwell Years">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-inkwell-years-110x150.jpg"
+                                         class="img-responsive" alt="The Inkwell Years"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-inkwell-years/">The Inkwell Years</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-inkwell-years/chapter-35/">Chapter 35</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-33177" class="item-thumb c-image-hover" data-post-id="33177">
+                                <a href="https://example.invalid/manga/bramble-court/" title="Bramble Court">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/bramble-court-110x150.jpg"
+                                         class="img-responsive" alt="Bramble Court"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/bramble-court/">Bramble Court</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/bramble-court/chapter-36/">Chapter 36</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-listing-item">
+                <div class="row row-eq-height">
+                    <div class="col-12 col-md-6 badge-pos-2">
+                        <div class="page-item-detail manga">
+                            <div id="manga-item-80679" class="item-thumb c-image-hover" data-post-id="80679">
+                                <a href="https://example.invalid/manga/the-cartographers-niece/" title="The Cartographers Niece">
+                                    <img width="110" height="150" src="https://example.invalid/wp-content/uploads/2026/01/the-cartographers-niece-110x150.jpg"
+                                         class="img-responsive" alt="The Cartographers Niece"/>
+                                </a>
+                            </div>
+                            <div class="item-summary">
+                                <div class="post-title font-title">
+                                    <h3 class="h5"><a href="https://example.invalid/manga/the-cartographers-niece/">The Cartographers Niece</a></h3>
+                                </div>
+                                <div class="list-chapter">
+                                    <div class="chapter-item">
+                                        <span class="chapter font-meta">
+                                            <a href="https://example.invalid/manga/the-cartographers-niece/chapter-37/">Chapter 37</a>
+                                        </span>
+                                        <span class="post-on font-meta">2 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="meta-item rating">
+                                    <div class="post-total-rating"><span class="score font-meta total_votes">4.2</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -744,7 +1110,6 @@
         </div>
     </div>
 </div>
-
 <footer class="c-footer">
     <p>Example Reader</p>
 </footer>

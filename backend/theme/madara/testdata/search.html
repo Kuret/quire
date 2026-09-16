@@ -17,6 +17,14 @@
     - covers are lazy-loaded via data-src with a base64 placeholder in src
     - one link points at a tag page, which must NOT become a search result
     - one link points off-site, which must NOT become a search result
+
+  FIDELITY CORRECTION 2026-09-16 — the asset path in this fixture used to be
+  /wp-content/plugins/madara/, which no live install serves. Madara is
+  distributed as a WordPress *theme*, so its assets come from
+  /wp-content/themes/madara/, and its companion plugin registers as
+  `madara-core`. The old string was invented here and then "verified" against
+  these fixtures, which is how a fingerprint that scored 88 on our own pages
+  came to score 43 on a real one.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -24,7 +32,7 @@
   <meta charset="utf-8">
   <title>Search Results for "lantern" &#8211; Example Reader</title>
   <meta name="generator" content="WordPress 6.5">
-  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/madara/css/style.css">
 </head>
 <body class="search search-results post-type-archive-wp-manga">
 <div class="wrap">

@@ -17,13 +17,21 @@
       behind and which must be trimmed or the request 404s
 
   Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+
+  FIDELITY CORRECTION 2026-09-16 — the asset path in this fixture used to be
+  /wp-content/plugins/madara/, which no live install serves. Madara is
+  distributed as a WordPress *theme*, so its assets come from
+  /wp-content/themes/madara/, and its companion plugin registers as
+  `madara-core`. The old string was invented here and then "verified" against
+  these fixtures, which is how a fingerprint that scored 88 on our own pages
+  came to score 43 on a real one.
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>The Lantern Keeper - Chapter 4 &#8211; Example Reader</title>
-  <link rel="stylesheet" href="https://example.invalid/wp-content/plugins/madara/css/style.css">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/madara/css/style.css">
 </head>
 <body class="reading-manga">
 <div class="wrap">
@@ -44,7 +52,7 @@
     </div>
     <div class="page-break no-gaps">
       <img id="image-2"
-           src="https://example.invalid/wp-content/plugins/madara/images/loading.gif"
+           src="https://example.invalid/wp-content/themes/madara/images/loading.gif"
            data-lazy-src="https://cdn.example.invalid/pages/lantern-keeper/4/003.jpg"
            class="wp-manga-chapter-img img-responsive" alt="">
     </div>
