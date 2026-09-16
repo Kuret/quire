@@ -95,7 +95,7 @@ func runVolumeDownload(t *testing.T, newTheme func(*themetest.Fetcher) theme.The
 		o.Registry = reg
 		o.Fetcher = f
 	})
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,

@@ -128,7 +128,7 @@ func TestWifiDroppingMidVolumeLeavesNothingBroken(t *testing.T) {
 			o.DownloadDir = dir
 			o.DownloadOptions.Retries = 1
 		})
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
@@ -176,7 +176,7 @@ func TestASiteChangingShapeMidSeriesFailsHonestly(t *testing.T) {
 	}
 
 	svc, store, libStore, fake, rec := newDownloadServiceWith(t, r)
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,

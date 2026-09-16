@@ -79,12 +79,19 @@ func stripRoutes(t *testing.T) map[string]themetest.Route {
 // addSourceWithSplitStrips adds the fixture source carrying an explicit
 // override, through the same store the app uses — so the value passes
 // Registry.Validate on the way in, exactly as a user-added source would.
-func addSourceWithSplitStrips(t *testing.T, store *state.Store, mode string) {
+// grouping is variadic so the existing calls, which are about splitting and do
+// not care, stay as they were. PLAN §6 M4's default is one PDF per chapter.
+func addSourceWithSplitStrips(t *testing.T, store *state.Store, mode string, grouping ...string) {
 	t.Helper()
+	group := ""
+	if len(grouping) > 0 {
+		group = grouping[0]
+	}
 	if _, err := store.Add(&theme.Source{
 		Name: "Example Reader", Lang: "en", Theme: madara.ID,
 		BaseURL: "https://example.invalid", AddedAt: fixedNow,
 		SplitStrips: mode,
+		Grouping:    group,
 	}); err != nil {
 		t.Fatalf("adding a source with splitStrips=%q: %v", mode, err)
 	}

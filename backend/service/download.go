@@ -40,10 +40,11 @@ const (
 
 // downloadRequest is the MessageEnqueueDownload payload.
 //
-// VolumeID is the chapter the user tapped. PLAN §6 M4 is emphatic that the
-// unit of a download is a *volume* and never a single chapter — a library of
-// chapter PDFs makes xochitl's reading position meaningless — so the chapter
-// is used to pick the volume it belongs to, and the whole volume is fetched.
+// VolumeID is the chapter the user tapped. It names the *document* that
+// chapter belongs to, which by default (PLAN §6 M4, reversed 2026-09-16) is
+// that chapter on its own, and is a whole volume when the source's grouping
+// setting says so. The field keeps its name because it keys library.Record and
+// renaming it would orphan every download already on the tablet.
 type downloadRequest struct {
 	SourceID string `json:"sourceId"`
 	SeriesID string `json:"seriesId"`
@@ -242,6 +243,12 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 // A single-chapter volume is enqueued without asking: there is nothing to
 // warn about, and a confirm step that always says "download this one chapter?"
 // is a step the user learns to tap through without reading.
+//
+// Since PLAN §6 M4 was reversed on 2026-09-16 that is the *common* case, not
+// an edge one — one PDF per chapter is the default — so this path is now
+// mostly the early return below. It stays because the grouping setting still
+// exists, and a tap that quietly queues ten chapters and a few hundred
+// megabytes is exactly what it was written for.
 func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequest) {
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID}
 
@@ -260,7 +267,7 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 		_ = s.sendError(out, "chapters_failed", plain(err))
 		return
 	}
-	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID)
+	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, src.Group(), src.Size())
 	if !ok {
 		_ = s.sendError(out, "not_found",
 			fmt.Sprintf("That chapter is no longer in %s's chapter list.", series.Title))
@@ -412,13 +419,13 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		return
 	}
 
-	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID)
+	vol, ok := volumeContaining(series.Title, chapters, req.VolumeID, src.Group(), src.Size())
 	if !ok {
 		fail("That chapter is no longer in %s's chapter list.", series.Title)
 		return
 	}
 	p.Series, p.Title = vol.Series, vol.Title
-	if vol.PerChapter {
+	if vol.OrderUnknown {
 		// Say it before the work starts, not only at the end: the user is
 		// about to watch a download they did not quite ask for.
 		p.Note = UnorderedSeriesNote
@@ -669,11 +676,16 @@ func (s *Service) storeVolume(ctx context.Context, vol volumePlan, dir string,
 	return res, place, nil
 }
 
-// documentName is what the volume is called on the tablet: "<Series> — Vol N".
+// documentName is what the document is called on the tablet:
+// "<Series> — Ch 0012" per chapter, or "<Series> — Vol N" when the user has
+// asked for volumes.
 //
 // The series is in the name because the library is flat (PLAN §6 M5): Comics
-// holds volumes from every series side by side, so a name that does not say
-// which series it belongs to is useless the moment there are two.
+// holds documents from every series side by side, so a name that does not say
+// which series it belongs to is useless the moment there are two. With one PDF
+// per chapter as the default (§6 M4, reversed 2026-09-16) there are roughly ten
+// times as many of them, which is why the chapter number is zero-padded — see
+// assemble.ChapterDocumentLabel.
 //
 // xochitl appends ".pdf" when the uploaded filename does not end in it, so the
 // suffix is here rather than left to chance: a name that already carries it is
@@ -686,7 +698,7 @@ func documentName(vol volumePlan, manifest *assemble.Manifest) string {
 	switch {
 	case vol.PerChapter:
 		// Not a volume, and calling it "Vol 12" would say it was. The chapter
-		// names itself.
+		// names itself, padded so the flat Comics folder sorts.
 		name = strings.TrimSpace(vol.Title)
 	case series != "" && label != "":
 		name = fmt.Sprintf("%s — Vol %s", series, label)
@@ -714,8 +726,10 @@ func documentName(vol volumePlan, manifest *assemble.Manifest) string {
 // the chapter list in the order the theme gave it — which is the order the
 // user is looking at in the chapter list, so the volume they get is the one
 // the chapter they tapped appears to be in.
-func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID string) (volumePlan, bool) {
-	for _, v := range groupVolumes(seriesTitle, chapters) {
+func volumeContaining(seriesTitle string, chapters []theme.Chapter, chapterID string,
+	mode string, size int) (volumePlan, bool) {
+
+	for _, v := range groupVolumes(seriesTitle, chapters, mode, size) {
 		for _, c := range v.Chapters {
 			if c.ID == chapterID {
 				return v, true
@@ -736,9 +750,19 @@ type volumePlan struct {
 	// site, and "the second group of ten", which means nothing to anyone.
 	SourceLabelled bool
 
-	// PerChapter is set when the theme could not establish a reading order, so
-	// this "volume" is a single chapter saved on its own.
+	// PerChapter is set when this document holds exactly one chapter and is
+	// named after it rather than after a volume. Since 2026-09-16 that is the
+	// default (PLAN §6 M4), so it is no longer a sign that anything went
+	// wrong — see OrderUnknown for the case that is.
 	PerChapter bool
+
+	// OrderUnknown is set when the theme could not establish a reading order.
+	// It is separate from PerChapter because the two used to be the same
+	// thing and are not any more: per chapter is now what the user asked for,
+	// while an unknowable order is something we have to tell them about.
+	// Conflating them would put the "we couldn't order this" note on every
+	// ordinary download, which is a note nobody would read.
+	OrderUnknown bool
 
 	// Part and Parts are 1-based and both 0 when the volume was not split.
 	// A volume splits when it would exceed xochitl's upload cap; see
@@ -771,7 +795,12 @@ const UnorderedSeriesNote = "Quire couldn’t work out what order this series’
 // The chapter list is used in the order the theme returned it, which PLAN §7.2
 // requires to be ascending reading order. This deliberately does not sort: two
 // places normalising order is how order drifts.
-func groupVolumes(seriesTitle string, chapters []theme.Chapter) []volumePlan {
+//
+// mode is theme.Source.Grouping — "chapter" (the default), "volume" or
+// "count" — and size is theme.Source.GroupSize. PLAN §6 M4 was reversed on
+// 2026-09-16: the source's volume labels are information, not an instruction,
+// so a label no longer decides anything unless the user has asked it to.
+func groupVolumes(seriesTitle string, chapters []theme.Chapter, mode string, size int) []volumePlan {
 	if seriesTitle == "" {
 		seriesTitle = "Series"
 	}
@@ -785,19 +814,34 @@ func groupVolumes(seriesTitle string, chapters []theme.Chapter) []volumePlan {
 		})
 	}
 
+	// An unknowable reading order overrides whatever was asked for. A volume
+	// is a *run* of chapters, so building one from a list the theme admits it
+	// could not order produces a silently scrambled book.
 	if !theme.OrderIsKnown(chapters) {
-		return perChapterVolumes(seriesTitle, flat)
+		return perChapterVolumes(seriesTitle, flat, true)
 	}
 
-	// GroupIntoVolumes groups on the source's own Volume label wherever there
-	// is one and falls back to runs of ten only where there is not — which is
-	// what PLAN §6 M4 meant by "one PDF per volume" all along.
-	grouped := assemble.GroupIntoVolumes(seriesTitle, flat, 0)
+	var grouped []assemble.Volume
+	switch mode {
+	case theme.GroupingVolume:
+		// The source's own Volume label wherever there is one, runs of size
+		// where there is not. This was the default until 2026-09-16 and is
+		// now something the user asks for.
+		grouped = assemble.GroupIntoVolumes(seriesTitle, flat, size)
+	case theme.GroupingCount:
+		grouped = assemble.GroupIntoRuns(seriesTitle, flat, size)
+	default:
+		// theme.GroupingChapter, and anything a hand-edited source smuggled
+		// past validation: one PDF per chapter. Falling back to the default
+		// rather than refusing keeps a bad value from costing a download.
+		return perChapterVolumes(seriesTitle, flat, false)
+	}
+
 	plans := make([]volumePlan, 0, len(grouped))
 	for _, v := range grouped {
 		plans = append(plans, volumePlan{
 			Volume:         v,
-			SourceLabelled: len(v.Chapters) > 0 && v.Chapters[0].Volume != "",
+			SourceLabelled: mode == theme.GroupingVolume && len(v.Chapters) > 0 && v.Chapters[0].Volume != "",
 		})
 	}
 	return plans
@@ -973,9 +1017,13 @@ func (s *Service) uploadBudget() int64 {
 	return library.UploadBudgetBytes
 }
 
-// perChapterVolumes is the fallback for a series whose reading order the theme
-// could not establish: one chapter per PDF, each correct on its own.
-func perChapterVolumes(seriesTitle string, chapters []assemble.Chapter) []volumePlan {
+// perChapterVolumes is one chapter per PDF, each correct on its own.
+//
+// It is both the default grouping (PLAN §6 M4, reversed 2026-09-16) and the
+// fallback for a series whose reading order the theme could not establish.
+// orderUnknown says which, because only the second one owes the user an
+// explanation.
+func perChapterVolumes(seriesTitle string, chapters []assemble.Chapter, orderUnknown bool) []volumePlan {
 	plans := make([]volumePlan, 0, len(chapters))
 	for _, ch := range chapters {
 		label := strings.TrimSpace(ch.Number)
@@ -986,12 +1034,16 @@ func perChapterVolumes(seriesTitle string, chapters []assemble.Chapter) []volume
 		}
 		plans = append(plans, volumePlan{
 			Volume: assemble.Volume{
-				Series:   seriesTitle,
-				Label:    label,
-				Title:    seriesTitle + " — " + chapterLabel(ch),
+				Series: seriesTitle,
+				Label:  label,
+				// The document's name, and what sorts it in a flat Comics
+				// folder: "Snotgirl — Ch 0012.5". See
+				// assemble.ChapterDocumentLabel for why it is padded.
+				Title:    seriesTitle + " — " + assemble.ChapterDocumentLabel(ch),
 				Chapters: []assemble.Chapter{ch},
 			},
-			PerChapter: true,
+			PerChapter:   true,
+			OrderUnknown: orderUnknown,
 		})
 	}
 	return plans

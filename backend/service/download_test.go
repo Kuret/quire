@@ -453,7 +453,7 @@ func TestDownloadNeedsAllThreeIdentifiers(t *testing.T) {
 // megabytes silently is not that.
 func TestFirstTapAsksBeforeDownloadingAVolume(t *testing.T) {
 	svc, store, _, fake, rec := newDownloadService(t)
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
@@ -486,7 +486,7 @@ func TestFirstTapAsksBeforeDownloadingAVolume(t *testing.T) {
 // runs the download.
 func TestConfirmingRunsTheDownload(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
@@ -503,7 +503,7 @@ func TestConfirmingRunsTheDownload(t *testing.T) {
 // series side by side, so the series has to be in the document name.
 func TestTheDocumentIsNamedSeriesAndVolume(t *testing.T) {
 	svc, store, _, fake, rec := newDownloadService(t)
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
@@ -569,7 +569,7 @@ func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
 			// forces the split without downloading anything large.
 			o.UploadBudgetBytes = 4096
 		})
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
@@ -634,5 +634,54 @@ func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
 		if c.DocumentUUID == "" {
 			t.Errorf("chapter %s lost its document when the volume was split", c.ID)
 		}
+	}
+}
+
+// addVolumeSource is addSource with PLAN §6 M4's grouping set to "volume":
+// one document per volume the source labels, runs of ten where it labels none.
+//
+// That was the default until it was reversed on 2026-09-16 in favour of one
+// PDF per chapter, so the tests that are about volumes — the confirm step, the
+// "<Series> — Vol N" name, splitting to the upload cap, a chapter list where
+// every row of a volume offers Read — now have to ask for it. They still test
+// the same behaviour; it is a setting rather than the default.
+func addVolumeSource(t *testing.T, store *state.Store) {
+	t.Helper()
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+		Grouping: theme.GroupingVolume,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// PLAN §6 M4's reversal, consequence 1: no confirm step for a single chapter.
+//
+// The step already skipped a one-chapter volume, and per chapter being the
+// default makes that the common case rather than an edge one — which is
+// exactly why it has to keep holding. A prompt that always says the same thing
+// is one people learn to tap through without reading, and then the one time it
+// says something else they tap through that too.
+func TestTheFirstTapDownloadsAChapterWithoutAsking(t *testing.T) {
+	svc, store, _, fake, rec := newDownloadService(t)
+	addSource(t, store) // the default: one PDF per chapter
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	// No "confirmed":true. This is the first tap.
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+
+	done := waitForPhase(t, rec, "done")
+	for _, m := range progressOf(t, rec) {
+		if m["phase"] == "confirm" {
+			t.Errorf("a one-chapter download asked first: %v", m["message"])
+		}
+	}
+	if len(fake.uploaded) != 1 {
+		t.Errorf("%d documents uploaded, want 1", len(fake.uploaded))
+	}
+	if name, _ := done["title"].(string); !strings.Contains(name, "Ch ") {
+		t.Errorf("the finished document is %q, which does not name a chapter", name)
 	}
 }

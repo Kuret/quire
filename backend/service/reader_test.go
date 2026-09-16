@@ -12,7 +12,7 @@ import (
 // what turns the row's button into "Read" after a restart.
 func TestSeriesDetailCarriesTheStoredUUID(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
-	addSource(t, store)
+	addVolumeSource(t, store)
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
