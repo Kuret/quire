@@ -1223,6 +1223,22 @@ the UI so a slow site doesn't look hung.
 **Stage 1 — Normalise and guard.** Parse the URL, require http(s), resolve DNS,
 apply the SSRF guard. Failure verdicts: `invalid_url`, `blocked_address`.
 
+**Stage 1 normalises a missing scheme to `https://`, and says so when that guess
+fails (added 2026-09-16).** Typing on an e-ink keyboard is slow, so
+`weebcentral.com` is accepted as what the user plainly meant. Two rules keep
+that from becoming guesswork: Quire only ever fills in **https**, and **never
+falls back to `http://`** — an unencrypted connection is the user's decision, so
+an unreachable host is reported with *"Quire assumed https://; type `http://…`
+if this site only works without encryption"*. Anything carrying a scheme keeps
+it, so a typed `http://` is respected and `ftp://`, `file://` and `javascript:`
+still reach the guard's scheme check. A *nearly* right scheme (`https:/host`,
+`https//host`) is `invalid_url` with the typo named, because choosing between
+"missing slash" and "a host called https:" for the user is the guessing this
+avoids. `example.com:8080` is a host and a port, not a scheme. The SSRF guard is
+unchanged and runs on the normalised URL, so `localhost` and friends are refused
+whether or not a scheme was typed — and **no dot-counting heuristic was added**,
+precisely so the guard stays the thing that does the refusing.
+
 **Stage 2 — Reachability.** `GET` the homepage with the honest UA, following
 redirects and recording the final registrable domain — if it differs from what
 the user typed, say so and ask before continuing. Record status, headers,
