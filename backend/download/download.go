@@ -37,6 +37,8 @@ package download
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -675,15 +677,46 @@ func sleep(ctx context.Context, d time.Duration) {
 
 var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
+// slugReadable is how much of the sanitised ID survives into the directory
+// name. Past this the name stops being a label and starts being a hazard: some
+// IDs are whole URLs. The digest below adds 9 more bytes, so the result stays
+// comfortably inside the 80 this function has always promised.
+const slugReadable = 48
+
 // slug turns a source-side chapter ID into a directory name. Source IDs are
 // untrusted strings that routinely contain slashes and query fragments.
+//
+// The name is injective: distinct IDs get distinct directories. That is not
+// free, because truncation alone is not. Fanfox chapter IDs are paths —
+// /manga/<series>/v01/c001/1.html — and for a long enough series name the
+// c001/c002 segment that tells two chapters apart falls past the cut, so both
+// would slugify to the same directory and planJobs would (rightly) refuse the
+// download. Truncating for readability and then appending a digest of the
+// *full, original* ID removes the collision instead of detecting it.
+//
+// The digest is taken before sanitising as well as before truncating: two IDs
+// that differ only in characters unsafeName rewrites (say "?p=1" and "#p=1")
+// are still two IDs, and hashing the sanitised form would reintroduce the same
+// class of collision one level down.
+//
+// It must also be stable across runs. Resume works by skipping page files that
+// are already on disk (PLAN §6 M4), so a slug that moved between runs would
+// silently re-download a whole volume and orphan the old directory. sha256 of
+// the ID depends on nothing but the ID — no time, no map order, no position in
+// the chapter list — so it does not move.
 func slug(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	digest := hex.EncodeToString(sum[:4])
+
 	s := strings.Trim(unsafeName.ReplaceAllString(id, "-"), "-.")
 	if s == "" {
 		s = "chapter"
 	}
-	if len(s) > 80 {
-		s = strings.Trim(s[:80], "-.")
+	if len(s) > slugReadable {
+		s = strings.Trim(s[:slugReadable], "-.")
+		if s == "" {
+			s = "chapter"
+		}
 	}
-	return s
+	return s + "-" + digest
 }

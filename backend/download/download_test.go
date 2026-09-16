@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -428,14 +429,37 @@ func TestRunRejectsEmptyChapter(t *testing.T) {
 	}
 }
 
+// Distinct IDs no longer share a directory, however they are spelled: slug is
+// injective. The guard stays for the one case left — the source handing back
+// the same ID twice — where sharing a directory would interleave two chapters'
+// pages.
 func TestRunRejectsCollidingChapterIDs(t *testing.T) {
 	q := download.New(&stubFetcher{}, download.Options{MinFreeBytes: -1})
 	chs := []download.Chapter{
 		{ID: "ch/1", PageURLs: []string{"https://example.invalid/a.jpg"}},
-		{ID: "ch:1", PageURLs: []string{"https://example.invalid/b.jpg"}},
+		{ID: "ch/1", PageURLs: []string{"https://example.invalid/b.jpg"}},
 	}
 	if _, _, err := q.Run(t.Context(), t.TempDir(), chs); err == nil {
-		t.Fatal("expected an error for two chapter IDs that share a directory name")
+		t.Fatal("expected an error for two chapters with the same ID")
+	}
+}
+
+// IDs that differ only in characters the sanitiser rewrites are still two
+// chapters, and must still get two directories.
+func TestRunAcceptsIDsDifferingOnlyInUnsafeCharacters(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 1200, 1600)}
+	chs := []download.Chapter{
+		{ID: "ch/1", Title: "A", Number: "1", PageURLs: []string{"https://example.invalid/a.jpg"}},
+		{ID: "ch:1", Title: "B", Number: "2", PageURLs: []string{"https://example.invalid/b.jpg"}},
+	}
+	q := download.New(f, download.Options{Concurrency: 1, MinFreeBytes: -1})
+	out, _, err := q.Run(t.Context(), dir, chs)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if a, b := filepath.Dir(out[0].Pages[0].Path), filepath.Dir(out[1].Pages[0].Path); a == b {
+		t.Fatalf("both chapters landed in %q", a)
 	}
 }
 
@@ -661,5 +685,113 @@ func assertNoTempFiles(t *testing.T, dir string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ---- directory naming --------------------------------------------------
+//
+// Fanfox chapter IDs are paths: /manga/<series>/v01/c001/1.html. For a long
+// series name the c001/c002 segment that tells two chapters apart sits past
+// the point where a truncating slug would cut, so a slug that only truncates
+// hands both chapters the same directory and the download is refused. The
+// names must therefore be injective, not merely short.
+
+func fanfoxID(volume, chapter string) string {
+	return "/manga/a_story_about_a_very_long_series_title_that_just_keeps_going_and_going_forever/" +
+		volume + "/" + chapter + "/1.html"
+}
+
+func TestLongChapterIDsDifferingLateDoNotCollide(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 1200, 1600)}
+
+	chs := []download.Chapter{
+		{ID: fanfoxID("v01", "c001"), Title: "Chapter 1", Number: "1",
+			PageURLs: []string{"https://example.invalid/1/0.jpg", "https://example.invalid/1/1.jpg"}},
+		{ID: fanfoxID("v01", "c002"), Title: "Chapter 2", Number: "2",
+			PageURLs: []string{"https://example.invalid/2/0.jpg", "https://example.invalid/2/1.jpg"}},
+	}
+
+	q := download.New(f, download.Options{Concurrency: 2, MinFreeBytes: -1})
+	out, stats, err := q.Run(t.Context(), dir, chs)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stats.PagesDone != 4 {
+		t.Errorf("PagesDone = %d, want 4", stats.PagesDone)
+	}
+
+	// Two chapters, two directories, and neither page of one overwrote the
+	// other's.
+	dirs := map[string]bool{}
+	for _, ch := range out {
+		for _, p := range ch.Pages {
+			dirs[filepath.Dir(p.Path)] = true
+		}
+	}
+	if len(dirs) != 2 {
+		t.Fatalf("pages landed in %d directories, want 2: %v", len(dirs), dirs)
+	}
+	if n := countFiles(t, dir); n != 4 {
+		t.Errorf("%d page files on disk, want 4", n)
+	}
+}
+
+// The readable head of the name survives: an ordinary short ID must still be
+// recognisable to someone looking in the directory.
+func TestShortChapterIDKeepsItsReadableName(t *testing.T) {
+	dir := t.TempDir()
+	f := &stubFetcher{body: synthJPEG(t, 1200, 1600)}
+
+	q := download.New(f, download.Options{Concurrency: 1, MinFreeBytes: -1})
+	out, _, err := q.Run(t.Context(), dir, chapters(1, 2))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	name := filepath.Base(filepath.Dir(out[0].Pages[0].Path))
+	if !strings.HasPrefix(name, "ch-1-") {
+		t.Errorf("directory %q does not start with the chapter ID", name)
+	}
+	if len(name) > 80 {
+		t.Errorf("directory name %q is %d bytes, want at most 80", name, len(name))
+	}
+}
+
+// Resume depends on the name being the same next time: it works by finding the
+// page files an earlier run left behind (PLAN §6 M4). A name that moved would
+// refetch a whole volume and orphan the old directory.
+func TestChapterDirectoryIsStableAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	body := synthJPEG(t, 1200, 1600)
+	chs := []download.Chapter{
+		{ID: fanfoxID("v01", "c001"), Title: "Chapter 1", Number: "1",
+			PageURLs: []string{"https://example.invalid/1/0.jpg", "https://example.invalid/1/1.jpg"}},
+		{ID: fanfoxID("v01", "c002"), Title: "Chapter 2", Number: "2",
+			PageURLs: []string{"https://example.invalid/2/0.jpg", "https://example.invalid/2/1.jpg"}},
+	}
+
+	q := download.New(&stubFetcher{body: body}, download.Options{Concurrency: 2, MinFreeBytes: -1})
+	first, _, err := q.Run(t.Context(), dir, chs)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	q2 := download.New(&stubFetcher{body: body}, download.Options{Concurrency: 2, MinFreeBytes: -1})
+	second, stats, err := q2.Run(t.Context(), dir, chs)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if stats.PagesFetched != 0 {
+		t.Errorf("PagesFetched = %d on a repeat run: the directory name moved and the pages were not found", stats.PagesFetched)
+	}
+	for i := range first {
+		for j := range first[i].Pages {
+			if got, want := second[i].Pages[j].Path, first[i].Pages[j].Path; got != want {
+				t.Fatalf("page path = %q, want %q (the same as last run)", got, want)
+			}
+		}
+	}
+	if n := countFiles(t, dir); n != 4 {
+		t.Errorf("%d page files on disk after two runs, want 4: the second run orphaned the first run's directory", n)
 	}
 }
