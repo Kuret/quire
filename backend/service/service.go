@@ -361,23 +361,6 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.sendSources(out)
 
-	case appload.MessageSetSourceGrouping:
-		var req struct {
-			SourceID string `json:"sourceId"`
-			Grouping string `json:"grouping"`
-		}
-		if err := decode(payload, &req); err != nil {
-			return true, s.sendError(out, "bad_request", err.Error())
-		}
-		switch err := s.store.SetGrouping(req.SourceID, req.Grouping); {
-		case errors.Is(err, state.ErrBadGrouping):
-			return true, s.sendError(out, "bad_request",
-				"Downloads can be saved per chapter, by the source's volumes, or in fixed runs.")
-		case err != nil:
-			return true, s.sendError(out, "not_found", plain(err))
-		}
-		return true, s.sendSources(out)
-
 	case appload.MessageCancelDownload:
 		var req downloadRequest
 		if err := decode(payload, &req); err != nil {
@@ -457,13 +440,6 @@ type sourceView struct {
 	// what absent means.
 	SplitStrips string `json:"splitStrips"`
 
-	// Grouping is how this source's chapters become documents (PLAN §6 M4),
-	// always one of "chapter", "volume" or "count" — never empty, even though
-	// the stored value can be, for the same reason SplitStrips is resolved
-	// here. GroupSize is the run length "count" uses.
-	Grouping  string `json:"grouping"`
-	GroupSize int    `json:"groupSize"`
-
 	// Status and StatusDetail are the last probe, in plain language. A source
 	// that has never been probed says so rather than showing an empty row.
 	Status       string `json:"status"`
@@ -483,8 +459,6 @@ func (s *Service) sendSources(out Sender) error {
 			ID: src.ID, Name: src.Name, BaseURL: src.BaseURL,
 			Theme: src.Theme, Lang: src.Lang, Enabled: src.IsEnabled(),
 			SplitStrips: split,
-			Grouping:    src.Group(),
-			GroupSize:   src.Size(),
 			Status:      "Not checked yet",
 		}
 		if src.LastProbe != nil {

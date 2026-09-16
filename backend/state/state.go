@@ -237,37 +237,6 @@ func (s *Store) SetSplitStrips(id, mode string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
-// ErrBadGrouping means the requested grouping is not one the schema offers.
-var ErrBadGrouping = errors.New("state: grouping must be chapter, volume or count")
-
-// SetGrouping changes how a source's chapters are grouped into documents
-// (PLAN §6 M4, reversed 2026-09-16).
-//
-// The empty string is accepted and stored as empty, which is how a source that
-// has never been touched stays on the schema default — one PDF per chapter —
-// rather than being pinned to a value it never asked for.
-//
-// GroupSize is deliberately not touched here. It is the run length for the
-// "count" mode and keeps whatever the source already had, so switching to
-// count and back does not quietly reset it.
-func (s *Store) SetGrouping(id, mode string) error {
-	if mode != "" && !slices.Contains(theme.GroupingValues, mode) {
-		return ErrBadGrouping
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, src := range s.sources {
-		if src.ID == id {
-			if src.Grouping == mode {
-				return nil
-			}
-			src.Grouping = mode
-			return s.save()
-		}
-	}
-	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
-}
-
 // NameMaxLen is schema/source.schema.json's maxLength for a source name. It is
 // mirrored here so a rename is refused with a sentence rather than by failing
 // schema validation somewhere further down.
