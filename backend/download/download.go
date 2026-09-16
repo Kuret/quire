@@ -97,7 +97,21 @@ func SetMemoryLimit() int64 {
 // Fetcher retrieves a page image. It is owned by this package: whatever
 // implements it is responsible for the fetch-layer invariants of PLAN §7.4.
 type Fetcher interface {
-	Get(ctx context.Context, url string) (io.ReadCloser, error)
+	// Get fetches one page image. referer is the address of the page the URL
+	// was extracted from, or "" for "send no Referer".
+	//
+	// PLAN §7.6 permits a truthful Referer and forbids any other kind, so the
+	// value is carried here rather than worked out here: this package cannot
+	// know which chapter a URL came from — one queue serves a whole volume —
+	// and anything it reconstructed would be a guess. The caller resolved it
+	// once per chapter, at the point where the chapter was still in hand, and
+	// it travels with the page from there. An empty string means the theme had
+	// no page to name, and the implementation must then send no header at all.
+	//
+	// It is a string rather than a fetch.Referrer because this package
+	// deliberately does not import backend/fetch (see the package doc). The
+	// adapter that does the fetching is the layer that validates it.
+	Get(ctx context.Context, url, referer string) (io.ReadCloser, error)
 }
 
 // DefaultConcurrency is the fetch fan-out PLAN §6 M4 prescribes: six page
@@ -139,6 +153,12 @@ type Chapter struct {
 	Number   string
 	Volume   string
 	PageURLs []string
+
+	// Referer is the address of the page these PageURLs were extracted from,
+	// or "" when the theme had none to name (PLAN §7.6). It is per chapter
+	// because the page that names a chapter's images is that chapter's own —
+	// the volume's first chapter is not a stand-in for its fortieth.
+	Referer string
 }
 
 // Progress is reported after each page completes.
@@ -326,6 +346,9 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 type job struct {
 	url  string
 	path string
+	// referer is the page this URL was extracted from, copied from the job's
+	// own chapter at planning time. Empty means no Referer header.
+	referer string
 	// skip is set when the page is already on disk from an earlier run.
 	skip bool
 }
@@ -351,7 +374,12 @@ func (q *Queue) planJobs(dir string, chapters []Chapter) ([]job, []assemble.Chap
 		for i, u := range ch.PageURLs {
 			path := filepath.Join(dir, sub, fmt.Sprintf("%04d.jpg", i))
 			st, err := os.Stat(path)
-			jobs = append(jobs, job{url: u, path: path, skip: err == nil && st.Size() > 0})
+			jobs = append(jobs, job{
+				url:     u,
+				path:    path,
+				referer: ch.Referer,
+				skip:    err == nil && st.Size() > 0,
+			})
 			ac.Pages = append(ac.Pages, assemble.Page{Path: path, Index: i})
 		}
 		out = append(out, ac)
@@ -510,7 +538,7 @@ func (r *run) fetchPage(ctx context.Context, j job) (stored, fetched int64, err 
 		return 0, 0, fmt.Errorf("download: %w", err)
 	}
 
-	body, err := r.q.fetcher.Get(ctx, j.url)
+	body, err := r.q.fetcher.Get(ctx, j.url, j.referer)
 	if err != nil {
 		return 0, 0, err
 	}

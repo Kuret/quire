@@ -61,7 +61,7 @@ type stubFetcher struct {
 	maxInFlight int
 }
 
-func (s *stubFetcher) Get(ctx context.Context, url string) (io.ReadCloser, error) {
+func (s *stubFetcher) Get(ctx context.Context, url, referer string) (io.ReadCloser, error) {
 	s.calls.Add(1)
 
 	s.mu.Lock()

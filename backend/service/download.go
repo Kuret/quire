@@ -16,6 +16,7 @@ import (
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/assemble"
 	"github.com/rickl/quire/backend/download"
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/theme"
 )
@@ -985,12 +986,28 @@ type sourceFetcher struct {
 	src   *theme.Source
 }
 
-func (f *sourceFetcher) Get(ctx context.Context, rawurl string) (io.ReadCloser, error) {
+// Get fetches one page image, naming the chapter page the address came out of
+// when there is one to name.
+//
+// referer arrives from the job rather than being worked out here, because here
+// is exactly where it could not be worked out honestly: the queue serves a
+// whole volume and the chapter is long gone. An empty referer yields the zero
+// fetch.Referrer, which sends no header at all — PLAN §7.6's answer for "we do
+// not know", and never a stand-in.
+func (f *sourceFetcher) Get(ctx context.Context, rawurl, referer string) (io.ReadCloser, error) {
 	pol, err := f.src.Policy()
 	if err != nil {
 		return nil, err
 	}
-	resp, err := f.fetch.GetRetrieval(ctx, pol, rawurl)
+	var from fetch.Referrer
+	if referer != "" {
+		// Already validated at enqueue time; re-derived here because the queue
+		// carries the address, not the type.
+		if from, err = fetch.PageReferrer(referer); err != nil {
+			return nil, err
+		}
+	}
+	resp, err := f.fetch.GetRetrievalFrom(ctx, pol, rawurl, from)
 	if err != nil {
 		return nil, err
 	}

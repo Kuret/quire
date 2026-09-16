@@ -83,7 +83,7 @@ func TestDeviceEncodeWorkers(t *testing.T) {
 // synthetic geometry repeated. Nothing here touches a network.
 type fileFetcher struct{ paths []string }
 
-func (f *fileFetcher) Get(ctx context.Context, url string) (io.ReadCloser, error) {
+func (f *fileFetcher) Get(ctx context.Context, url, referer string) (io.ReadCloser, error) {
 	i, err := strconv.Atoi(strings.TrimPrefix(url, "file://"))
 	if err != nil || i < 0 || i >= len(f.paths) {
 		return nil, fmt.Errorf("no such page %q", url)
