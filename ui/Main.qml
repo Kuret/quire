@@ -232,6 +232,23 @@ Rectangle {
             root.applyDownloadProgress(msg)
             return
 
+        case Msg.QueueConfirm:
+            // The backend's question about the selection, put where questions
+            // are asked. The strip does not need the ids: the selection is the
+            // screen's, and it is still standing behind the strip.
+            chapterListScreen.confirmingKind = "queue"
+            chapterListScreen.confirmingId = "selection"
+            chapterListScreen.confirmingMessage = msg && msg.message ? msg.message : ""
+            return
+
+        case Msg.QueueResult:
+            // Only says anything when something did not fit. Every row that did
+            // says "Queued." for itself, and a summary of what the list already
+            // shows is a sentence that teaches people to skip sentences.
+            if (msg && msg.message)
+                root.lastError = msg.message
+            return
+
         case Msg.DeleteConfirm:
             // The backend's question, put where questions are asked. The strip
             // carries the document's UUID, because that is what the answer
@@ -254,7 +271,8 @@ Rectangle {
             // A delete question left open over an answer that went wrong would
             // invite tapping it again. Only that one: a download confirmation
             // is about a different row and is not what failed.
-            if (chapterListScreen.confirmingKind === "delete")
+            if (chapterListScreen.confirmingKind === "delete"
+                || chapterListScreen.confirmingKind === "queue")
                 chapterListScreen.closeConfirm()
             root.lastError = msg ? msg.message : "Something went wrong."
             addSourceScreen.onBackendError(root.lastError)
@@ -482,6 +500,7 @@ Rectangle {
         chapterListScreen.synopsis = ""
         chapterListScreen.page = 1
         chapterListScreen.closeConfirm()
+        chapterListScreen.leaveSelection()
         chapterListScreen.busy = true
         root.refreshWatchedFlag()
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
@@ -713,6 +732,17 @@ Rectangle {
             // stays behind the one Loader.
             onDeleteRequested: root.send(Msg.DeleteDownload, {"documentUuid": documentUuid})
             onDeleteConfirmed: root.deleteDownload(documentUuid)
+
+            // A selection of rows, asked about once and queued once. The
+            // grouping rides on it exactly as it does on a single download,
+            // because the two lists hold different things.
+            onQueueRequested: root.send(Msg.EnqueueDownloads, {
+                "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
+            onQueueConfirmed: root.send(Msg.EnqueueDownloads, {
+                "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter",
+                "confirmed": true})
         }
 
         Settings {

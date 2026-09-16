@@ -58,7 +58,16 @@ Item {
     onViewChanged: {
         screen.page = 1
         screen.closeConfirm()
+        // Chapters and Volumes are two lists of different things. A selection
+        // made in one of them means nothing in the other, and carrying it
+        // across would queue rows the user can no longer see.
+        screen.leaveSelection()
     }
+
+    // A page turn hides the rows that were selected. The selection goes with
+    // them for the same reason it goes when the mode is left: what is not on
+    // screen cannot be checked before it is acted on.
+    onPageChanged: screen.clearSelection()
 
     function showView(which) {
         if (screen.view !== which)
@@ -91,6 +100,13 @@ Item {
     signal deleteRequested(string documentUuid)
     signal deleteConfirmed(string documentUuid)
 
+    // Queueing a selection (PLAN §12.1). Two signals for the same two steps as
+    // a delete: the first asks the backend for the question, the second is the
+    // answer. The ids travel with both, because the selection is the view's and
+    // the sentence about it is the backend's.
+    signal queueRequested(var chapterIds, bool volumes)
+    signal queueConfirmed(var chapterIds, bool volumes)
+
     signal watchRequested()
     signal unwatchRequested()
 
@@ -116,11 +132,90 @@ Item {
     property string confirmingMessage: ""
 
     // Which question the strip is asking. "download" is the volume-download
-    // confirmation the strip was built for; "delete" is PLAN §12.4's. One
-    // property rather than a second strip: there is one place at the foot of
-    // the list for a question, and two strips fighting over it is two ways to
-    // answer the one you were not looking at.
+    // confirmation the strip was built for, "delete" is PLAN §12.4's, and
+    // "queue" is a selection of rows. One property rather than a third strip:
+    // there is one place at the foot of the list for a question, and two
+    // strips fighting over it is two ways to answer the one you were not
+    // looking at.
     property string confirmingKind: "download"
+
+    // ---- selecting several rows --------------------------------------------
+    //
+    // An explicit mode, entered from a button, rather than a long press. A long
+    // press is undiscoverable, and the press-and-hold feedback that makes it
+    // legible elsewhere does not exist on e-ink: the screen simply does not
+    // move until it does, by which time the user has lifted their finger.
+    property bool selecting: false
+
+    // The selected row ids, in list order. An array rather than a set, because
+    // the order is the order the queue will work through and the order the user
+    // is reading in.
+    property var selectedIds: []
+
+    readonly property int selectedCount: screen.selectedIds.length
+
+    // canSelect is the whole of "only rows that can be downloaded are
+    // selectable": a row already in the library, already queued or already
+    // downloading has nothing to queue. Letting it be selected would let the
+    // user build a selection of ten and watch four of them do nothing.
+    //
+    // It is deliberately the same set of states that make the row's button say
+    // Download or Retry, so what is selectable is what the row already offers.
+    function canSelect(state, documentUuid) {
+        if (documentUuid)
+            return false
+        return state === "" || state === "failed" || state === "cancelled"
+    }
+
+    function isSelected(chapterId) {
+        return screen.selectedIds.indexOf(chapterId) >= 0
+    }
+
+    function toggleSelected(chapterId, state, documentUuid) {
+        if (!screen.selecting || !screen.canSelect(state, documentUuid))
+            return
+        var next = screen.selectedIds.slice()
+        var at = next.indexOf(chapterId)
+        if (at >= 0)
+            next.splice(at, 1)
+        else
+            next.push(chapterId)
+        // Assigned rather than mutated: a QML property holding an array emits
+        // no change signal when its contents are edited in place, so a delegate
+        // bound to it would keep drawing the selection it had a moment ago.
+        screen.selectedIds = next
+    }
+
+    function clearSelection() {
+        if (screen.selectedIds.length > 0)
+            screen.selectedIds = []
+    }
+
+    // enterSelection and leaveSelection are the only two doors. Leaving always
+    // clears: a selection the user cannot see is a selection they will act on
+    // by accident, which is the same rule the confirm strip follows.
+    function enterSelection() {
+        screen.closeConfirm()
+        screen.selecting = true
+        screen.clearSelection()
+    }
+
+    function leaveSelection() {
+        screen.selecting = false
+        screen.clearSelection()
+    }
+
+    // askToQueue opens the question for the selection. The sentence is the
+    // backend's: it is the one that knows what a queue of this size costs, and
+    // PLAN §2 keeps every sentence there.
+    function askToQueue() {
+        if (screen.selectedCount === 0)
+            return
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+        screen.confirmingKind = "queue"
+        screen.queueRequested(screen.selectedIds, screen.showingVolumes)
+    }
 
     // askToDelete opens the delete question for a row. The sentence itself
     // comes back from the backend, which is the only thing that knows what the
@@ -231,7 +326,8 @@ Item {
             anchors {
                 top: parent.top; topMargin: Style.margin
                 left: parent.left; leftMargin: Style.margin
-                right: watchButton.left; rightMargin: Style.gap
+                right: selectButton.visible ? selectButton.left : watchButton.left
+                rightMargin: Style.gap
             }
             wrapMode: Text.WordWrap
             maximumLineCount: 3
@@ -247,6 +343,41 @@ Item {
         // served, which is the one on screen. Watching from anywhere else
         // would make the first check announce the whole back catalogue as new
         // (PLAN §12.2).
+        // The way into selection mode. It lives in the header because that is
+        // where the screen's verbs are, and it disappears while the mode is on:
+        // the footer owns the mode once it is entered, and two controls that
+        // both mean "stop selecting" is one more than the screen needs.
+        Rectangle {
+            id: selectButton
+            objectName: "selectButton"
+            anchors {
+                right: watchButton.left; rightMargin: Style.gap
+                top: parent.top; topMargin: Style.margin
+            }
+            width: 220
+            height: Style.buttonHeight
+            visible: !screen.selecting && screen.rowCount > 0
+            color: selectArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Select"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: selectArea
+                objectName: "selectArea"
+                anchors.fill: parent
+                enabled: selectButton.visible
+                onClicked: screen.enterSelection()
+            }
+        }
+
         Rectangle {
             id: watchButton
             objectName: "watchButton"
@@ -382,9 +513,28 @@ Item {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
                     height: Style.rowHeight
 
+                    // The box is the affordance and the answer at once: it is
+                    // there only on rows that can be queued, and filled only on
+                    // the ones that are. A row with no box in selection mode is
+                    // a row with nothing to queue — already downloaded, already
+                    // waiting, or already on its way.
+                    Rectangle {
+                        id: selectBox
+                        objectName: "selectBox"
+                        anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                        width: 40
+                        height: 40
+                        radius: 4
+                        visible: screen.selecting && screen.canSelect(model.downloadState, model.documentUuid)
+                        border.width: 2
+                        border.color: Style.ink
+                        color: screen.isSelected(model.chapterId) ? Style.ink : Style.paper
+                    }
+
                     Column {
                         anchors {
-                            left: parent.left; leftMargin: Style.margin
+                            left: selectBox.visible ? selectBox.right : parent.left
+                            leftMargin: Style.margin
                             right: deleteButton.visible ? deleteButton.left : downloadButton.left
                             rightMargin: Style.gap
                             verticalCenter: parent.verticalCenter
@@ -396,7 +546,12 @@ Item {
                             elide: Text.ElideRight
                             text: model.title
                             font.pointSize: Style.bodySize
-                            color: Style.ink
+                            // A row that cannot be queued says so quietly while
+                            // the mode is on, rather than looking tappable and
+                            // doing nothing.
+                            color: screen.selecting
+                                   && !screen.canSelect(model.downloadState, model.documentUuid)
+                                   ? Style.muted : Style.ink
                         }
 
                         // A download in progress replaces the date line rather than
@@ -434,7 +589,7 @@ Item {
                         anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: model.documentUuid ? true : false
+                        visible: model.documentUuid && !screen.selecting ? true : false
                         color: deleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -456,6 +611,11 @@ Item {
                         }
                     }
 
+                    // In selection mode the row is the target, not the button
+                    // on it: the point of the mode is to pick several rows
+                    // without waiting for each one's button to settle. The
+                    // button stays on screen so the row still says what state
+                    // it is in; it just stops being tappable.
                     Rectangle {
                         id: downloadButton
                         anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
@@ -476,9 +636,22 @@ Item {
                         MouseArea {
                             id: downloadArea
                             anchors.fill: parent
-                            enabled: screen.canTap(model.downloadState, model.documentUuid)
+                            enabled: !screen.selecting
+                                     && screen.canTap(model.downloadState, model.documentUuid)
                             onClicked: screen.tapped(model.chapterId, model.downloadState, model.documentUuid)
                         }
+                    }
+
+                    // Declared last so it sits over the row's buttons while the
+                    // mode is on, and disabled the rest of the time so it is
+                    // not in the way of them.
+                    MouseArea {
+                        id: rowSelectArea
+                        objectName: "rowSelectArea"
+                        anchors.fill: parent
+                        enabled: screen.selecting
+                        onClicked: screen.toggleSelected(model.chapterId, model.downloadState,
+                                                          model.documentUuid)
                     }
                 }
 
@@ -515,9 +688,23 @@ Item {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
                     height: Style.rowHeight
 
+                    Rectangle {
+                        id: volumeSelectBox
+                        objectName: "volumeSelectBox"
+                        anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                        width: 40
+                        height: 40
+                        radius: 4
+                        visible: screen.selecting && screen.canSelect(model.downloadState, model.documentUuid)
+                        border.width: 2
+                        border.color: Style.ink
+                        color: screen.isSelected(model.chapterId) ? Style.ink : Style.paper
+                    }
+
                     Column {
                         anchors {
-                            left: parent.left; leftMargin: Style.margin
+                            left: volumeSelectBox.visible ? volumeSelectBox.right : parent.left
+                            leftMargin: Style.margin
                             right: volumeDeleteButton.visible ? volumeDeleteButton.left : volumeButton.left
                             rightMargin: Style.gap
                             verticalCenter: parent.verticalCenter
@@ -529,7 +716,9 @@ Item {
                             elide: Text.ElideRight
                             text: model.title
                             font.pointSize: Style.bodySize
-                            color: Style.ink
+                            color: screen.selecting
+                                   && !screen.canSelect(model.downloadState, model.documentUuid)
+                                   ? Style.muted : Style.ink
                         }
 
                         // What the volume holds, which is the whole reason this
@@ -562,7 +751,7 @@ Item {
                         anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: model.documentUuid ? true : false
+                        visible: model.documentUuid && !screen.selecting ? true : false
                         color: volumeDeleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -604,10 +793,20 @@ Item {
                         MouseArea {
                             id: volumeArea
                             anchors.fill: parent
-                            enabled: screen.canTap(model.downloadState, model.documentUuid)
+                            enabled: !screen.selecting
+                                     && screen.canTap(model.downloadState, model.documentUuid)
                             onClicked: screen.volumeTapped(model.chapterId, model.downloadState,
                                                            model.documentUuid)
                         }
+                    }
+
+                    MouseArea {
+                        id: volumeRowSelectArea
+                        objectName: "volumeRowSelectArea"
+                        anchors.fill: parent
+                        enabled: screen.selecting
+                        onClicked: screen.toggleSelected(model.chapterId, model.downloadState,
+                                                          model.documentUuid)
                     }
                 }
 
@@ -628,6 +827,100 @@ Item {
         }
     }
 
+    // ---- the selection bar -------------------------------------------------
+    //
+    // It stands in the same place as the confirm strip and gives way to it: one
+    // place at the foot of the list for the screen to speak from, and a bar
+    // under an open question is a second thing to tap while a question is
+    // waiting.
+    Rectangle {
+        id: selectionBar
+        objectName: "selectionBar"
+        anchors { left: parent.left; right: parent.right; bottom: pagerBar.top }
+        height: Style.rowHeight
+        color: Style.paper
+        visible: screen.selecting && !confirmStrip.visible
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        // The count, because it is the thing the user is keeping in their head
+        // while they tap down a list. The wording of a *question* is the
+        // backend's (PLAN §2); this is a label on a control, like the buttons.
+        Text {
+            id: selectionCount
+            objectName: "selectionCount"
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            text: screen.selectedCount === 1 ? "1 selected" : screen.selectedCount + " selected"
+            font.pointSize: Style.smallSize
+            color: Style.muted
+        }
+
+        Row {
+            anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
+            spacing: Style.gap
+
+            // The way out, and it selects nothing on the way.
+            Rectangle {
+                objectName: "cancelSelectionButton"
+                width: 160
+                height: Style.buttonHeight
+                color: cancelSelectionArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Cancel"
+                    font.pointSize: Style.smallSize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: cancelSelectionArea
+                    objectName: "cancelSelectionArea"
+                    anchors.fill: parent
+                    onClicked: screen.leaveSelection()
+                }
+            }
+
+            // Inert until something is selected, rather than absent: a button
+            // that appears when you have picked a row is a button you have to
+            // discover twice.
+            Rectangle {
+                objectName: "queueSelectionButton"
+                width: 240
+                height: Style.buttonHeight
+                color: queueSelectionArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: screen.selectedCount > 0 ? Style.ink : Style.rule
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Download selected"
+                    font.pointSize: Style.smallSize
+                    color: screen.selectedCount > 0 ? Style.ink : Style.muted
+                }
+
+                MouseArea {
+                    id: queueSelectionArea
+                    objectName: "queueSelectionArea"
+                    anchors.fill: parent
+                    enabled: screen.selectedCount > 0
+                    onClicked: screen.askToQueue()
+                }
+            }
+        }
+    }
+
     // ---- the confirm strip -------------------------------------------------
     //
     // A tap on Download in the volume view queues up to ten chapters and a few
@@ -636,6 +929,9 @@ Item {
     // this file's. A single chapter is never asked about — the backend does not
     // send the question — so this strip belongs to the volume view in practice,
     // and confirming from it confirms a volume.
+    //
+    // A selection of rows asks here too, for the same reason and through the
+    // same strip: "queue" is the third thing confirmingKind can be.
     Rectangle {
         id: confirmStrip
         objectName: "confirmStrip"
@@ -664,6 +960,37 @@ Item {
             color: Style.muted
         }
 
+        // The way back out of the queue question. It closes the question and
+        // leaves the selection exactly as it was, because "not yet" after
+        // reading how many rows it is usually means "let me take one off".
+        Rectangle {
+            id: cancelQueueButton
+            objectName: "cancelQueueButton"
+            visible: screen.confirmingKind === "queue"
+            anchors { right: confirmButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+            width: 160
+            height: Style.buttonHeight
+            color: cancelQueueArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Not yet"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: cancelQueueArea
+                objectName: "cancelQueueArea"
+                anchors.fill: parent
+                enabled: cancelQueueButton.visible
+                onClicked: screen.closeConfirm()
+            }
+        }
+
         Rectangle {
             id: confirmButton
             objectName: "confirmDownloadButton"
@@ -678,7 +1005,7 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: "Download all"
+                text: screen.confirmingKind === "queue" ? "Download them" : "Download all"
                 font.pointSize: Style.smallSize
                 color: Style.ink
             }
@@ -689,7 +1016,17 @@ Item {
                 onClicked: {
                     var id = screen.confirmingId
                     var volume = screen.showingVolumes
+                    var queueing = screen.confirmingKind === "queue"
+                    var ids = screen.selectedIds
+
+                    // Both doors close before anything is sent: the question is
+                    // answered, and the selection it was about has been spent.
                     screen.closeConfirm()
+                    if (queueing) {
+                        screen.leaveSelection()
+                        screen.queueConfirmed(ids, volume)
+                        return
+                    }
                     if (volume)
                         screen.volumeDownloadConfirmed(id)
                     else

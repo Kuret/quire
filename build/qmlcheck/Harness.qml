@@ -69,6 +69,14 @@ Window {
     property int deleteConfirms: 0
     property string deleteConfirmedAbout: ""
 
+    // What a selection asked to queue (PLAN §12.1). Counters again: the point
+    // of the confirmation is that picking rows queues nothing until it is
+    // answered, which is only observable as a count that did not move.
+    property int queueAsks: 0
+    property int queueConfirms: 0
+    property var queueAskedFor: []
+    property bool queueAskedForVolumes: false
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -147,6 +155,15 @@ Window {
                   onVolumeDownloadRequested: {
                       win.volumeAsks++
                       win.volumeAskedFor = chapterId
+                  }
+                  onQueueRequested: {
+                      win.queueAsks++
+                      win.queueAskedFor = chapterIds
+                      win.queueAskedForVolumes = volumes
+                  }
+                  onQueueConfirmed: {
+                      win.queueConfirms++
+                      win.queueAskedFor = chapterIds
                   }
                   onDeleteRequested: {
                       win.deleteAsks++
@@ -703,6 +720,123 @@ Window {
         volumesModel.setProperty(0, "documentUuid", "")
         win.want("clearing it takes the volume Delete button too", visibleVolumeDeletes(), 0)
         chapterList.showView("chapters")
+
+        // ---- selecting several rows (PLAN §12.1) ---------------------------
+        //
+        // The properties worth holding: the mode is entered and left from one
+        // control each, only rows with something to queue can be picked,
+        // leaving clears, and the question is answered once for the lot.
+
+        chapterList.showView("chapters")
+        chapterList.leaveSelection()
+        chapterList.closeConfirm()
+
+
+        var selectBoxes = function () {
+            var found = win.findChildren(chapterList, "selectBox", [])
+            var n = 0
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
+                    n++
+            return n
+        }
+
+        var bar = win.findChild(chapterList, "selectionBar")
+        win.want("the list starts out of selection mode", chapterList.selecting, false)
+        win.want("so there is no selection bar", bar.visible, false)
+        win.want("and no boxes on the rows", selectBoxes(), 0)
+
+        win.findChild(chapterList, "selectArea").clicked(null)
+        win.want("Select enters the mode", chapterList.selecting, true)
+        win.want("the bar comes up with it", bar.visible, true)
+        win.want("the way in goes away while the mode is on",
+                 win.findChild(chapterList, "selectButton").visible, false)
+
+        // Only rows that can be downloaded are candidates. Counted as a
+        // difference rather than against the page size: what matters is that
+        // finishing a row takes it out of the running, not how many rows a
+        // viewport of this height happens to hold.
+        var pickable = selectBoxes()
+        chaptersModel.setProperty(1, "downloadState", "done")
+        chaptersModel.setProperty(3, "documentUuid", "doc-read")
+        win.findChild(chapterList, "chapterRows").forceLayout()
+        win.want("a row in the library and a row already downloaded drop out",
+                 selectBoxes(), pickable - 2)
+
+        // Picking is toggling, and it queues nothing on its own.
+        chapterList.toggleSelected("c0", "", "")
+        chapterList.toggleSelected("c2", "", "")
+        win.want("two rows are selected", chapterList.selectedCount, 2)
+        win.want("the count says so", win.findChild(chapterList, "selectionCount").text, "2 selected")
+        win.want("picking rows queues nothing", win.queueAsks, 0)
+
+        chapterList.toggleSelected("c2", "", "")
+        win.want("tapping a selected row takes it off", chapterList.selectedCount, 1)
+
+        // A row with nothing to queue cannot be added, however it is asked.
+        chapterList.toggleSelected("c1", "done", "")
+        chapterList.toggleSelected("c3", "", "doc-read")
+        win.want("a finished row cannot be selected", chapterList.selectedCount, 1)
+
+        // The footer asks; it does not queue.
+        win.findChild(chapterList, "queueSelectionArea").clicked(null)
+        win.want("the footer asks once", win.queueAsks, 1)
+        win.want("and asks about the selected row", win.queueAskedFor.length, 1)
+        win.want("asking queues nothing", win.queueConfirms, 0)
+
+        // The backend's sentence, as Main.qml applies it.
+        chapterList.confirmingKind = "queue"
+        chapterList.confirmingId = "selection"
+        chapterList.confirmingMessage = "Download 1 chapter?"
+        var strip = win.findChild(chapterList, "confirmStrip")
+        win.want("the question is on screen", strip.visible, true)
+        win.want("and the bar gives way to it", bar.visible, false)
+        win.want("and offers a way out", win.findChild(chapterList, "cancelQueueButton").visible, true)
+
+        // "Not yet" keeps the selection: the usual reason for it is to take a
+        // row back off before saying yes.
+        win.findChild(chapterList, "cancelQueueArea").clicked(null)
+        win.want("backing out closes the question", strip.visible, false)
+        win.want("and keeps the selection", chapterList.selectedCount, 1)
+        win.want("and leaves the mode on", chapterList.selecting, true)
+
+        // Confirming queues once and spends the selection.
+        chapterList.confirmingKind = "queue"
+        chapterList.confirmingId = "selection"
+        chapterList.confirmingMessage = "Download 1 chapter?"
+        win.findChild(chapterList, "confirmDownloadButton").children[1].clicked(null)
+        win.want("confirming queues once", win.queueConfirms, 1)
+        win.want("confirming leaves the mode", chapterList.selecting, false)
+        win.want("and clears the selection", chapterList.selectedCount, 0)
+
+        // Leaving by the footer selects nothing, and turning a page forgets
+        // what was picked on the page before it.
+        win.findChild(chapterList, "selectArea").clicked(null)
+        chapterList.toggleSelected("c0", "", "")
+        win.want("picked again", chapterList.selectedCount, 1)
+        win.findChild(chapterList, "cancelSelectionArea").clicked(null)
+        win.want("Cancel leaves the mode", chapterList.selecting, false)
+        win.want("Cancel selects nothing", chapterList.selectedCount, 0)
+        win.want("Cancel queues nothing", win.queueConfirms, 1)
+
+        win.findChild(chapterList, "selectArea").clicked(null)
+        chapterList.toggleSelected("c0", "", "")
+        chapterList.page = 2
+        win.want("turning the page clears the selection", chapterList.selectedCount, 0)
+        win.want("but stays in the mode", chapterList.selecting, true)
+        chapterList.page = 1
+
+        // Switching lists leaves the mode outright: a selection of chapters
+        // means nothing among volumes.
+        chapterList.toggleSelected("c0", "", "")
+        chapterList.showView("volumes")
+        win.want("switching view leaves selection mode", chapterList.selecting, false)
+        win.want("and takes the selection with it", chapterList.selectedCount, 0)
+        chapterList.showView("chapters")
+
+        // Put the rows back as they were found.
+        chaptersModel.setProperty(1, "downloadState", "")
+        chaptersModel.setProperty(3, "documentUuid", "")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
