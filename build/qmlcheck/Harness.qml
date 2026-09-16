@@ -43,6 +43,8 @@ Window {
         onWatchPhraseChanged: summaryTarget.phraseWrites++
     }
 
+    property var typed: []
+
     property int robotsWrites: 0
     property int robotsAsks: 0
     property bool robotsAskedFor: false
@@ -55,6 +57,43 @@ Window {
         } else {
             console.log("ok   " + label + " = " + got)
         }
+    }
+
+    // findChildren collects every descendant with the objectName, which is how
+    // the keyboard's keys are counted.
+    function findChildren(item, name, into) {
+        if (!item)
+            return into
+        if (item.objectName === name)
+            into.push(item)
+        for (var i = 0; i < item.children.length; ++i)
+            win.findChildren(item.children[i], name, into)
+        return into
+    }
+
+    // visibleKeyLabels returns the text of every key that is actually on
+    // screen, which is what "how many full stops does this layout have?" means.
+    function visibleKeyLabels(kb) {
+        var out = []
+        function walk(item) {
+            if (!item || item.visible === false)
+                return
+            if (item.text !== undefined && String(item.text).length > 0)
+                out.push(String(item.text))
+            for (var i = 0; i < item.children.length; ++i)
+                walk(item.children[i])
+        }
+        walk(kb)
+        return out
+    }
+
+    function countLabel(kb, want) {
+        var labels = win.visibleKeyLabels(kb)
+        var n = 0
+        for (var i = 0; i < labels.length; ++i)
+            if (labels[i] === want)
+                n++
+        return n
     }
 
     function findChild(item, name) {
@@ -91,6 +130,23 @@ Window {
     }
     WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
     PagerBar    { id: lonePager;   width: 1620 }
+
+    // Both keyboard layouts, so the URL one can be inspected without driving a
+    // screen into its search state.
+    Keyboard {
+        id: textKeys
+        objectName: "textKeys"
+        width: 1620
+        layout: "text"
+        onKeyTyped: { win.typed.push(text); win.typedChanged() }
+    }
+    Keyboard {
+        id: urlKeys
+        objectName: "urlKeys"
+        width: 1620
+        layout: "url"
+        onKeyTyped: { win.typed.push(text); win.typedChanged() }
+    }
 
     Component.onCompleted: {
         for (var i = 0; i < 40; ++i)
@@ -326,6 +382,50 @@ Window {
 
         settings.consultRobots = false
         win.want("the toggle follows the push back", robotsState.text, "Off")
+
+        // ---- the on-screen keyboard ------------------------------------
+        //
+        // The device ships Noto Sans, Noto Serif, NotoSansUI and Noto Mono and
+        // nothing else. U+232B ERASE TO THE LEFT is in Noto Sans *Symbols*,
+        // which is not installed, so the backspace key rendered as a tofu box.
+        // It is drawn now, and the assertion is that nothing in the keyboard
+        // depends on a glyph at all.
+        var backKey = win.findChild(urlKeys, "keyboardBackspace")
+        win.want("the backspace key exists", backKey !== null, true)
+        var glyph = null
+        for (var g = 0; g < backKey.children.length; ++g)
+            if (backKey.children[g].toString().indexOf("QQuickCanvasItem") === 0)
+                glyph = backKey.children[g]
+        win.want("the backspace glyph is drawn, not typed", glyph !== null, true)
+        win.want("the drawn glyph has a size", glyph.width > 0 && glyph.height > 0, true)
+        win.want("the backspace key carries no text",
+                 win.countLabel(backKey, "") === 0 && win.visibleKeyLabels(backKey).length, 0)
+
+        // A URL layout with two full stops had one key that did nothing the
+        // other did not, and a space bar that silently was not one.
+        win.want("the URL layout has exactly one full stop", win.countLabel(urlKeys, "."), 1)
+        win.want("the URL layout has no space bar",
+                 win.findChild(urlKeys, "keyboardSpace").visible, false)
+        win.want("the text layout keeps its space bar",
+                 win.findChild(textKeys, "keyboardSpace").visible, true)
+        win.want("the text layout has one full stop", win.countLabel(textKeys, "."), 1)
+
+        // The suffix keys, in the URL layout only, inserting the whole string.
+        var urlSuffixes = win.findChildren(urlKeys, "keyboardSuffix", [])
+        var textSuffixes = win.findChildren(textKeys, "keyboardSuffix", [])
+        win.want("the URL layout has two suffix keys", urlSuffixes.length, 2)
+        win.want("the text layout has none", textSuffixes.length, 0)
+
+        win.typed = []
+        urlSuffixes[0].children[1].clicked(null)
+        urlSuffixes[1].children[1].clicked(null)
+        win.want("the first suffix types .com", win.typed[0], ".com")
+        win.want("the second suffix types .org", win.typed[1], ".org")
+
+        // The row still fits the panel without reflowing or shrinking keys.
+        win.want("the URL keyboard fits the panel", urlKeys.width >= 1620, true)
+        win.want("the suffix keys stay a comfortable target",
+                 urlSuffixes[0].width >= 150 && urlSuffixes[0].height >= 80, true)
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12
