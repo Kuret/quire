@@ -285,15 +285,32 @@ func (h *watchHarness) forget() {
 	h.rec.sent = nil
 }
 
-func (h *watchHarness) list() []watchRow {
+// watchSummaryRow is the at-a-glance half of a WatchList, decoded back.
+type watchSummaryRow struct {
+	SeriesWithNew int    `json:"seriesWithNew"`
+	NewChapters   int    `json:"newChapters"`
+	Failed        int    `json:"failed"`
+	Short         string `json:"short"`
+	Phrase        string `json:"phrase"`
+}
+
+type watchListMsg struct {
+	Watched []watchRow      `json:"watched"`
+	Summary watchSummaryRow `json:"summary"`
+}
+
+func (h *watchHarness) listMsg() watchListMsg {
 	h.t.Helper()
-	var env struct {
-		Watched []watchRow `json:"watched"`
-	}
+	var env watchListMsg
 	if err := json.Unmarshal(h.rec.wait(h.t, appload.MessageWatchList), &env); err != nil {
 		h.t.Fatal(err)
 	}
-	return env.Watched
+	return env
+}
+
+func (h *watchHarness) list() []watchRow {
+	h.t.Helper()
+	return h.listMsg().Watched
 }
 
 // The plain case, and the one the user asked for: three chapters appeared, and
@@ -703,5 +720,74 @@ func TestAWatchCheckAsksAsDiscovery(t *testing.T) {
 		if c.Kind != fetch.KindDiscovery {
 			t.Errorf("%s %s was made as %s; a watch check is discovery", c.Method, c.URL, c.Kind)
 		}
+	}
+}
+
+// PLAN §12.2's at-a-glance indicator. It has to be on the push that happens on
+// attach: the entry point lives on a screen that may never open the watched
+// list, so a summary only sent after a check round would leave it blank on the
+// screen that matters most.
+func TestTheSummaryRidesOnEveryWatchListAndAgreesWithTheRows(t *testing.T) {
+	h := newWatchHarness(t, chaptersSeen())
+	h.openSeries()
+
+	// Watching it is itself a WatchList push, and there is nothing to report.
+	h.watch()
+	if got := h.listMsg().Summary; got.Short != "" || got.Phrase != "" {
+		t.Errorf("a freshly watched series reports %+v, want silence", got)
+	}
+
+	h.forget()
+	h.phase(chaptersGrown())
+	h.checkNow()
+	if got := h.settled(); got.NewChapters != 3 {
+		t.Fatalf("setup: %+v", got)
+	}
+
+	// The check round ends with a list, and it carries the summary.
+	afterCheck := h.listMsg()
+	if afterCheck.Summary.Short != "1 new" {
+		t.Errorf("short = %q, want %q", afterCheck.Summary.Short, "1 new")
+	}
+	if afterCheck.Summary.Phrase != "1 series has new chapters" {
+		t.Errorf("phrase = %q", afterCheck.Summary.Phrase)
+	}
+
+	// And on attach, which is the one the entry point depends on.
+	h.forget()
+	if err := h.svc.FrontendAttached(h.rec); err != nil {
+		t.Fatal(err)
+	}
+	onAttach := h.listMsg()
+	if onAttach.Summary.Short != "1 new" || onAttach.Summary.NewChapters != 3 {
+		t.Fatalf("summary on attach = %+v", onAttach.Summary)
+	}
+
+	// The summary is computed from the rows it travels with, so the two cannot
+	// disagree — "3 new" over a list showing two is the bug this guards.
+	var rowsWithBadge, chapters int
+	for _, r := range onAttach.Watched {
+		if r.NewChapters > 0 {
+			rowsWithBadge++
+			chapters += r.NewChapters
+		}
+	}
+	if rowsWithBadge != onAttach.Summary.SeriesWithNew || chapters != onAttach.Summary.NewChapters {
+		t.Errorf("summary %+v does not match its own rows (%d series, %d chapters)",
+			onAttach.Summary, rowsWithBadge, chapters)
+	}
+
+	// Looking at the series empties it again, and the indicator goes out
+	// rather than reading "0 new".
+	h.forget()
+	h.openSeries()
+	handle(t, h.svc, h.rec, appload.MessageUnwatchSeries,
+		`{"sourceId":"example-reader","seriesId":"`+seriesPath+`"}`)
+	empty := h.listMsg()
+	if len(empty.Watched) != 0 {
+		t.Fatalf("watch list = %+v", empty.Watched)
+	}
+	if empty.Summary.Short != "" || empty.Summary.Phrase != "" {
+		t.Errorf("an empty list reports %+v, want silence", empty.Summary)
 	}
 }

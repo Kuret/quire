@@ -124,8 +124,15 @@ const (
 	// nowhere else — never on a timer, never in the background (PLAN §6 M7).
 	MessageCheckWatched MessageType = 62
 
-	// MessageWatchList is BE→UI, JSON {watched: [...]}. The whole list, pushed
-	// on attach and after any change to it.
+	// MessageWatchList is BE→UI, JSON {watched: [...], summary: {...}}. The
+	// whole list, pushed on attach and after any change to it.
+	//
+	// The summary is the at-a-glance indicator: counts, plus the wording for
+	// the entry point and for the watched screen's header. It rides on every
+	// push, including the one on attach, because the entry point lives on a
+	// screen that may never open the watched list at all. It is computed from
+	// the rows in the same message — two counts maintained separately drift,
+	// and the user meets that as "3 new" over a list showing two.
 	MessageWatchList MessageType = 63
 
 	// MessageWatchUpdate is BE→UI, JSON — one series' state, streamed as each

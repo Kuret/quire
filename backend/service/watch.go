@@ -137,8 +137,119 @@ func plural(n int) string {
 	return fmt.Sprintf("%d new chapters", n)
 }
 
+// watchSummary is the at-a-glance form of the whole list: the counts, and the
+// two sentences that go with them (PLAN §12.2).
+//
+// The counts travel beside the words so the view can decide *whether* to show
+// something without deciding *what* it says — a badge that reads "3 new" is a
+// sentence, and PLAN §2 keeps sentences out of QML.
+type watchSummary struct {
+	// SeriesWithNew is how many watched series carry a badge, and NewChapters
+	// is how many chapters that adds up to.
+	SeriesWithNew int `json:"seriesWithNew"`
+	NewChapters   int `json:"newChapters"`
+
+	// Failed is how many series' last check did not finish.
+	Failed int `json:"failed"`
+
+	// Short is the entry-point label and Phrase heads the watched screen. Both
+	// are "" when there is nothing to report — never "0 new", and never a
+	// cheerful "up to date". An indicator that is always lit is one people stop
+	// reading, which would defeat the whole feature.
+	Short  string `json:"short"`
+	Phrase string `json:"phrase"`
+}
+
+// summarise reduces the rows to the summary that ships in the same message.
+//
+// It is computed from the rows rather than tracked alongside them on purpose:
+// two counters maintained separately drift, and the way a user meets that is
+// "3 new" over a list showing two.
+//
+// # What counts as new, and what counts as failed
+//
+// A row counts as new when it carries a badge, whatever its last check did —
+// including a row whose last check failed while an *earlier* one found three
+// chapters. Those three are still unread and the list still shows them, so
+// leaving them out of the summary would be the drift this function exists to
+// prevent. A row therefore can be in both buckets, and the two are not a
+// partition of the list.
+//
+// A row mid-check counts as neither. A check round lands one series at a time
+// (see checkWatched), and a summary that counted an in-flight row's stale value
+// would tick up and back down as the round progressed.
+//
+// # Why Short says nothing about failures
+//
+// One series failing while three have new chapters is not the same as
+// everything failing and nothing being new — but neither is a reason to light
+// the entry point, and the distinction is drawn in Phrase, where the rows that
+// say "Couldn't check" are on screen anyway.
+//
+// The entry point stays quiet about failures because Quire already has a
+// considered position on what a failed fetch means: maybeReprobe treats a
+// transport error as a blip — wifi dropped, the tablet woke mid-request — and
+// refuses to re-probe on one. A badge lit by that same blip would be crying
+// wolf on the strength of evidence the project has already decided is not
+// evidence. And when a source really has changed, the re-probe says so on the
+// source list, which is where a broken source belongs.
+//
+// "" is not a claim of success. It renders as no indicator at all, so a user
+// whose checks are all failing is told nothing rather than told a lie, and the
+// watched screen has the whole truth a tap away.
+func summarise(rows []watchView) watchSummary {
+	var sum watchSummary
+	for _, r := range rows {
+		if r.State == watchStateChecking {
+			continue
+		}
+		if r.NewChapters > 0 {
+			sum.SeriesWithNew++
+			sum.NewChapters += r.NewChapters
+		}
+		if r.State == watchStateFailed {
+			sum.Failed++
+		}
+	}
+
+	if sum.SeriesWithNew > 0 {
+		sum.Short = fmt.Sprintf("%d new", sum.SeriesWithNew)
+	}
+
+	switch {
+	case sum.SeriesWithNew > 0 && sum.Failed > 0:
+		sum.Phrase = fmt.Sprintf("%s, and %s couldn’t be checked",
+			seriesHaveNew(sum.SeriesWithNew), countOfSeries(sum.Failed))
+	case sum.SeriesWithNew > 0:
+		sum.Phrase = seriesHaveNew(sum.SeriesWithNew)
+	case sum.Failed > 0:
+		sum.Phrase = fmt.Sprintf("%s couldn’t be checked", seriesCount(sum.Failed))
+	}
+	return sum
+}
+
+// seriesHaveNew is "1 series has new chapters" / "4 series have new chapters".
+// "series" is its own plural, so only the verb moves.
+func seriesHaveNew(n int) string {
+	if n == 1 {
+		return "1 series has new chapters"
+	}
+	return fmt.Sprintf("%d series have new chapters", n)
+}
+
+// seriesCount is "1 series" / "4 series", for the head of a sentence.
+func seriesCount(n int) string { return fmt.Sprintf("%d series", n) }
+
+// countOfSeries is the same count once "series" has already been said, so the
+// sentence does not repeat itself: "…, and 1 couldn't be checked".
+func countOfSeries(n int) string { return fmt.Sprintf("%d", n) }
+
 func (s *Service) sendWatchList(out Sender) error {
-	return send(out, appload.MessageWatchList, map[string]any{"watched": s.watchListView()})
+	rows := s.watchListView()
+	return send(out, appload.MessageWatchList, map[string]any{
+		"watched": rows,
+		"summary": summarise(rows),
+	})
 }
 
 func (s *Service) sendWatchUpdate(out Sender, v watchView) {
