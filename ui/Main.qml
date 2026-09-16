@@ -215,6 +215,10 @@ Rectangle {
                 // The backend resolves "unset" to "auto", so this is never
                 // blank; the fallback is for a reply from an older backend.
                 "splitStrips": s.splitStrips ? s.splitStrips : "auto",
+                // Same story: the backend resolves "unset" to "chapter" and
+                // the schema's default run length, so these are never blank.
+                "grouping": s.grouping ? s.grouping : "chapter",
+                "groupSize": s.groupSize ? s.groupSize : 10,
                 "status": s.status,
                 "statusDetail": s.statusDetail ? s.statusDetail : ""
             })
@@ -516,6 +520,8 @@ Rectangle {
             onRenameRequested: root.send(Msg.RenameSource, {"sourceId": sourceId, "name": name})
             onSplitStripsRequested: root.send(Msg.SetSourceSplitStrips,
                                               {"sourceId": sourceId, "splitStrips": mode})
+            onGroupingRequested: root.send(Msg.SetSourceGrouping,
+                                           {"sourceId": sourceId, "grouping": mode})
         }
 
         AddSource {

@@ -48,6 +48,10 @@ Item {
     // the schema's own spellings, sent as data. The words the user reads are
     // chosen below and never travel.
     signal splitStripsRequested(string sourceId, string mode)
+    // PLAN §6 M4's per-source grouping, reversed 2026-09-16. mode is
+    // "chapter", "volume" or "count" — the schema's own spellings, sent as
+    // data. The words the user reads are chosen below and never travel.
+    signal groupingRequested(string sourceId, string mode)
     signal noticeDismissed()
 
     // A quiet line from the backend, above the list. Composed there, not here.
@@ -88,6 +92,7 @@ Item {
     }
 
     function startSplitting(sourceId, name, mode) {
+        screen.groupingId = ""
         screen.confirmingId = ""
         screen.confirmingName = ""
         screen.splittingId = sourceId
@@ -104,6 +109,46 @@ Item {
         screen.splittingMode = mode
     }
 
+    // The open row's current grouping, carried for the same reason the name is.
+    property string confirmingGrouping: "chapter"
+    property int confirmingGroupSize: 10
+
+    // The source whose grouping panel is open, and the mode shown as chosen.
+    property string groupingId: ""
+    property string groupingName: ""
+    property string groupingMode: "chapter"
+    property int groupingSize: 10
+
+    // The words for each grouping, in one place. The backend sends "chapter",
+    // "volume" and "count"; PLAN §2 keeps the wording on the side that shows
+    // it. The count says its own size, because "Runs" alone answers nothing.
+    function groupingLabel(mode, size) {
+        if (mode === "volume")
+            return "By volume"
+        if (mode === "count")
+            return "Runs of " + size
+        return "Per chapter"
+    }
+
+    function startGrouping(sourceId, name, mode, size) {
+        screen.confirmingId = ""
+        screen.confirmingName = ""
+        screen.splittingId = ""
+        screen.groupingId = sourceId
+        screen.groupingName = name
+        screen.groupingMode = mode ? mode : "chapter"
+        screen.groupingSize = size ? size : 10
+    }
+
+    function chooseGrouping(mode) {
+        // Sending an unchanged value would make the backend rewrite the store
+        // and push a fresh source list for nothing, which on e-ink is a visible
+        // repaint of the whole screen.
+        if (mode !== screen.groupingMode)
+            screen.groupingRequested(screen.groupingId, mode)
+        screen.groupingMode = mode
+    }
+
     // The source being renamed, and the name being typed. Renaming is here
     // rather than on a screen of its own because it is one field: the name is
     // guessed from the site's <title> at probe time and that guess is
@@ -113,6 +158,7 @@ Item {
     property string renameText: ""
 
     function startRename(sourceId, name) {
+        screen.groupingId = ""
         screen.confirmingId = ""
         screen.confirmingName = ""
         screen.splittingId = ""
@@ -251,6 +297,10 @@ Item {
                             screen.confirmingName = open ? model.name : ""
                             screen.confirmingSplit = open && model.splitStrips
                                                    ? model.splitStrips : "auto"
+                            screen.confirmingGrouping = open && model.grouping
+                                                      ? model.grouping : "chapter"
+                            screen.confirmingGroupSize = open && model.groupSize
+                                                       ? model.groupSize : 10
                         }
                     }
 
@@ -345,7 +395,7 @@ Item {
         Text {
             anchors {
                 left: parent.left; leftMargin: Style.margin
-                right: splitButton.left; rightMargin: Style.gap
+                right: groupButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
             elide: Text.ElideRight
@@ -353,6 +403,41 @@ Item {
                   "? Downloaded volumes stay in your library."
             font.pointSize: Style.smallSize
             color: Style.muted
+        }
+
+        // The grouping setting reads its current value on the button, for the
+        // same reason splitting does: "how will this arrive?" is the question
+        // the long press is there to answer.
+        Rectangle {
+            id: groupButton
+            objectName: "groupButton"
+            anchors {
+                right: splitButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 300
+            height: Style.buttonHeight - Style.gap
+            color: groupArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                objectName: "groupButtonLabel"
+                anchors.centerIn: parent
+                text: "Saving: " + screen.groupingLabel(screen.confirmingGrouping,
+                                                        screen.confirmingGroupSize)
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: groupArea
+                anchors.fill: parent
+                onClicked: screen.startGrouping(screen.confirmingId, screen.confirmingName,
+                                                screen.confirmingGrouping,
+                                                screen.confirmingGroupSize)
+            }
         }
 
         // The splitting setting reads its current value on the button, so the
@@ -647,6 +732,152 @@ Item {
             onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
             onClearAll: screen.renameText = ""
             onSubmit: screen.commitRename()
+        }
+    }
+
+    // ---- how downloads are saved --------------------------------------------
+    //
+    // PLAN §6 M4, reversed 2026-09-16 after living with it: one PDF per chapter
+    // is the default, even where the source publishes volume labels. The reason
+    // is sampling — the first thing you do with an unfamiliar series is read a
+    // few pages to decide whether you want the rest, and a 7–10 minute wait
+    // before anything is readable makes that impossible. The source's volumes
+    // are information, not an instruction.
+    //
+    // A panel rather than a cycling button, for the same reason splitting has
+    // one: three states on one button cannot say what any of them mean, and the
+    // trade each one makes is the load-bearing part.
+    //
+    // No animation and no repaint on an unchanged value: taps that re-choose
+    // the current mode send nothing (see chooseGrouping).
+    Rectangle {
+        id: groupPanel
+        objectName: "groupPanel"
+        anchors.fill: parent
+        color: Style.paper
+        visible: screen.groupingId.length > 0
+
+        MouseArea { anchors.fill: parent }
+
+        Column {
+            anchors {
+                top: parent.top; topMargin: Style.margin
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+            spacing: Style.gap
+
+            Text {
+                objectName: "groupHeading"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "How downloads are saved"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Text {
+                objectName: "groupExplanation"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "One file per chapter means the first one is readable in " +
+                      "about a minute, so you can try a few pages before " +
+                      "deciding whether to read the rest. A whole volume takes " +
+                      "seven to ten minutes before anything opens.\n\n" +
+                      "Bigger files keep your place across chapters and put " +
+                      "fewer entries in your library."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Repeater {
+                model: [
+                    {"mode": "chapter", "label": "Per chapter",
+                     "note": "One file for each chapter. The usual choice."},
+                    {"mode": "volume", "label": "By volume",
+                     "note": "One file per volume this site names, or ten chapters where it names none."},
+                    {"mode": "count", "label": "Runs of " + screen.groupingSize,
+                     "note": "One file for every " + screen.groupingSize + " chapters, whatever the site calls them."}
+                ]
+
+                Rectangle {
+                    objectName: "groupOption-" + modelData.mode
+                    width: groupPanel.width - Style.margin * 2
+                    height: Style.rowHeight
+                    // The chosen row is drawn heavier rather than tinted: a fill
+                    // change is a full-row repaint on e-ink, and a border is
+                    // legible without one.
+                    color: groupOptionArea.pressed ? Style.pressed : Style.paper
+                    border.width: screen.groupingMode === modelData.mode ? 4 : 2
+                    border.color: screen.groupingMode === modelData.mode ? Style.ink : Style.rule
+                    radius: 6
+
+                    Column {
+                        anchors {
+                            left: parent.left; leftMargin: Style.gap
+                            right: parent.right; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
+
+                        Text {
+                            objectName: "groupOptionLabel-" + modelData.mode
+                            text: screen.groupingMode === modelData.mode
+                                  ? modelData.label + " (chosen)" : modelData.label
+                            font.pointSize: Style.bodySize
+                            color: Style.ink
+                        }
+
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: modelData.note
+                            font.pointSize: Style.smallSize
+                            color: Style.muted
+                        }
+                    }
+
+                    MouseArea {
+                        id: groupOptionArea
+                        anchors.fill: parent
+                        onClicked: screen.chooseGrouping(modelData.mode)
+                    }
+                }
+            }
+
+            Text {
+                objectName: "groupFootnote"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Whatever you choose, anything already downloaded stays " +
+                      "where it is and still opens."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Rectangle {
+                objectName: "groupDoneButton"
+                width: 220
+                height: Style.buttonHeight
+                color: groupDoneArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Done"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: groupDoneArea
+                    objectName: "groupDoneArea"
+                    anchors.fill: parent
+                    onClicked: screen.groupingId = ""
+                }
+            }
         }
     }
 
