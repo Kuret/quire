@@ -129,6 +129,39 @@ type SourceValidator interface {
 	Validate(s *Source) error
 }
 
+// PageReferrer is implemented by a theme whose image host refuses a request
+// that does not say which of the site's pages it came from.
+//
+// PLAN §7.6, decided 2026-09-16: a truthful `Referer` is permitted, because
+// naming the page an image URL was actually extracted from is a true statement
+// rather than pretence. Three sites parse perfectly to page URLs and then
+// answer 403 on the image host without one.
+//
+// It is the *theme's* to answer for the same reason the ordering contract is:
+// only the theme knows which URL its Pages() read. It is a side interface
+// rather than part of Theme because most themes have no such host, and "" is
+// the right answer for them.
+//
+// # The contract, and it is not optional
+//
+// The returned URL must be **a page this theme actually fetched** in the
+// course of producing that chapter's page URLs — for every theme here, the
+// exact URL Pages() requested. A URL the theme did not fetch is a fabricated
+// Referer, which §7.6 forbids as squarely as it forbids a spoofed User-Agent.
+// When a theme cannot say, it returns "" and no header is sent; that is a
+// perfectly good answer and is what the zero fetch.Referrer exists for.
+//
+// It is a pure function of the source and the chapter ID rather than state
+// left behind by the last Pages() call, so that it cannot go stale, cannot be
+// read for the wrong chapter, and cannot differ between two callers. Every
+// implementation here is the same one line its Pages() uses to build its own
+// request.
+type PageReferrer interface {
+	// PageReferer returns the absolute URL of the page whose markup names the
+	// page images of chapterID, or "" when the theme has none to name.
+	PageReferer(s *Source, chapterID string) string
+}
+
 // Fetcher is the slice of fetch.Client a theme uses. Themes depend on this
 // interface rather than the concrete client so tests can serve committed
 // fixtures without a network, a server or a loopback exemption.
