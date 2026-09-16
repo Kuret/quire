@@ -72,11 +72,28 @@ const DefaultThreshold = 60
 // near-ties go to the user as a choice").
 const NearMiss = 10
 
-// capabilityQuery is the query used for stage 5's search. PLAN §7.5 allows the
-// popular/latest listing instead "if search needs a query"; every theme we have
-// implements search over a plain query string, so one short, common substring
-// exercises the same path with one request.
-const capabilityQuery = "a"
+// capabilityListing is stage 5's first attempt at a search: PLAN §7.5's "or the
+// popular/latest listing if search needs a query", which PLAN §12.1 made
+// implementable by defining Browse as a search with an empty query.
+//
+// CORRECTION 2026-09-16 — this used to be a one-character query, "a", and that
+// was the probe manufacturing its own failure. comick.art drops any search
+// query shorter than three characters at the edge: `q=a` and `q=ab` answer 444
+// with no body, `q=dra` and no query at all answer 200. Quire probed with "a",
+// was dropped, and reported the site as one it could not search. A one-
+// character query is exactly the shape an API rejects as abusive, and it is not
+// what any user would type. The empty-query listing is what stage 5 asked for,
+// it is what the user sees on the source's front page, and it invents nothing.
+const capabilityListing = ""
+
+// capabilityQuery is the fallback, used only when the listing yields nothing.
+//
+// Three characters is the floor: that is the length comick.art drops below, and
+// short queries are the ones edges treat as abuse. "one" is deliberately
+// unremarkable — a common word in titles across languages of romanised manga
+// ("One Piece", "One Punch Man", "Someone…"), so a site with a catalogue will
+// match it, and it asks for nothing unusual.
+const capabilityQuery = "one"
 
 // Progress is one streamed stage update (message type 13). It is deliberately
 // tiny: PLAN §7.1's real payload ceiling is a few hundred KB and this is sent

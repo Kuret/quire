@@ -108,25 +108,56 @@ func (c capability) summary() string {
 	return strings.ToUpper(c.failure()[:1]) + c.failure()[1:]
 }
 
+// capabilitySearch gets stage 5 a handful of series to work with, and returns
+// an empty note when it managed to. PLAN §7.5 stage 5: "a search (or the
+// popular/latest listing if search needs a query)".
+//
+// The listing goes first, and that order is the point (corrected 2026-09-16).
+// Probing with a one-character query made Quire generate the very failure it
+// then reported: comick.art drops any query under three characters at the edge,
+// so "a" came back as a bare 444 and a site that works perfectly was written
+// off. The listing is the request a user makes by opening Browse, so it is both
+// the gentlest thing to ask for and the most representative.
+//
+// The text query is the fallback for a site whose listing is genuinely empty —
+// a search-only front page — and it is never shorter than capabilityQuery,
+// because short queries are the shape edges treat as abuse.
+func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.Source) ([]theme.SeriesStub, string) {
+	stubs, listErr := th.Search(ctx, src, capabilityListing, 1)
+	if listErr == nil && len(stubs) > 0 {
+		return stubs, ""
+	}
+
+	// Nothing from the listing — either it is empty or the theme needs a query
+	// to search at all. One more request, with a word rather than a letter.
+	stubs, err := th.Search(ctx, src, capabilityQuery, 1)
+	switch {
+	case err != nil:
+		return nil, plainError(err)
+	case len(stubs) == 0:
+		if listErr != nil {
+			// The listing failed too, and its reason is the more informative
+			// of the two: the search merely found nothing.
+			return nil, plainError(listErr)
+		}
+		return nil, "the site returned no results at all."
+	}
+	return stubs, ""
+}
+
 // stageCapability exercises the whole path. Every step is attempted even after
 // an earlier one fails where that is still meaningful, so the report can say
 // what does work rather than only where it stopped.
 func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.Source) capability {
 	var cap capability
 
-	stubs, err := th.Search(ctx, src, capabilityQuery, 1)
-	switch {
-	case err != nil:
-		cap.Search.Note = plainError(err)
-	case len(stubs) == 0:
-		cap.Search.Note = "the site returned no results at all."
-	default:
-		cap.Search.OK = true
-		cap.Search.Count = len(stubs)
-	}
-	if !cap.Search.OK {
+	stubs, note := r.capabilitySearch(ctx, th, src)
+	if note != "" {
+		cap.Search.Note = note
 		return cap
 	}
+	cap.Search.OK = true
+	cap.Search.Count = len(stubs)
 
 	// The first result with a usable ID; a theme may legitimately return a stub
 	// it could not fully parse, and picking it would test our patience rather
