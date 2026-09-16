@@ -327,10 +327,16 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		qs.Set("page", strconv.Itoa(page))
 	}
 
-	raw, err := t.get(ctx, s, searchPath+"?"+qs.Encode())
+	path := searchPath + "?" + qs.Encode()
+	raw, err := t.get(ctx, s, path)
 	if err != nil {
 		return nil, err
 	}
+	// The cover host answers 403 without a `Referer` and 200 with one
+	// (measured 2026-09-16), so each stub carries the page its cover URL came
+	// out of — this listing, the exact URL just fetched, resolved the same way
+	// t.get resolved it. PLAN §7.6: truthful, per-request, never a constant.
+	from := t.absolute(s, path)
 	var res searchResponse
 	if err := json.Unmarshal([]byte(raw), &res); err != nil {
 		return nil, fmt.Errorf("%s: search: parse JSON: %w", ID, err)
@@ -351,11 +357,18 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if e.ContentRating != "" && !allowed[e.ContentRating] {
 			continue
 		}
-		out = append(out, theme.SeriesStub{
+		cover := t.absolute(s, e.DefaultThumbnail)
+		stub := theme.SeriesStub{
 			ID:       t.seriesID(e.Slug),
 			Title:    theme.Collapse(e.Title),
-			CoverURL: t.absolute(s, e.DefaultThumbnail),
-		})
+			CoverURL: cover,
+		}
+		// No cover, nothing to name: an empty referrer rather than a page
+		// attached to nothing.
+		if cover != "" {
+			stub.CoverReferrer = from
+		}
+		out = append(out, stub)
 	}
 	return out, nil
 }
@@ -417,7 +430,8 @@ type genreName struct {
 // the rendered page truncates the description and hides the alternate titles
 // behind a control — and stable in a way a utility-class selector is not.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	body, err := t.get(ctx, s, t.seriesPath(id))
+	path := t.seriesPath(id)
+	body, err := t.get(ctx, s, path)
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +450,11 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 		Description: theme.Collapse(d.Desc),
 		CoverURL:    t.absolute(s, d.DefaultThumbnail),
 		Status:      parseStatus(d.Status),
+	}
+	// The series page is where this cover URL was read, and it is the page
+	// just fetched. See Search for why the header is needed at all.
+	if out.CoverURL != "" {
+		out.CoverReferrer = t.absolute(s, path)
 	}
 	for _, a := range d.Authors {
 		if a.Name != "" {

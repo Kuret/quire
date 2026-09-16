@@ -60,6 +60,9 @@ func TestSearchReadsTheAPIEnvelope(t *testing.T) {
 		ID:       seriesID,
 		Title:    "The Lantern Keeper",
 		CoverURL: "https://pages.example.invalid/the-lantern-keeper/covers/8edfff1d.jpg",
+		// The listing this cover was read from, which is the URL Search
+		// fetched. PLAN §7.6 — see TestCoverReferrerIsThePageTheCoverCameFrom.
+		CoverReferrer: "https://example.invalid/api/search?q=lantern&type=comic",
 	}
 	if got[0] != want {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
