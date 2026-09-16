@@ -107,14 +107,29 @@ func main() {
 	defer conn.Close()
 	log.Info("connected")
 
-	if err := serve(conn, log, svc); err != nil {
+	serveErr := serve(conn, log, svc)
+
+	// Stop the service's background work and wait for it, whichever way the
+	// loop ended. A watched-series check or an automatic re-probe outlives the
+	// message that started it by design, so the message loop returning is not
+	// evidence that anything has stopped writing to the store; only this is.
+	// Exiting under it would leave the state directory mid-write on a device
+	// that is about to lose the process (docs/DEVICE-NOTES.md §10.4).
+	if svc != nil {
+		svc.Close()
+		log.Debug("background work stopped")
+	}
+
+	if serveErr != nil {
 		// Left open on purpose: an error exit is an abnormal end, and the next
 		// session should say so.
-		log.Error("serve failed", "err", err)
+		log.Error("serve failed", "err", serveErr)
 		os.Exit(1)
 	}
 	// A clean exit clears the marker; anything else — a crash, the OOM killer,
-	// a power cut — leaves it, and the next launch tells the user quietly.
+	// a power cut — leaves it, and the next launch tells the user quietly. The
+	// marker is cleared only after Close: it claims an orderly end, and that is
+	// not true while a re-probe is still running.
 	if err := session.Close(); err != nil {
 		log.Warn("could not clear the session marker", "err", err)
 	}
