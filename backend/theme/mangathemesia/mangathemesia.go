@@ -156,6 +156,14 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 	// carry it on their own. They are weighted to just reach the probe's
 	// confidence threshold together, and no single one of them is decisive.
 	add(p.Has(".listupd .bsx"), 20)
+	// Measured on a live home page 2026-09-16, after madara's fingerprint was
+	// found to score 43 on a real site of its own family. This one held up —
+	// a real home page scored 65 against a threshold of 60 — but five points
+	// is one skin variation away from failing, so two more signals that were
+	// really there were added. Both are this theme's own card internals, and
+	// neither appears on a page of any other theme we ship.
+	add(p.Has(".listupd .bs .bsx .bigor, .bsx .bigor"), 10)
+	add(p.Has(".bsx .imgseries, .bsx .ply, .bsx .rt .rating"), 10)
 	add(p.Has(".listupd .bsx .bigor .tt, .listupd .bsx .tt"), 15)
 	add(p.Has(".listupd .utao .uta .imgu"), 15)
 	add(p.Has(".bsx .limit .type, .bsx .limit"), 10)
