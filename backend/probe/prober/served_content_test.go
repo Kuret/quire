@@ -188,3 +188,66 @@ func servedPageWith(marker string) string {
 	b.WriteString(`</div><script src="` + marker + `"></script></body></html>`)
 	return b.String()
 }
+
+// When stage 4 recognises nothing, stage 3's gate warnings are noise that
+// misdirects.
+//
+// From a real complaint: a user was told "the first thing this site shows is a
+// sign-in form" about a page that had just handed Quire 158 series links. Two
+// password inputs in a WordPress nav triggered it, via the branch that fires
+// when no theme matched — which was true only because the madara fingerprint
+// was broken. The fingerprint is fixed separately; this pins the presentation,
+// because even with a correct fingerprint "we didn't recognise this site" is
+// the whole story and a login-wall note beside it points somewhere else.
+func TestUnrecognisedSiteCarriesNoGateWarnings(t *testing.T) {
+	body := `<!DOCTYPE html><html><head><title>Example</title></head><body>` +
+		`<nav><form><input type="text" name="user"><input type="password" name="pass">` +
+		`<input type="password" name="pass2"></form></nav>` +
+		`<main><p>A site of a shape no theme here knows, with plenty of content on it.</p></main>` +
+		`</body></html>`
+
+	res := run(t, map[string]themetest.Route{"GET /": {Body: body}}, &recordUI{})
+
+	if res.Verdict != theme.VerdictUnrecognised {
+		t.Fatalf("verdict = %q (%s), want unrecognised", res.Verdict, res.Detail)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("unrecognised verdict carried warnings that misdirect: %v", res.Warnings)
+	}
+	// The honest headline names what was tried, which is the actionable part.
+	if !strings.Contains(res.Detail, "compared it against") {
+		t.Errorf("detail %q does not name the themes that were tried", res.Detail)
+	}
+}
+
+// Warnings still reach the user when a theme *did* match, because then they
+// describe what their source will be like. Suppression is scoped to the case
+// where there is no source to describe.
+//
+// The marker used here is an age gate rather than the sign-in form, because a
+// password input on a page we read in full deliberately warns about nothing:
+// that branch needs a refusal status or a page nothing recognised. A login form
+// in a site's nav is not a wall, and saying so would be the same misdirection
+// in a different place.
+func TestRecognisedSiteKeepsItsGateWarnings(t *testing.T) {
+	routes := madaraRoutes()
+	home, err := os.ReadFile("testdata/home-madara.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withGate := strings.Replace(string(home), "</body>",
+		`<div class="gate"><p>Age verification required before reading.</p></div></body>`, 1)
+	routes["GET /"] = themetest.Route{Body: withGate}
+
+	res := run(t, routes, &recordUI{})
+
+	if res.Verdict != theme.VerdictOK {
+		t.Fatalf("verdict = %q (%s), want ok", res.Verdict, res.Detail)
+	}
+	if len(res.Warnings) == 0 {
+		t.Fatal("a recognised site lost the age-gate warning that describes what its source will be like")
+	}
+	if !strings.Contains(strings.ToLower(res.Warnings[0]), "age gate") {
+		t.Errorf("warning = %q, want the age gate", res.Warnings[0])
+	}
+}

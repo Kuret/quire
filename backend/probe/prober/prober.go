@@ -478,6 +478,7 @@ func (r *run) reachError(base *url.URL, err error) Result {
 func (r *run) stageFingerprint(ctx context.Context) (theme.Theme, Result, error) {
 	scores := r.fingerprint()
 	if len(scores) == 0 || scores[0].Score < r.p.threshold {
+		r.dropGateWarnings()
 		return nil, r.result(theme.VerdictUnrecognised, r.unrecognisedDetail()), nil
 	}
 
@@ -516,10 +517,31 @@ func (r *run) stageFingerprint(ctx context.Context) (theme.Theme, Result, error)
 	th, ok := r.p.reg.Lookup(winner.ThemeID)
 	if !ok {
 		// Only reachable if a theme scored and then vanished from the registry.
+		r.dropGateWarnings()
 		return nil, r.result(theme.VerdictUnrecognised, r.unrecognisedDetail()), nil
 	}
 	return th, Result{}, nil
 }
+
+// dropGateWarnings discards stage 3's non-blocking findings when stage 4
+// recognised nothing.
+//
+// Added 2026-09-16, from a real complaint. A site was told "the first thing
+// this site shows is a sign-in form" — on a page that had just handed Quire 158
+// series links. The warning came from two password inputs in a WordPress nav,
+// and it fired because its second branch is gated on `noThemeMatch()`, which
+// was true only because the fingerprint was broken. The branch was not itself
+// wrong; it was downstream of a different bug.
+//
+// But the presentation was wrong regardless of that bug. When no theme matched,
+// "we didn't recognise this site, here is what we tried" is the whole story,
+// and a login-wall warning beside it is noise that points the user at a
+// question that is not the one they need to answer. Warnings describe what a
+// *working* source will be like; there is no source here to describe.
+//
+// This is a presentation rule, not a detection change: nothing in stage 3 is
+// relaxed, and a challenge is still terminal whatever stage 4 would have said.
+func (r *run) dropGateWarnings() { r.warnings = nil }
 
 // fingerprint runs the stage 4 fan-out once and memoises it. Stage 3's generic
 // JS-gate signal needs the same answer, and PLAN §7.5's own reason for caching
