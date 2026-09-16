@@ -42,6 +42,13 @@ Rectangle {
     property string currentSourceName: ""
     property string currentSeriesId: ""
 
+    // PLAN §12.2's at-a-glance summary, composed in the backend and shown as
+    // it arrived: "short" on the entry point, "phrase" on the watched screen.
+    // Empty means there is nothing to report, and nothing is what is shown —
+    // an indicator that is always lit teaches people to ignore it.
+    property string watchShort: ""
+    property string watchPhrase: ""
+
     // Which screen the open series was reached from, so Back goes where the
     // user came from rather than always to the grid they may never have seen.
     property string seriesCameFrom: "browse"
@@ -164,7 +171,7 @@ Rectangle {
             return
 
         case Msg.WatchList:
-            root.reconcileWatched(msg ? msg.watched : [])
+            root.reconcileWatched(msg)
             return
 
         case Msg.WatchUpdate:
@@ -276,8 +283,11 @@ Rectangle {
     // words (PLAN §2). The model bookkeeping is in Watch.js, which is where it
     // can be driven by the offscreen harness.
 
-    function reconcileWatched(list) {
-        WatchJs.reconcile(watchedModel, list)
+    function reconcileWatched(msg) {
+        WatchJs.reconcile(watchedModel, msg ? msg.watched : [])
+        // Written only where the string differs, so a check round that ends
+        // with the same summary it began with repaints nothing.
+        WatchJs.applySummary(root, msg)
         root.refreshWatchedFlag()
     }
 
@@ -489,6 +499,7 @@ Rectangle {
             model: sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.screen = "add" }
             onWatchingRequested: root.screen = "watching"
+            watchingLabel: root.watchShort
             onOpenRequested: root.openSource(sourceId, name)
             notice: root.notice
             onNoticeDismissed: root.notice = ""
@@ -517,6 +528,7 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "watching"
             model: watchedModel
+            phrase: root.watchPhrase
             onCheckRequested: root.send(Msg.CheckWatched, {})
             onUnwatchRequested: root.send(Msg.UnwatchSeries,
                 {"sourceId": sourceId, "seriesId": seriesId})
