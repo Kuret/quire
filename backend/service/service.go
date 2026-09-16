@@ -391,6 +391,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.enqueueDownload(ctx, out, req)
 
+	case appload.MessageEnqueueDownloads:
+		var req enqueueManyRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.enqueueMany(ctx, out, req)
+
 	case robotsMessage:
 		return s.handleRobots(out, payload)
 

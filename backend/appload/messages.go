@@ -109,6 +109,38 @@ const (
 	// calls this not optional.
 	MessageCancelDownload MessageType = 42
 
+	// MessageEnqueueDownloads is UI→BE, JSON
+	// {sourceId, seriesId, grouping, chapterIds, confirmed}: one selection of
+	// rows, queued together.
+	//
+	// It is its own message rather than a loop of MessageEnqueueDownload on the
+	// frontend, because the two things that make a selection different from a
+	// run of taps are both *answers*: one question for the whole selection, and
+	// one reply saying what fitted on the queue. Sent as a loop, a selection of
+	// thirty against a queue of sixteen would answer fourteen times with the
+	// same refusal.
+	MessageEnqueueDownloads MessageType = 43
+
+	// MessageQueueConfirm is BE→UI, JSON {message, count}: the question asked
+	// before a selection is queued.
+	//
+	// A selection is the case PLAN §7.1's confirmation exists for — "a tap that
+	// quietly queues ten chapters and a few hundred megabytes" — and the
+	// sentence is the backend's (PLAN §2). A single row still queues without a
+	// question: there is nothing to warn about, and a step that always says
+	// "download this one?" is a step the user learns to tap through.
+	MessageQueueConfirm MessageType = 44
+
+	// MessageQueueResult is BE→UI, JSON {queued, skipped, message}: what the
+	// queue actually took.
+	//
+	// The rows that fitted already say "Queued." for themselves, so `message`
+	// is empty when everything fitted and carries the shortfall when it did
+	// not. The queue is sixteen deep on purpose (a deeper one is a way to fill
+	// /home while nobody is looking), so a long selection meeting that ceiling
+	// is ordinary, and it is told once.
+	MessageQueueResult MessageType = 45
+
 	// MessageOpenInReader is UI→BE, JSON {documentUuid}.
 	MessageOpenInReader MessageType = 50
 
@@ -234,6 +266,9 @@ var messageNames = map[MessageType]string{
 	MessageEnqueueDownload:       "EnqueueDownload",
 	MessageDownloadProgress:      "DownloadProgress",
 	MessageCancelDownload:        "CancelDownload",
+	MessageEnqueueDownloads:      "EnqueueDownloads",
+	MessageQueueConfirm:          "QueueConfirm",
+	MessageQueueResult:           "QueueResult",
 	MessageOpenInReader:          "OpenInReader",
 	MessageDeleteDownload:        "DeleteDownload",
 	MessageDeleteConfirm:         "DeleteConfirm",
