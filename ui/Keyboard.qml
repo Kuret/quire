@@ -167,6 +167,37 @@ Item {
                 }
             }
 
+            // Whole suffixes, in the URL layout only. Eight taps each on a
+            // panel that redraws between them, and there is no ambiguity about
+            // what an address ends in.
+            Repeater {
+                model: keyboard.layout === "url" ? [".com", ".org"] : []
+
+                delegate: Rectangle {
+                    objectName: "keyboardSuffix"
+                    property string suffix: modelData
+                    width: 170
+                    height: 84
+                    color: suffixArea.pressed ? Style.pressed : Style.paper
+                    border.width: 1
+                    border.color: Style.rule
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: parent.suffix
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: suffixArea
+                        anchors.fill: parent
+                        onClicked: keyboard.keyTyped(parent.suffix)
+                    }
+                }
+            }
+
             Rectangle {
                 id: backKey
                 objectName: "keyboardBackspace"
