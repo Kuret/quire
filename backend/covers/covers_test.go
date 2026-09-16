@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rickl/quire/backend/covers"
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/internal/nonet"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/madara"
@@ -58,7 +59,7 @@ func TestCoverIsDownscaledOnceAndReused(t *testing.T) {
 	})
 	c := covers.New(t.TempDir(), f)
 
-	path, err := c.Path(context.Background(), source(), coverURL)
+	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestCoverIsDownscaledOnceAndReused(t *testing.T) {
 	// A second request must not fetch again: the fixture fetcher records every
 	// call, so this is checkable rather than a matter of faith.
 	before := len(f.Calls())
-	again, err := c.Path(context.Background(), source(), coverURL)
+	again, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestForgetDropsOnlyThatSource(t *testing.T) {
 	})
 	dir := t.TempDir()
 	c := covers.New(dir, f)
-	if _, err := c.Path(context.Background(), source(), coverURL); err != nil {
+	if _, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{}); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(dir, "another-source", "keep.jpg")
@@ -141,7 +142,7 @@ func TestOddSourceIDStaysInsideTheCache(t *testing.T) {
 
 	src := source()
 	src.ID = "../../escape"
-	path, err := c.Path(context.Background(), src, coverURL)
+	path, err := c.Path(context.Background(), src, coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,5 +152,54 @@ func TestOddSourceIDStaysInsideTheCache(t *testing.T) {
 	}
 	if len(rel) >= 2 && rel[:2] == ".." {
 		t.Errorf("cover written outside the cache: %s", path)
+	}
+}
+
+// PLAN §7.6, measured on comick's CDN on 2026-09-16: 403 with no `Referer`,
+// 200 `image/webp` with one. The cache cannot know which page a cover URL came
+// from, so the value arrives as a parameter and has to reach the request
+// unchanged.
+func TestCoverReferrerReachesTheRequest(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: bigPNG(t)},
+	})
+	c := covers.New(t.TempDir(), f)
+
+	from, err := fetch.PageReferrer("https://example.invalid/comic/the-lantern-keeper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Path(context.Background(), source(), coverURL, from); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d requests, want 1", len(calls))
+	}
+	if calls[0].Referrer.String() != from.String() {
+		t.Errorf("the cover was fetched with referrer %q, want %q", calls[0].Referrer.String(), from.String())
+	}
+}
+
+// The other half of the same rule, and the reason mangadex is untouched: a
+// source whose cover host asks for nothing gets **no header at all**, asserted
+// by absence rather than by an empty string.
+func TestNoCoverReferrerSendsNoHeader(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: bigPNG(t)},
+	})
+	c := covers.New(t.TempDir(), f)
+
+	if _, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d requests, want 1", len(calls))
+	}
+	if !calls[0].Referrer.IsZero() {
+		t.Errorf("a cover with no page behind it was fetched with referrer %q", calls[0].Referrer.String())
 	}
 }

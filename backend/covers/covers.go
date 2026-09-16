@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/theme"
 )
@@ -62,7 +63,21 @@ func (c *Cache) Dir() string { return c.dir }
 // robots-checked and SSRF-guarded like every other request (PLAN §7.4). A cover
 // on an image CDN needs that CDN in the source's allowedHosts, which is exactly
 // the check we want rather than a hole to route around.
-func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string) (string, error) {
+//
+// # from, and why it is a parameter rather than something derived here
+//
+// Some cover hosts answer 403 to a request that does not say which of the
+// site's pages the URL came from — measured on comick's CDN on 2026-09-16:
+// 403 with no `Referer`, 200 `image/webp` with one. PLAN §7.6 permits a
+// truthful one and forbids any other kind, so this cache cannot make one up:
+// it has a URL and nothing else, and the page that URL was extracted from is
+// known only to the theme that parsed it. It therefore travels here as a
+// value, from theme.SeriesStub.CoverReferrer via theme.CoverRefererFrom.
+//
+// The zero fetch.Referrer sends no header, which is the right answer for every
+// host that does not ask — mangadex's among them — and the right answer when
+// we do not know.
+func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string, from fetch.Referrer) (string, error) {
 	if rawurl == "" {
 		return "", fmt.Errorf("covers: no cover URL")
 	}
@@ -105,7 +120,7 @@ func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string) (str
 	if err != nil {
 		return "", fmt.Errorf("covers: %w", err)
 	}
-	resp, err := c.f.Get(ctx, pol, rawurl)
+	resp, err := c.f.GetFrom(ctx, pol, rawurl, from)
 	if err != nil {
 		return "", fmt.Errorf("covers: %w", err)
 	}
