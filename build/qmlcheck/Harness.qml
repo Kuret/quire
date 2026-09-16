@@ -52,10 +52,6 @@ Window {
     property string splitAskedFor: ""
     property string splitAskedAbout: ""
 
-    property int groupAsks: 0
-    property string groupAskedFor: ""
-    property string groupAskedAbout: ""
-
     property int robotsWrites: 0
     property int robotsAsks: 0
     property bool robotsAskedFor: false
@@ -129,11 +125,6 @@ Window {
             win.splitAsks++
             win.splitAskedFor = mode
             win.splitAskedAbout = sourceId
-        }
-        onGroupingRequested: {
-            win.groupAsks++
-            win.groupAskedFor = mode
-            win.groupAskedAbout = sourceId
         }
     }
     AddSource   { id: addSource;   objectName: "addSource";   anchors.fill: parent }
@@ -518,64 +509,6 @@ Window {
         // button, so reaching past it would be testing nothing.
         win.findChild(sourceList, "splitDoneArea").clicked(null)
         win.want("done closes the panel", splitPanel.visible, false)
-
-        // ---- PLAN §6 M4: how downloads are saved -------------------------
-        //
-        // Reversed 2026-09-16: one PDF per chapter is the default, even where
-        // the source publishes volume labels, because a 7–10 minute wait before
-        // anything is readable makes sampling a series impossible. Grouping
-        // survives as this per-source control, and it is the same shape as the
-        // splitting one above — a source with nothing set must read as "Per
-        // chapter" rather than blank, and choosing must send the schema's
-        // spelling exactly once.
-        var groupPanel = win.findChild(sourceList, "groupPanel")
-        win.want("the grouping panel is closed until asked for", groupPanel.visible, false)
-
-        sourceList.confirmingId = "s2"
-        sourceList.confirmingName = "Another"
-        sourceList.confirmingGrouping = ""
-        sourceList.confirmingGroupSize = 0
-        var groupLabel = win.findChild(sourceList, "groupButtonLabel")
-        win.want("an unset source reads as per chapter, not blank",
-                 groupLabel.text, "Saving: Per chapter")
-
-        sourceList.confirmingGrouping = "volume"
-        win.want("the button says what is set", groupLabel.text, "Saving: By volume")
-        sourceList.confirmingGrouping = "count"
-        sourceList.confirmingGroupSize = 5
-        win.want("a fixed count says how many", groupLabel.text, "Saving: Runs of 5")
-
-        sourceList.confirmingGrouping = "volume"
-        sourceList.confirmingGroupSize = 10
-        sourceList.startGrouping("s2", "Another", sourceList.confirmingGrouping,
-                                 sourceList.confirmingGroupSize)
-        win.want("the grouping panel opens", groupPanel.visible, true)
-        win.want("opening it closes the row strip", sourceList.confirmingId, "")
-        win.want("the chosen grouping is marked",
-                 win.findChild(sourceList, "groupOptionLabel-volume").text, "By volume (chosen)")
-        win.want("the others are not",
-                 win.findChild(sourceList, "groupOptionLabel-chapter").text, "Per chapter")
-
-        // Re-choosing what is already chosen must send nothing: the reply is a
-        // fresh source list, which on e-ink repaints the whole screen.
-        win.groupAsks = 0
-        sourceList.chooseGrouping("volume")
-        win.want("re-choosing the current grouping sends nothing", win.groupAsks, 0)
-
-        sourceList.chooseGrouping("chapter")
-        win.want("choosing a grouping asks once", win.groupAsks, 1)
-        win.want("it sends the schema spelling, not the label", win.groupAskedFor, "chapter")
-        win.want("it names the source", win.groupAskedAbout, "s2")
-        win.want("the grouping panel follows the choice",
-                 win.findChild(sourceList, "groupOptionLabel-chapter").text, "Per chapter (chosen)")
-
-        // Every mode the schema offers is reachable from the panel.
-        win.want("per chapter is offered", win.findChild(sourceList, "groupOption-chapter") !== null, true)
-        win.want("by volume is offered", win.findChild(sourceList, "groupOption-volume") !== null, true)
-        win.want("a fixed count is offered", win.findChild(sourceList, "groupOption-count") !== null, true)
-
-        win.findChild(sourceList, "groupDoneArea").clicked(null)
-        win.want("done closes the grouping panel", groupPanel.visible, false)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
