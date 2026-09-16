@@ -35,6 +35,10 @@ Item {
     // check round and the page the user is on stays put.
     onTotalPagesChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
 
+    // PLAN §12.2's "phrase" summary, composed in the backend and shown as it
+    // arrived. Empty means nothing to report and nothing is shown.
+    property string phrase: ""
+
     signal checkRequested()
     signal unwatchRequested(string sourceId, string seriesId)
     signal openRequested(string sourceId, string sourceName, string seriesId, string title)
@@ -65,21 +69,40 @@ Item {
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: Style.rowHeight
 
-        Text {
+        Column {
             anchors {
                 left: parent.left; leftMargin: Style.margin
                 right: checkButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
-            elide: Text.ElideRight
-            wrapMode: Text.WordWrap
-            maximumLineCount: 2
+            spacing: 4
+
+            // The backend's sentence, drawn as it arrived. When there is
+            // nothing to report the line is not there at all, rather than
+            // saying so at length.
+            Text {
+                objectName: "watchPhrase"
+                width: parent.width
+                elide: Text.ElideRight
+                text: screen.phrase
+                font.pointSize: Style.bodySize
+                color: Style.ink
+                visible: screen.phrase.length > 0
+                height: visible ? implicitHeight : 0
+            }
+
             // PLAN §12.2: never on a timer, never in the background. Saying so
             // is the difference between "Quire is not watching" and "Quire
             // looks when you open it", which is the actual behaviour.
-            text: "Checked when you open Quire, and whenever you ask."
-            font.pointSize: Style.smallSize
-            color: Style.muted
+            Text {
+                width: parent.width
+                elide: Text.ElideRight
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                text: "Checked when you open Quire, and whenever you ask."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
         }
 
         Rectangle {
