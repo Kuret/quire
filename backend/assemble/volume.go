@@ -37,8 +37,9 @@ type Chapter struct {
 // original reasoning weighed clutter and reading position and missed sampling:
 // the first thing anyone does with an unfamiliar series is read a few pages to
 // decide whether they want the rest, and a 7–10 minute wait before *anything*
-// is readable makes that impossible. Grouping survives as a per-source setting
-// (theme.Source.Grouping), so a Volume here may hold one chapter or twenty.
+// is readable makes that impossible. Grouping survives as a choice made at
+// download time (see GroupingChapter and GroupingVolume), so a Volume here may
+// hold one chapter or twenty.
 type Volume struct {
 	// Series is the series title; it names the library folder in M5.
 	Series string
@@ -54,9 +55,34 @@ type Volume struct {
 	Chapters []Chapter
 }
 
-// DefaultChaptersPerVolume is the fallback grouping size for sources with no
-// volume structure, per PLAN §6 M4. It applies only when the user has asked
-// for grouping at all; the default is one chapter per document.
+// The groupings a download request can ask for (PLAN §6 M4, revised
+// 2026-09-16). They live here rather than on a source because the question they
+// answer — "am I about to be without a connection?" — is situational, not a
+// property of a website. There is no third mode: fixed runs of N ignoring the
+// labels only ever applied to sources with no labels, which are exactly the
+// ones that now offer no volume view at all.
+const (
+	// GroupingChapter is one PDF per chapter. It is the default, and it is
+	// always available whatever the source publishes.
+	GroupingChapter = "chapter"
+
+	// GroupingVolume groups on the source's own volume label, and is offered
+	// only when the source publishes real labels and the reading order is
+	// known.
+	GroupingVolume = "volume"
+)
+
+// GroupingValues are the accepted spellings, in the order the UI offers them.
+// Empty is also accepted on the wire and means GroupingChapter.
+var GroupingValues = []string{GroupingChapter, GroupingVolume}
+
+// DefaultChaptersPerVolume is the run length GroupIntoVolumes falls back to for
+// the stretch of a series the source has not labelled.
+//
+// It is not a grouping in its own right. A volume view is offered only for a
+// source that publishes labels, but labels usually appear only once a print
+// edition exists, so the most recent chapters of a labelled series routinely
+// carry none — this is what those become.
 const DefaultChaptersPerVolume = 10
 
 // GroupIntoVolumes splits chapters, in the order given, into volumes.
