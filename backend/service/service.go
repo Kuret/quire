@@ -118,6 +118,13 @@ type Service struct {
 	coverBatch  context.Context
 	coverCancel context.CancelFunc
 
+	// coverRefs remembers, per source and cover URL, the page that URL was
+	// parsed out of — PLAN §7.6's truthful `Referer`, for the hosts that answer
+	// 403 without one. See rememberCoverReferrer for why it is remembered here
+	// rather than asked for at fetch time.
+	coverRefMu sync.Mutex
+	coverRefs  map[string]string
+
 	// dlQueue serialises downloads; see enqueueDownload for why there is
 	// exactly one worker behind it.
 	dlOnce  sync.Once
@@ -711,6 +718,7 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 
 	rows := make([]seriesRow, 0, len(res.Items))
 	for _, st := range res.Items {
+		s.rememberCoverReferrer(sourceID, st.CoverURL, st.CoverReferrer)
 		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL})
 	}
 	// An *empty listing* is evidence the site changed; an empty search is not.
@@ -743,6 +751,7 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		_ = s.sendError(out, "series_failed", plain(err))
 		return
 	}
+	s.rememberCoverReferrer(sourceID, series.CoverURL, series.CoverReferrer)
 	chapters, err := th.Chapters(ctx, src, seriesID)
 	if err != nil {
 		_ = s.sendError(out, "chapters_failed", plain(err))

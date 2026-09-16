@@ -48,3 +48,38 @@ func TestCoverBatchWithoutACacheDoesNothing(t *testing.T) {
 		t.Fatal("a service with no cover cache started a batch")
 	}
 }
+
+// PLAN §7.6: the `Referer` a cover host asks for must name the page the URL
+// was actually extracted from. The URL round-trips through the frontend, so
+// the page it came from is remembered here when the theme hands it over and
+// looked up again when the request comes back. These pin that it is a lookup
+// and not a reconstruction.
+func TestCoverReferrerIsRememberedPerSourceAndURL(t *testing.T) {
+	s := &Service{}
+	const url = "https://cdn.example.invalid/a.webp"
+	s.rememberCoverReferrer("comick", url, "https://example.invalid/comic/lantern")
+
+	if got := s.coverReferrerFor("comick", url); got != "https://example.invalid/comic/lantern" {
+		t.Errorf("referrer = %q, want the page it was recorded against", got)
+	}
+	// Two sources can run the same software on two hosts, and one's referrer is
+	// not a truthful one for the other.
+	if got := s.coverReferrerFor("other", url); got != "" {
+		t.Errorf("a referrer recorded for one source leaked to another: %q", got)
+	}
+	// A URL with no note yields "", and therefore no header, which §7.6 says is
+	// the right answer when we do not know.
+	if got := s.coverReferrerFor("comick", "https://cdn.example.invalid/b.webp"); got != "" {
+		t.Errorf("an unknown cover URL invented a referrer: %q", got)
+	}
+}
+
+// A theme with no page to name — mangadex, whose cover host asks for nothing —
+// records nothing, so nothing is sent.
+func TestNoReferrerIsRecordedForAThemeThatNamesNone(t *testing.T) {
+	s := &Service{}
+	s.rememberCoverReferrer("mangadex", "https://uploads.example.invalid/a.jpg", "")
+	if got := s.coverReferrerFor("mangadex", "https://uploads.example.invalid/a.jpg"); got != "" {
+		t.Errorf("referrer = %q, want none", got)
+	}
+}
