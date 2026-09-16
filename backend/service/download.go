@@ -74,6 +74,19 @@ type downloadProgress struct {
 	PagesTotal  int   `json:"pagesTotal,omitempty"`
 	BytesStored int64 `json:"bytesStored,omitempty"`
 
+	// PagesSplit and PagesFromSplit report vertical-scroll strip splitting
+	// (PLAN §12.3): how many source images were cut up, and how many pages they
+	// became. They are sent on the done phase, and only when splitting actually
+	// happened — omitempty, so an ordinary manga download carries neither.
+	//
+	// This is the user's way of checking the guarantee we made them. The worry
+	// that prompted the feature was "I'd hate for an actual manga to be
+	// recognised as a webtoon and get weirdly split", and splitting that happens
+	// silently makes that worry unanswerable: the only way to find out would be
+	// to notice the reader looks wrong and guess at the cause.
+	PagesSplit     int `json:"pagesSplit,omitempty"`
+	PagesFromSplit int `json:"pagesFromSplit,omitempty"`
+
 	// DocumentUUID is xochitl's handle for the finished document, on the done
 	// phase. It is what M6 opens the stock reader with.
 	DocumentUUID string   `json:"documentUuid,omitempty"`
@@ -568,6 +581,10 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 	} else {
 		p.Message = fmt.Sprintf("%s is in %s.", lastName, where)
 	}
+	if line := splitSentence(stats); line != "" {
+		p.PagesSplit, p.PagesFromSplit = stats.PagesSplit, stats.PagesFromSplit
+		p.Message += " " + line
+	}
 	_ = send(out, appload.MessageDownloadProgress, p)
 }
 
@@ -987,6 +1004,30 @@ func chapterNumber(c theme.Chapter) string {
 		return ""
 	}
 	return strconv.FormatFloat(c.Number, 'f', -1, 64)
+}
+
+// splitSentence describes strip splitting in plain language, or returns "" when
+// nothing was split.
+//
+// The empty case is the important half. A line that appears on every download
+// is a line nobody reads, so an ordinary manga volume says nothing at all — the
+// same rule as PLAN §12.2's empty summary. When it does appear it is the user's
+// evidence that Quire cut something up, which is the only way they can check
+// the promise that ordinary pages are left alone.
+func splitSentence(stats download.Stats) string {
+	if stats.PagesSplit <= 0 || stats.PagesFromSplit <= 0 {
+		return ""
+	}
+	images := "tall images"
+	if stats.PagesSplit == 1 {
+		images = "tall image"
+	}
+	pages := "pages"
+	if stats.PagesFromSplit == 1 {
+		pages = "page"
+	}
+	return fmt.Sprintf("Quire split %d %s into %d %s.",
+		stats.PagesSplit, images, stats.PagesFromSplit, pages)
 }
 
 var unsafeSegment = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
