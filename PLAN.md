@@ -680,15 +680,23 @@ message naming what was tried.
   unnecessary for a single chapter and should not appear (a prompt that always
   says the same thing is one people learn to tap through); and **existing
   volume PDFs already in a user's library must keep resolving for "Read"** —
-  changing the default must not orphan what is already downloaded. Quire maps chapters → (volume PDF, page
-  offset). Where a source has no volume structure, group by a configurable
-  chapter count (default 10).
-  **Grouping precedence (settled after §7.2's ordering contract):**
-  1. **`Chapter.Volume`**, the source's own label, whenever it has one. This is
-     what the plan meant by "volume"; runs-of-N is the *fallback* it was always
-     described as, not the primary mechanism.
-  2. Runs of N (default 10) only when the source publishes no volume labels.
-  3. **A hard byte budget, which overrides both.** Measured on the device
+  changing the default must not orphan what is already downloaded.
+
+  Quire maps chapters → (PDF, page offset) whatever the grouping. Per chapter
+  the offset is 0, which must stay a *real* recorded offset rather than an
+  assumed one — §6 M6's "Read" resolves through it.
+
+  **Grouping, as it now stands.** A per-source `grouping` setting, default
+  `chapter`:
+  1. **`chapter` (default)** — one PDF per chapter, **even when the source
+     publishes volume labels**. Labels are information, not an instruction.
+  2. `volume` — the source's own labels, falling back to runs of `groupSize`
+     where a source has none. This is the pre-2026-09-16 behaviour, kept for
+     anyone who wants it.
+  3. `count` — fixed runs of `groupSize` (default 10), labels ignored.
+  **An unknowable reading order overrides all three** (§7.2's contract): a list
+  we could not order is never assembled into a multi-chapter PDF.
+  4. **A hard byte budget, which overrides everything above.** Measured on the device
      2026-09-15: **xochitl's `/upload` rejects any multipart body of
      100,000,000 bytes or more** — a decimal 100 MB cap on the *body*, not the
      PDF. Worse, past that it frequently **resets the connection mid-upload**
