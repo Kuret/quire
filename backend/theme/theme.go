@@ -192,6 +192,38 @@ func PageRefererFor(th Theme, s *Source, chapterID string) (fetch.Referrer, erro
 	return ref, nil
 }
 
+// CoverRefererFrom resolves the Referer to send with a cover image.
+//
+// It is PageRefererFor one layer up, for the other thing an image host refuses
+// without a `Referer`: the cover thumbnails on the series grid. The difference
+// is where the value comes from. A chapter's page referrer is a pure function
+// of the chapter ID, so it can be asked for; a cover has no such handle — the
+// same URL may be reached from a listing or from a series page — so the theme
+// **carries it on the data**, in SeriesStub.CoverReferrer and
+// Series.CoverReferrer, naming the page that response was parsed out of.
+// Reconstructing it at fetch time would be the guessing PLAN §7.6 forbids.
+//
+// The contract is the same as PageReferrer's and is not optional: raw must be
+// a page this theme actually fetched while producing that cover URL. A theme
+// with nothing to name leaves the field empty, which yields the zero
+// fetch.Referrer and therefore **no header at all** — the correct answer when
+// we do not know, and the reason mangadex, whose cover host asks for nothing,
+// is untouched by any of this.
+//
+// A non-empty value fetch.PageReferrer refuses is a bug in the theme rather
+// than a reason to invent something: the error comes back so the caller can
+// say so, and the Referrer handed back is the zero one, which sends nothing.
+func CoverRefererFrom(raw string) (fetch.Referrer, error) {
+	if raw == "" {
+		return fetch.Referrer{}, nil
+	}
+	ref, err := fetch.PageReferrer(raw)
+	if err != nil {
+		return fetch.Referrer{}, err
+	}
+	return ref, nil
+}
+
 // Fetcher is the slice of fetch.Client a theme uses. Themes depend on this
 // interface rather than the concrete client so tests can serve committed
 // fixtures without a network, a server or a loopback exemption.
@@ -417,14 +449,23 @@ type SeriesStub struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	CoverURL string `json:"coverUrl,omitempty"`
+
+	// CoverReferrer is the absolute URL of the page CoverURL was extracted
+	// from, or "" when the theme has none to name. See CoverRefererFrom.
+	CoverReferrer string `json:"coverReferrer,omitempty"`
 }
 
 // Series is a full series page.
 type Series struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	AltTitles   []string `json:"altTitles,omitempty"`
-	CoverURL    string   `json:"coverUrl,omitempty"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	AltTitles []string `json:"altTitles,omitempty"`
+	CoverURL  string   `json:"coverUrl,omitempty"`
+
+	// CoverReferrer is the absolute URL of the page CoverURL was extracted
+	// from, or "" when the theme has none to name. See CoverRefererFrom.
+	CoverReferrer string `json:"coverReferrer,omitempty"`
+
 	Description string   `json:"description,omitempty"`
 	Authors     []string `json:"authors,omitempty"`
 	Artists     []string `json:"artists,omitempty"`
