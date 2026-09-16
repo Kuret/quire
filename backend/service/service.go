@@ -137,9 +137,15 @@ type Service struct {
 	// dlMu guards the cancellation registry. dlActive holds the cancel func of
 	// the download currently running; dlCancelled remembers a Stop that
 	// arrived while the request was still queued.
+	//
+	// dlChapters is the set of chapter ids the running download is writing page
+	// files for. Deleting a download reclaims those files (PLAN §12.4), and the
+	// one thing it must not do is take them out from under a writer — see
+	// claimChapters.
 	dlMu        sync.Mutex
 	dlActive    map[downloadKey]context.CancelFunc
 	dlCancelled map[downloadKey]bool
+	dlChapters  map[string]int
 
 	// mu guards the single in-flight probe. There is deliberately only one:
 	// the wizard is a single screen, and a second probe started behind it would

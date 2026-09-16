@@ -226,6 +226,53 @@ func (s *Service) beginDownload(ctx context.Context, key downloadKey) (context.C
 	}
 }
 
+// claimChapters marks the chapters a running download is writing, and returns
+// the release.
+//
+// Only a *running* download claims. A queued one has written nothing yet, so a
+// delete that removes its pages first costs it a refetch and nothing else —
+// resume simply finds them absent (PLAN §6 M4). A running one is the case that
+// matters: removing the directory underneath it leaves a writer holding files
+// that are no longer anywhere, and a volume assembled from what survived.
+//
+// Counted rather than flagged, because the same chapter can be claimed by the
+// volume that contains it and by itself in the same session.
+func (s *Service) claimChapters(chapters []download.Chapter) func() {
+	ids := make([]string, 0, len(chapters))
+	s.dlMu.Lock()
+	if s.dlChapters == nil {
+		s.dlChapters = map[string]int{}
+	}
+	for _, ch := range chapters {
+		if ch.ID == "" {
+			continue
+		}
+		s.dlChapters[ch.ID]++
+		ids = append(ids, ch.ID)
+	}
+	s.dlMu.Unlock()
+
+	return func() {
+		s.dlMu.Lock()
+		defer s.dlMu.Unlock()
+		for _, id := range ids {
+			if s.dlChapters[id] <= 1 {
+				delete(s.dlChapters, id)
+				continue
+			}
+			s.dlChapters[id]--
+		}
+	}
+}
+
+// chapterIsDownloading reports whether a download is writing this chapter's
+// pages right now.
+func (s *Service) chapterIsDownloading(chapterID string) bool {
+	s.dlMu.Lock()
+	defer s.dlMu.Unlock()
+	return s.dlChapters[chapterID] > 0
+}
+
 // enqueueDownload accepts a request and returns immediately.
 //
 // Downloads run one at a time. Two reasons, and they are independent: the
@@ -527,6 +574,10 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 	}
 
 	dir := filepath.Join(s.downloadDir, safeSegment(src.ID), safeSegment(req.SeriesID))
+
+	// Held for the rest of the run, so a delete landing mid-download reclaims
+	// the pages of other chapters and leaves these alone.
+	defer s.claimChapters(chs)()
 
 	// The pages already on disk are left exactly where they are. Resume works
 	// by skipping files that exist (PLAN §6 M4), so cancelling at page 300 of
