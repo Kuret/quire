@@ -20,6 +20,20 @@ import (
 // the reader can do about it. Anything else keeps its number but is wrapped in
 // a sentence rather than presented naked.
 //
+// CORRECTION 2026-09-16 — **every sentence states what was observed, never a
+// cause that was inferred.** The first version of this file said 444 "almost
+// always means it is rate limiting", on the strength of what 444 usually is in
+// the wild. It was measured the same day: comick.art answers 444 to any search
+// query shorter than three characters and 200 to longer ones, deterministically
+// and with no rate limit anywhere in it. A user followed our advice, waited
+// several minutes, retried and failed again — a confident false explanation is
+// worse than the bare code it replaced, because it sends someone off to do
+// something useless. So 429, which is the server *saying* "too many requests",
+// names rate limiting; 444, which is the server saying nothing at all, does
+// not. This is PLAN §7.5's rule about challenge markers one layer down: the
+// observation is the fact, the cause is the inference, and only the first may
+// be asserted.
+//
 // Nothing here retries. PLAN §7.4's client already honours Retry-After and
 // backs off on 429/5xx; a probe that silently retried a rate limit would make
 // the rate limit worse. Telling the user to come back in a few minutes leaves
@@ -37,19 +51,29 @@ func StatusSentence(subject string, code int) string {
 		subject = "the site"
 	}
 	switch code {
-	case 429, 444:
-		// 444 is nginx closing the connection without answering, which in the
-		// wild is a rate limit or a cheap bot filter almost every time.
-		return subject + " is refusing requests for now, which almost always means it is rate limiting Quire; waiting a few minutes and trying again usually works"
+	case 429:
+		// The only case where rate limiting is a *fact*: 429 is the server
+		// saying "too many requests" in so many words.
+		return subject + " says Quire is asking too often; waiting a few minutes and trying again usually works"
+	case 444:
+		// 444 is nginx closing the connection without sending a response, and
+		// that is the whole of what it tells us. It does not say why. A rate
+		// limit is one cause; a filter on the request, a rule about the path,
+		// or a query the site won't accept are others, and a user who was told
+		// "rate limiting" waited several minutes for nothing.
+		return subject + " closed the connection without answering, which can mean anything from a busy moment to a request it won't accept; trying again later is worth one attempt, but if it keeps happening the site is refusing this request rather than delaying it"
 	case 403:
 		// Not a challenge — those are caught earlier. This is a plain refusal
 		// of this request, and saying more would assert what we did not see.
-		return subject + " refused this request; if the page opens in a browser, it is turning Quire away specifically, and there is nothing Quire can change about that"
+		return subject + " refused this request; if the page opens in a browser, it is refusing Quire's request in particular, and there is nothing Quire can change about that"
 	case 502, 503, 504:
-		return subject + " is having trouble at its end right now; it is worth trying again later"
+		// Observed: these three are the server's own statement that it could
+		// not serve the request, so "later" is advice, not a diagnosis.
+		return subject + " answered that it couldn't serve the request just now; trying again later is worth it"
 	case 404:
-		// This one points at us. Saying so is what makes it reportable.
-		return "the address Quire asked " + subject + " for isn't there, which is more likely a problem with Quire's theme for this site than with the site itself"
+		// Observed: the address is not there. "Which side is at fault" is the
+		// inference, so it is offered as a possibility, not stated.
+		return "the address Quire asked " + subject + " for isn't there; that may mean the site has moved it, or that Quire's theme for this site is out of date"
 	}
 	return fmt.Sprintf("%s answered with HTTP %d, which Quire couldn't use", subject, code)
 }

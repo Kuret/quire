@@ -24,17 +24,15 @@ func TestStatusSentenceIsActionable(t *testing.T) {
 		// want are fragments the sentence must contain, lowercased.
 		want []string
 	}{
-		{"too many requests", 429, []string{"rate limiting", "few minutes", "trying again"}},
+		{"too many requests", 429, []string{"asking too often", "few minutes", "trying again"}},
 		// The specific hole: Go does not name 444, so before this it was a
 		// bare number and nothing else.
-		{"nginx no response", 444, []string{"rate limiting", "few minutes", "trying again"}},
+		{"nginx no response", 444, []string{"closed the connection without answering"}},
 		{"forbidden", 403, []string{"refused this request"}},
-		{"bad gateway", 502, []string{"trouble", "later"}},
-		{"service unavailable", 503, []string{"trouble", "later"}},
-		{"gateway timeout", 504, []string{"trouble", "later"}},
-		// A 404 on a path one of our themes expected points at us, not at the
-		// site, and saying so is what makes it reportable.
-		{"not found", 404, []string{"isn't there", "quire's theme"}},
+		{"bad gateway", 502, []string{"couldn't serve the request", "later"}},
+		{"service unavailable", 503, []string{"couldn't serve the request", "later"}},
+		{"gateway timeout", 504, []string{"couldn't serve the request", "later"}},
+		{"not found", 404, []string{"isn't there"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,6 +50,58 @@ func TestStatusSentenceIsActionable(t *testing.T) {
 				t.Errorf("StatusSentence(%d) = %q does not name the subject", tc.code, got)
 			}
 		})
+	}
+}
+
+// The correction of 2026-09-16, and the reason this file has a test of its own.
+//
+// comick.art answers 444 to any search query shorter than three characters and
+// 200 to longer ones — deterministic, with no rate limit in it anywhere. Our
+// first wording told the user it "almost always means rate limiting"; they
+// waited several minutes, retried, and failed again. 444 is nginx closing the
+// connection without a response: it says the server dropped us, and nothing at
+// all about why.
+func Test444DescribesWhatHappenedAndDiagnosesNothing(t *testing.T) {
+	got := fetch.StatusSentence("the site", 444)
+	low := strings.ToLower(got)
+
+	if !strings.Contains(low, "closed the connection") {
+		t.Errorf("StatusSentence(444) = %q does not say what actually happened", got)
+	}
+	for _, claim := range []string{"rate limiting", "rate limit", "too often", "too many requests"} {
+		if strings.Contains(low, claim) {
+			t.Errorf("StatusSentence(444) = %q claims %q, which 444 does not tell us", got, claim)
+		}
+	}
+	// Waiting may be offered as one possibility; it must not be presented as
+	// the answer, because for the site that forced this correction it is not.
+	if strings.Contains(low, "usually works") {
+		t.Errorf("StatusSentence(444) = %q promises that waiting fixes it", got)
+	}
+}
+
+// 429 is the opposite case: the server said "too many requests" itself, so
+// naming rate limiting is reporting, not guessing.
+func Test429NamesRateLimitingBecauseTheServerDid(t *testing.T) {
+	low := strings.ToLower(fetch.StatusSentence("the site", 429))
+	if !strings.Contains(low, "asking too often") {
+		t.Errorf("StatusSentence(429) = %q does not say the site called it rate limiting", low)
+	}
+	if !strings.Contains(low, "few minutes") || !strings.Contains(low, "trying again") {
+		t.Errorf("StatusSentence(429) = %q does not say what to do about it", low)
+	}
+}
+
+// The same test applied to the rest: state the observation, hedge the cause.
+// A 404 is a fact about the address; whose fault it is, is not.
+func Test404OffersACauseWithoutAssertingOne(t *testing.T) {
+	got := fetch.StatusSentence("the site", 404)
+	low := strings.ToLower(got)
+	if !strings.Contains(low, "isn't there") {
+		t.Errorf("StatusSentence(404) = %q does not say what was observed", got)
+	}
+	if !strings.Contains(low, "may mean") {
+		t.Errorf("StatusSentence(404) = %q states a cause it cannot know", got)
 	}
 }
 
@@ -92,9 +142,9 @@ func TestStatusSentenceNamesTheSubject(t *testing.T) {
 // That is the string that reached the user.
 func TestExplainStatus(t *testing.T) {
 	cases := []struct{ name, in, wantFrag string }{
-		{"bare code", "HTTP 444", "rate limiting"},
-		{"bare code with stop", "HTTP 429.", "rate limiting"},
-		{"prefixed", "search: HTTP 503", "trouble"},
+		{"bare code", "HTTP 444", "closed the connection"},
+		{"bare code with stop", "HTTP 429.", "asking too often"},
+		{"prefixed", "search: HTTP 503", "couldn't serve the request"},
 		{"lowercase", "http 403", "refused this request"},
 	}
 	for _, tc := range cases {

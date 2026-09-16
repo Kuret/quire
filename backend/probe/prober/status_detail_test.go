@@ -17,8 +17,12 @@ import (
 //
 // The verdict was right — the site genuinely could not be searched — but the
 // user was left with a status code and nothing to do. 444 is nginx closing the
-// connection without answering, which is a rate limit nearly every time, and
-// waiting a few minutes would have fixed it.
+// connection without answering.
+//
+// What it is *not* is a diagnosis. Measured the same day, that site answers 444
+// to every search query shorter than three characters and 200 to longer ones,
+// with no rate limit involved. So these tests check both halves: the sentence
+// says what happened, and does not claim a cause the status cannot tell us.
 
 // The exact shape that produced the bare code: a theme error whose tail is a
 // status Go does not even have a name for.
@@ -31,15 +35,18 @@ func TestSearchRefusalSaysWhatTheCodeMeans(t *testing.T) {
 		gone string
 	}{
 		{
+			// 444 says the server dropped us and nothing more. Measured on
+			// 2026-09-16: comick.art answers 444 to any query under three
+			// characters, so "rate limiting" here would be a false cause.
 			name: "nginx 444",
 			err:  errors.New("comick: /v1.0/search: HTTP 444"),
-			want: []string{"rate limiting", "few minutes", "trying again"},
+			want: []string{"closed the connection without answering"},
 			gone: "444",
 		},
 		{
 			name: "too many requests",
 			err:  errors.New("comick: /v1.0/search: HTTP 429"),
-			want: []string{"rate limiting", "few minutes"},
+			want: []string{"asking too often", "few minutes"},
 			gone: "429",
 		},
 		{
@@ -51,13 +58,13 @@ func TestSearchRefusalSaysWhatTheCodeMeans(t *testing.T) {
 		{
 			name: "site trouble",
 			err:  errors.New("comick: /v1.0/search: HTTP 503"),
-			want: []string{"trouble", "later"},
+			want: []string{"couldn't serve the request", "later"},
 			gone: "503",
 		},
 		{
-			name: "theme asked for a path that is gone",
+			name: "the address is gone",
 			err:  errors.New("comick: /v1.0/search: HTTP 404"),
-			want: []string{"isn't there", "quire's theme"},
+			want: []string{"isn't there", "may mean"},
 			gone: "404",
 		},
 	}
@@ -102,9 +109,9 @@ func TestReachabilityRefusalSaysWhatTheCodeMeans(t *testing.T) {
 		want   []string
 		gone   string
 	}{
-		{"nginx 444", 444, []string{"rate limiting", "few minutes"}, "444"},
-		{"too many requests", http.StatusTooManyRequests, []string{"rate limiting", "few minutes"}, "429"},
-		{"site trouble", http.StatusBadGateway, []string{"trouble", "later"}, "502"},
+		{"nginx 444", 444, []string{"closed the connection without answering"}, "444"},
+		{"too many requests", http.StatusTooManyRequests, []string{"asking too often", "few minutes"}, "429"},
+		{"site trouble", http.StatusBadGateway, []string{"couldn't serve the request", "later"}, "502"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,7 +147,7 @@ func TestImageHostRateLimitSaysWhatToDo(t *testing.T) {
 		t.Fatalf("verdict = %q (%s), want partial", res.Verdict, res.Detail)
 	}
 	low := strings.ToLower(res.Detail)
-	if !strings.Contains(low, "rate limiting") || !strings.Contains(low, "few minutes") {
+	if !strings.Contains(low, "asking too often") || !strings.Contains(low, "few minutes") {
 		t.Errorf("detail %q does not say what a 429 on the image host means", res.Detail)
 	}
 	if !strings.Contains(low, "image host") {
@@ -174,7 +181,7 @@ func TestChallengeWordingIsUnchangedByStatusWording(t *testing.T) {
 	if !strings.Contains(low, "doesn't work around challenges") {
 		t.Errorf("detail %q no longer says Quire will not work around the challenge", res.Detail)
 	}
-	for _, forbidden := range []string{"rate limiting", "few minutes", "try again", "trying again", "later"} {
+	for _, forbidden := range []string{"rate limiting", "asking too often", "few minutes", "try again", "trying again", "later"} {
 		if strings.Contains(low, forbidden) {
 			t.Errorf("detail %q leaks %q into a terminal challenge verdict", res.Detail, forbidden)
 		}

@@ -37,7 +37,7 @@ func TestDownloadRateLimitSaysWhatToDo(t *testing.T) {
 	failed := waitForPhase(t, rec, "failed")
 	msg, _ := failed["message"].(string)
 	low := strings.ToLower(msg)
-	if !strings.Contains(low, "rate limiting") || !strings.Contains(low, "few minutes") {
+	if !strings.Contains(low, "asking too often") || !strings.Contains(low, "few minutes") {
 		t.Errorf("message %q does not tell the user what a 429 means or what to do", msg)
 	}
 	if strings.Contains(msg, "429") {
