@@ -110,27 +110,28 @@ const (
 	MessageCancelDownload MessageType = 42
 
 	// MessageEnqueueDownloads is UI→BE, JSON
-	// {sourceId, seriesId, grouping, chapterIds, confirmed}: one selection of
-	// rows, queued together.
+	// {sourceId, seriesId, grouping, chapterIds}: one selection of rows, queued
+	// together and without a question — picking the rows was the deliberate
+	// step.
 	//
 	// It is its own message rather than a loop of MessageEnqueueDownload on the
-	// frontend, because the two things that make a selection different from a
-	// run of taps are both *answers*: one question for the whole selection, and
-	// one reply saying what fitted on the queue. Sent as a loop, a selection of
-	// thirty against a queue of sixteen would answer fourteen times with the
-	// same refusal.
+	// frontend, because a selection differs from a run of taps in what the
+	// backend *answers*: one reply saying what fitted on the queue, and no
+	// per-row question. Sent as a loop, a selection of thirty against a queue of
+	// sixteen would answer fourteen times with the same refusal, and a selection
+	// of volumes would ask about each of them in turn.
 	MessageEnqueueDownloads MessageType = 43
 
-	// MessageQueueConfirm is BE→UI, JSON {message, count}: the question asked
-	// before a selection is queued.
+	// 44 was MessageQueueConfirm, the question asked before a selection was
+	// queued. The user asked for the selection path to queue instantly — "just
+	// download and queue instantly when i click download" — so there is no
+	// question to carry any more.
 	//
-	// A selection is the case PLAN §7.1's confirmation exists for — "a tap that
-	// quietly queues ten chapters and a few hundred megabytes" — and the
-	// sentence is the backend's (PLAN §2). A single row still queues without a
-	// question: there is nothing to warn about, and a step that always says
-	// "download this one?" is a step the user learns to tap through.
-	MessageQueueConfirm MessageType = 44
-
+	// The number stays retired rather than being reused or closed up: these
+	// constants are a wire protocol, pinned on both sides by
+	// TestQMLMessagesMatchGo, and a frontend and backend that disagree about
+	// what 44 means is worse than a gap in the numbering.
+	//
 	// MessageQueueResult is BE→UI, JSON {queued, skipped, message}: what the
 	// queue actually took.
 	//
@@ -267,7 +268,6 @@ var messageNames = map[MessageType]string{
 	MessageDownloadProgress:      "DownloadProgress",
 	MessageCancelDownload:        "CancelDownload",
 	MessageEnqueueDownloads:      "EnqueueDownloads",
-	MessageQueueConfirm:          "QueueConfirm",
 	MessageQueueResult:           "QueueResult",
 	MessageOpenInReader:          "OpenInReader",
 	MessageDeleteDownload:        "DeleteDownload",

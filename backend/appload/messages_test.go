@@ -38,7 +38,6 @@ func TestMessageTypeValues(t *testing.T) {
 		"DownloadProgress":      41,
 		"CancelDownload":        42,
 		"EnqueueDownloads":      43,
-		"QueueConfirm":          44,
 		"QueueResult":           45,
 		"OpenInReader":          50,
 		"DeleteDownload":        51,

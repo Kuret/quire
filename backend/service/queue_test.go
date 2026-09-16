@@ -57,45 +57,12 @@ func jsonList(ids []string) string {
 	return string(b)
 }
 
-// A selection asks once, and the question says how many rows it is about — the
-// count is the thing the user can no longer see once the strip is over the
-// list.
-func TestQueueingASelectionAsksOnceWithTheCount(t *testing.T) {
-	svc, store, _, _, rec := newDownloadService(t)
-	addSource(t, store)
-
-	seriesID, ids := firstChapters(t, svc, rec, 3)
-
-	fresh := &recorder{}
-	handle(t, svc, fresh, appload.MessageEnqueueDownloads, fmt.Sprintf(
-		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s}`, seriesID, jsonList(ids)))
-
-	var q struct {
-		Count   int    `json:"count"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(fresh.wait(t, appload.MessageQueueConfirm), &q); err != nil {
-		t.Fatal(err)
-	}
-	if q.Count != len(ids) {
-		t.Errorf("the question is about %d rows, want %d", q.Count, len(ids))
-	}
-	if !strings.Contains(q.Message, fmt.Sprintf("%d chapters", len(ids))) {
-		t.Errorf("question %q does not say how many chapters", q.Message)
-	}
-
-	// Asking must not start anything.
-	fresh.mu.Lock()
-	defer fresh.mu.Unlock()
-	for _, f := range fresh.sent {
-		if f.Type == appload.MessageDownloadProgress {
-			t.Fatalf("asking queued something: %s", f.Payload)
-		}
-	}
-}
-
-// The confirmed send queues every row and answers once. Nothing was skipped, so
-// the answer carries no sentence: each row says "Queued." for itself.
+// The footer queues every row it was given and answers once. Nothing was
+// skipped, so the answer carries no sentence: each row says "Queued." for
+// itself.
+//
+// Nothing is asked first. The user asked for the selection path to queue
+// instantly, and picking the rows is already the deliberate step.
 func TestQueueingASelectionQueuesEveryRow(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
 	addSource(t, store)
@@ -104,7 +71,7 @@ func TestQueueingASelectionQueuesEveryRow(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageEnqueueDownloads, fmt.Sprintf(
-		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s,"confirmed":true}`,
+		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s}`,
 		seriesID, jsonList(ids)))
 
 	var r struct {
@@ -124,6 +91,63 @@ func TestQueueingASelectionQueuesEveryRow(t *testing.T) {
 	if r.Message != "" {
 		t.Errorf("message %q; a selection that fitted needs no sentence", r.Message)
 	}
+
+	// Queued straight away, with nothing asked in between: every row has its
+	// own "queued" frame by the time the selection is answered.
+	queued := 0
+	for _, p := range progressOf(t, fresh) {
+		if phase, _ := p["phase"].(string); phase == "queued" {
+			queued++
+		}
+	}
+	if queued != len(ids) {
+		t.Errorf("%d rows reported queued, want %d", queued, len(ids))
+	}
+}
+
+// A selection of volumes must not turn into a stack of individual
+// confirmations. Each row is queued as already confirmed, and with no question
+// at the selection level either, that suppression is the only thing standing
+// between one tap and three questions.
+func TestASelectionOfVolumesAsksNothing(t *testing.T) {
+	svc, store, _, _, rec := newDownloadService(t)
+	addVolumeSource(t, store)
+
+	seriesID, ids := firstChapters(t, svc, rec, 2)
+
+	fresh := &recorder{}
+	handle(t, svc, fresh, appload.MessageEnqueueDownloads, fmt.Sprintf(
+		`{"sourceId":"example-reader","seriesId":%q,"grouping":"volume","chapterIds":%s}`,
+		seriesID, jsonList(ids)))
+	var r struct {
+		Queued int `json:"queued"`
+	}
+	if err := json.Unmarshal(fresh.wait(t, appload.MessageQueueResult), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Queued != len(ids) {
+		t.Fatalf("queued %d of %d volumes", r.Queued, len(ids))
+	}
+
+	// Every volume is on the queue by the time the selection is answered. A
+	// volume that was *asked* about instead would have no queued frame here —
+	// its question would still be out being composed — so this is where a
+	// reintroduced per-row confirmation shows up.
+	queued, confirms := 0, 0
+	for _, p := range progressOf(t, fresh) {
+		switch phase, _ := p["phase"].(string); phase {
+		case "queued":
+			queued++
+		case "confirm":
+			confirms++
+		}
+	}
+	if confirms != 0 {
+		t.Errorf("%d volumes asked a question of their own", confirms)
+	}
+	if queued != len(ids) {
+		t.Errorf("%d volumes reported queued, want %d", queued, len(ids))
+	}
 }
 
 // The same row twice is one download. A selection is built by tapping, and a
@@ -137,7 +161,7 @@ func TestASelectionQueuesADuplicatedRowOnce(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageEnqueueDownloads, fmt.Sprintf(
-		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s,"confirmed":true}`,
+		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s}`,
 		seriesID, jsonList(doubled)))
 
 	var r struct {
@@ -186,7 +210,7 @@ func TestASelectionBeyondTheQueueIsAnsweredOnce(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageEnqueueDownloads, fmt.Sprintf(
-		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s,"confirmed":true}`,
+		`{"sourceId":"example-reader","seriesId":%q,"chapterIds":%s}`,
 		seriesID, jsonList(ids)))
 
 	var r struct {

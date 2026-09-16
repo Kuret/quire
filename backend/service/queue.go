@@ -22,10 +22,6 @@ type enqueueManyRequest struct {
 	// volume row's id is its first chapter's, which is what the single-row
 	// path uses too.
 	ChapterIDs []string `json:"chapterIds"`
-
-	// Confirmed is set on the second send, after the user has seen how much
-	// they just asked for.
-	Confirmed bool `json:"confirmed,omitempty"`
 }
 
 func (r enqueueManyRequest) grouping() string {
@@ -35,22 +31,33 @@ func (r enqueueManyRequest) grouping() string {
 	return assemble.GroupingChapter
 }
 
-// enqueueMany queues a selection of rows.
+// enqueueMany queues a selection of rows, immediately.
+//
+// # No question
+//
+// A selection used to ask before it queued. The user asked for that to go —
+// "just download and queue instantly when i click download" — and they are
+// right about their own screen: picking the rows *is* the deliberate step, and
+// a confirmation behind a deliberate step is a tap people learn to make without
+// reading. A single row's own Download button still asks where it always did
+// (see askToConfirm); this is the selection path only.
 //
 // # Why this is not a loop over enqueueDownload
 //
-// Two things about a selection are different from the same taps made one at a
-// time, and both of them are things the backend *says*:
+// Two things about a selection are still different from the same taps made one
+// at a time:
 //
-//   - **One question.** PLAN §7.1 asks before a tap that quietly queues ten
-//     chapters and a few hundred megabytes. Asked per row, that is ten
-//     questions for one decision, which is how a confirmation becomes a thing
-//     people tap through without reading.
+//   - **No per-row question.** Each row is queued as already confirmed, so a
+//     selection of volumes does not turn into a stack of individual
+//     confirmations. Without a question at the selection level, this is the
+//     only thing holding that back.
 //   - **One answer about the queue.** The queue is sixteen deep and stays that
 //     way: a deeper one on a 2 GB device is how /home fills while the user is
 //     not looking (docs/DEVICE-NOTES.md §10.3). A selection longer than that is
 //     ordinary, not an error, and answering it with fourteen copies of "Quire
-//     is already busy" is noise standing in for information.
+//     is already busy" is noise standing in for information. With nothing asked
+//     up front, this reply is now the only way the user learns what did not
+//     fit, which makes it more load-bearing than it was, not less.
 //
 // The downloads themselves are the same downloads: the same queue, the same
 // single worker, the same per-row progress.
@@ -66,13 +73,6 @@ func (s *Service) enqueueMany(ctx context.Context, out Sender, req enqueueManyRe
 	ids := dedupe(req.ChapterIDs)
 	if len(ids) == 0 {
 		return s.sendError(out, "bad_request", "Nothing was selected, so there is nothing to queue.")
-	}
-
-	if !req.Confirmed {
-		return send(out, appload.MessageQueueConfirm, map[string]any{
-			"count":   len(ids),
-			"message": queueQuestion(len(ids), req.grouping()),
-		})
 	}
 
 	queued, skipped := 0, 0
@@ -103,35 +103,6 @@ func (s *Service) enqueueMany(ctx context.Context, out Sender, req enqueueManyRe
 		"skipped": skipped,
 		"message": queueOutcome(queued, skipped, req.grouping()),
 	})
-}
-
-// queueQuestion is the sentence asked before a selection is queued.
-//
-// It says the count, because that is the thing the user cannot see once the
-// list is behind a confirm strip, and it says what the queue will do with it.
-// It does not guess at megabytes: the size of a chapter is not known until its
-// pages have been fetched, and a number invented here would be a number the
-// user plans around.
-func queueQuestion(n int, grouping string) string {
-	what := "chapters"
-	if grouping == assemble.GroupingVolume {
-		what = "volumes"
-	}
-	if n == 1 {
-		what = what[:len(what)-1]
-	}
-
-	q := fmt.Sprintf("Download %d %s? Quire downloads one at a time, in the order they are listed, "+
-		"and you can stop any of them while they wait.", n, what)
-
-	if n > downloadQueueDepth {
-		// Said before they agree to it, not discovered afterwards. The ceiling
-		// is deliberate (see enqueueMany), so the honest thing is to say what
-		// will happen to the rest.
-		q += fmt.Sprintf(" Quire holds %d at a time, so the first %d go on the queue and the other %d "+
-			"will need asking for again.", downloadQueueDepth, downloadQueueDepth, n-downloadQueueDepth)
-	}
-	return q
 }
 
 // queueOutcome is what the backend says after the fact, and it is empty when

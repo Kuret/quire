@@ -46,7 +46,6 @@ var CancelDownload = 42
 // Queueing a selection of rows (PLAN §12.1). One question for the whole
 // selection, and one answer about what fitted on the queue.
 var EnqueueDownloads = 43
-var QueueConfirm = 44
 var QueueResult = 45
 
 var OpenInReader = 50
