@@ -352,21 +352,6 @@ type Source struct {
 	// RateLimit narrows the global politeness caps; it can never widen them.
 	RateLimit *fetch.RateLimit `json:"rateLimit,omitempty"`
 
-	// Grouping decides how many chapters go into one document (PLAN §6 M4):
-	// "chapter", "volume" or "count". Empty means the schema default,
-	// "chapter" — one PDF per chapter, even where the source publishes volume
-	// labels, because sampling a series is what the first download is for.
-	//
-	// It is a string for the same reason SplitStrips is: the spellings live in
-	// the schema and TestGroupingEnumAgreesEverywhere reads them out of it as
-	// data rather than trusting a hand-copied list.
-	Grouping string `json:"grouping,omitempty"`
-
-	// GroupSize is the run length used when Grouping is "count", and when it
-	// is "volume" and the source publishes no labels. Zero means the schema
-	// default, DefaultGroupSize.
-	GroupSize int `json:"groupSize,omitempty"`
-
 	// SplitStrips overrides vertical-scroll strip detection (PLAN §12.3):
 	// "auto", "never" or "always". Empty means the schema default, "auto".
 	//
@@ -419,56 +404,6 @@ const (
 
 // IsEnabled applies the schema's default of true.
 func (s *Source) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
-
-// The PLAN §6 M4 grouping enum, spelled out so callers do not retype strings.
-const (
-	// GroupingChapter is one PDF per chapter, and the default.
-	GroupingChapter = "chapter"
-	// GroupingVolume groups on the source's own volume label where it has
-	// one, and falls back to runs of GroupSize where it does not. This was the
-	// default until 2026-09-16.
-	GroupingVolume = "volume"
-	// GroupingCount ignores volume labels and always uses runs of GroupSize.
-	GroupingCount = "count"
-)
-
-// GroupingValues are the accepted spellings of Source.Grouping, in the
-// schema's order. Empty is also accepted and means the default, "chapter".
-var GroupingValues = []string{GroupingChapter, GroupingVolume, GroupingCount}
-
-// DefaultGroupSize is schema/source.schema.json's default for groupSize.
-const DefaultGroupSize = 10
-
-// GroupSizeMin and GroupSizeMax mirror the schema's bounds, so a hand-edited
-// source is refused here too rather than only at import.
-const (
-	GroupSizeMin = 1
-	GroupSizeMax = 100
-)
-
-// validGrouping reports whether v is one of GroupingValues, or empty.
-func validGrouping(v string) bool {
-	if v == "" {
-		return true
-	}
-	return slices.Contains(GroupingValues, v)
-}
-
-// Group is the grouping mode to apply, with the schema's default filled in.
-func (s *Source) Group() string {
-	if s.Grouping == "" {
-		return GroupingChapter
-	}
-	return s.Grouping
-}
-
-// Size is the run length to use, with the schema's default filled in.
-func (s *Source) Size() int {
-	if s.GroupSize <= 0 {
-		return DefaultGroupSize
-	}
-	return s.GroupSize
-}
 
 // SplitStripsValues are the accepted spellings of Source.SplitStrips, in the
 // schema's order. Empty is also accepted and means the default, "auto".
