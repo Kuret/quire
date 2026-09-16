@@ -92,6 +92,18 @@ const (
 	// reply is MessageSources, so the list redraws with the new value.
 	MessageSetSourceSplitStrips MessageType = 25
 
+	// MessageSetSourceGrouping is UI→BE, JSON {sourceId, grouping}, where
+	// grouping is "chapter", "volume" or "count" (PLAN §6 M4). It belongs with
+	// the per-source settings at 17–19 and 25, and takes 26 because everything
+	// below it is spent.
+	//
+	// It exists because PLAN §6 M4 was reversed on 2026-09-16: one PDF per
+	// chapter is the default, since a 7–10 minute wait before anything is
+	// readable makes sampling a series impossible. Anyone who preferred one
+	// document per volume asks for it here. The reply is MessageSources, so
+	// the list redraws with the new value.
+	MessageSetSourceGrouping MessageType = 26
+
 	// MessageSeriesDetail is UI→BE, JSON {sourceId, seriesId}.
 	MessageSeriesDetail MessageType = 30
 	// MessageSeriesDetailResult is BE→UI, JSON.
@@ -197,6 +209,7 @@ var messageNames = map[MessageType]string{
 	MessageRequestCover:          "RequestCover",
 	MessageCoverReady:            "CoverReady",
 	MessageSetSourceSplitStrips:  "SetSourceSplitStrips",
+	MessageSetSourceGrouping:     "SetSourceGrouping",
 	MessageSeriesDetail:          "SeriesDetail",
 	MessageSeriesDetailResult:    "SeriesDetailResult",
 	MessageEnqueueDownload:       "EnqueueDownload",

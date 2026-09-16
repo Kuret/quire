@@ -36,6 +36,11 @@ var CoverReady = 24
 // because 20-24 were already spent.
 var SetSourceSplitStrips = 25
 
+// Per-source grouping (PLAN §6 M4, reversed 2026-09-16): "chapter" — the
+// default, one PDF per chapter — "volume" or "count". It sits beside 25 for the
+// same reason: it is a per-source setting and 17-19 were full.
+var SetSourceGrouping = 26
+
 var SeriesDetail = 30
 var SeriesDetailResult = 31
 
