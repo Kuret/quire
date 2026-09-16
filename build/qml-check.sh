@@ -46,6 +46,36 @@ for f in ui/*.qml; do
 done
 [[ $status -eq 0 ]] && echo "   no errors"
 
+# The device ships Noto Sans, Noto Serif, NotoSansUI and Noto Mono and nothing
+# else. A codepoint outside them renders as a tofu box, which is how the
+# backspace key came to be a square on the user's screen: U+232B ERASE TO THE
+# LEFT lives in Noto Sans *Symbols*, which is not installed. The same hole
+# swallows U+21E7 shift, U+23CE return, U+2423 space and U+2326 delete, so the
+# trap is not specific to one key.
+#
+# The allow-list below was checked against the cmap tables of the fonts pulled
+# off the device, not inferred from what a desktop happens to render. Anything
+# else in a string that reaches the screen fails here. A glyph inside a comment
+# is fine: nobody sees it.
+echo ">> auditing rendered glyphs against the fonts on the device"
+glyphs=0
+for f in ui/*.qml ui/*.js; do
+    hits="$(sed -e 's://.*::' "$f" \
+            | sed -e 's/\xc2\xb7//g' -e 's/\xe2\x80\x94//g' -e 's/\xe2\x80\x99//g' \
+                  -e 's/\xe2\x80\xa6//g' -e 's/\xe2\x80\xb9//g' -e 's/\xe2\x80\xba//g' \
+            | LC_ALL=C grep -n '[^[:print:][:space:]]' || true)"
+    if [[ -n "$hits" ]]; then
+        echo "--- $f draws a glyph the device has no font for:"
+        echo "$hits"
+        glyphs=1
+    fi
+done
+if [[ $glyphs -eq 0 ]]; then
+    echo "   only codepoints present in the device fonts"
+else
+    status=1
+fi
+
 echo ">> instantiating every screen under the offscreen platform"
 out="$(QT_QPA_PLATFORM=offscreen qml -platform offscreen \
         -I "$ROOT/ui" "$HERE/qmlcheck/Harness.qml" 2>&1)" || true
