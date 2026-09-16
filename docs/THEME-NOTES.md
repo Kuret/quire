@@ -348,6 +348,9 @@ a source of that shape should carry by default; `""` means "no opinion" and
 | Theme | Suggestion | Why |
 |---|---|---|
 | `mangadex` | `"MangaDex"` | One site, which knows what it is called. Without this, adding `https://api.mangadex.org` produced a source named **"MangaDex API documentation"** — exactly what that page's `<title>` says, and meaningless in a source list. |
+| `webtoons` | `"WEBTOON"` | One publisher, and a `<title>` that is a sentence of marketing copy. |
+| `fanfox` | `"Manga Fox"` | One site, and likewise a `<title>` that is a slogan rather than a name. |
+| `comick` | `"Comick"` | One piece of software, and the name is the same whichever host the user points at — which is what makes a suggestion right even though the theme deliberately names no host (see its notes on mirrors). |
 | `weebcentral` | `"Weeb Central"` | One site, and one that spells its own name with a space the theme ID does not. The page `<title>` would in fact have done here — but only by luck, which is the case §7.5's stage-6 correction is about: a theme that knows its site's name should say so rather than leave the default to whatever the site puts in a `<title>` this week. |
 | `mangakakalot` | `""` | A family of mirrors carrying different names and no shared branding. There is no one name to lend them, so the page title is the better default and a rename is one tap away. |
 | `madara`, `mangathemesia`, `generic` | `""` | Families of hundreds of independently branded sites, or an escape hatch pointed at a site nobody has themed. For these the page title genuinely *is* the best available default; inventing a name would be worse than the title ever is. |
@@ -1111,62 +1114,442 @@ qualifier.
 
 ---
 
-## The `Referer` wall — three sites that fail stage 5 for one reason
+## The `Referer` wall — decided, implemented, and one thing still open
 
-Recorded 2026-09-16, from live reconnaissance done while looking for themes to
-add. It is here rather than in a per-theme section because **no theme was
-written for any of these**, and the next person to consider them should find out
-why in five minutes rather than in an afternoon.
-
-Three otherwise-clean candidates were taken end to end: search → series →
-chapters → page URLs → fetch one image. All three passed every step **except the
-last**, and all three failed it the same way:
+Recorded 2026-09-16. Three otherwise-clean candidates were taken end to end —
+search → series → chapters → page URLs → fetch one image — and all three passed
+every step **except the last**, in the same way:
 
 | Candidate | Everything up to page URLs | Image host, no `Referer` | Image host, with `Referer` |
 |---|---|---|---|
-| A vertical-scroll publisher platform | **200** throughout; chapter list is a clean JSON API | **403**, Akamai `Referral Denied` | **200**, `image/jpeg` |
-| An older PHP reader family | **200** throughout; mobile reader ships every page URL eagerly | **403**, Cloudflare `Attention Required!` | **200**, `image/jpeg` |
-| A JSON-API aggregator | **200** throughout on one mirror; reader page embeds the page list as JSON | **403**, Cloudflare `Attention Required!` | **200**, `image/webp` |
+| `webtoons` | **200** throughout; the chapter list is a clean JSON API | **403**, Akamai `Referral Denied` | **200**, `image/jpeg` |
+| `fanfox` | **200** throughout; the mobile reader ships every page URL eagerly | **403**, Cloudflare `Attention Required!` | **200**, `image/jpeg` |
+| `comick` | **200** throughout on one mirror; the reader page embeds the page list as JSON | **403**, Cloudflare `Attention Required!` | **200**, `image/webp` |
 
-`backend/fetch` sends no `Referer` on any request, so under the client as it
-stands all three produce a **`partial`** verdict from §7.5 stage 5, naming page
-fetching as the failing step. Building a theme for any of them would ship a
-theme that cannot download, which is what stage 5 was rewritten to prevent.
+### The decision
 
-**This is a question for a human, and it is not §7.6.** §7.6 forbids rotating or
-spoofing a `User-Agent`, impersonating browser TLS, solving CAPTCHAs, proxying
-through a scraping service, and replaying clearance cookies — all of which are
-ways of *pretending to be something you are not*. Sending a `Referer` naming the
-page the image URL was actually extracted from is the opposite: it is telling
-the server the truth about where the request came from, and the truth happens to
-satisfy the check. `backend/library` already does exactly this against the
-device's own web interface, for the same reason and with the same reasoning.
+**A truthful `Referer` is permitted** (PLAN §7.6, decided 2026-09-16). The test
+§7.6 applies is *"are we pretending to be something we are not?"*, and a
+`Referer` naming the page a URL was actually extracted from fails to be
+pretence: it is a true statement, in the header designed to carry exactly that
+fact. Hotlink protection asks "did this come from one of our pages?" and the
+honest answer is yes. We satisfy the check **by telling the truth**, which is
+the opposite of circumventing it. A challenge asks "are you a browser?", where
+the only way through is a lie — that stays refused and stays terminal.
 
-Whether to do it in `backend/fetch` is nonetheless an architecture decision and
-not a detail, because it changes what every request in the project looks like.
-Until it is decided, these three stay unimplemented. Two further notes for
-whoever picks it up:
+### How it is built, and why in that shape
 
-- **The `Referer` would have to be real, not constant.** A fixed string is a
-  spoof by another name. The honest form is the URL of the page the theme
-  extracted the image from, which means the fetch layer needs to be told it —
-  a signature change, not a header constant.
-- **One of the three is a mirror set where the mirrors disagree.** Its
-  best-known host answers **403 with a challenge interstitial** on the same API
-  path a sibling host answers **200 JSON** on. Under §7.6 the challenged host is
-  terminal; the unchallenged one works today. "Works today, on one mirror,"
-  is not the same claim as "clean", and treating it as such is how a theme
-  becomes someone's maintenance problem.
+Three pieces, and the constraints are structural rather than conventional:
 
-**The vertical-scroll platform has a second, independent problem**, which is
-worth recording even though the `Referer` wall stops it first. Its pages are
-webtoon *strips*: single images several thousand pixels tall. PLAN §6 M4 fits a
-page image into a 3:4 PDF page, so a strip becomes a small centred sliver with
-white space either side — technically correct output that is unreadable. M4's
-memory guard bounds the damage but does not change the result. Making that
-platform useful needs real strip-splitting (cutting a tall image into
-screen-shaped pages at sensible boundaries), which is its own design decision
-and **not** something to bolt on while writing a theme.
+- **`fetch.Referrer`** (`backend/fetch/referrer.go`). An opaque value, not a
+  string parameter. The **zero value sends no header**, and `Get` /
+  `GetRetrieval` are literally `GetFrom` / `GetRetrievalFrom` called with one —
+  so "never defaulted" is a property of the code rather than a promise. There
+  is deliberately **no client-wide or per-source setting**: one would be pinned
+  to a constant within a week, and a constant naming a page we did not fetch is
+  exactly the lie §7.6 forbids.
+- **`Response.Referrer()`** is the preferred constructor and cannot lie: the
+  only way to hold a `*Response` is to have fetched the page, and it uses
+  `FinalURL` so a redirect is reflected honestly. `fetch.PageReferrer(url)` is
+  the escape for a caller holding an address rather than a response; it
+  validates absolute/http(s)/host, and strips **userinfo** (a `Referer` is the
+  classic way a credential reaches someone else's access log) and the
+  **fragment**. The query survives, because on two of the three sites the
+  chapter is identified by nothing else.
+- **`theme.PageReferrer`** (`backend/theme/theme.go`). An optional side
+  interface: `PageReferer(s *Source, chapterID string) string`. It belongs to
+  the theme for the same reason the ordering contract does — only the theme
+  knows which URL its `Pages()` read. It is a **pure function of the source and
+  chapter ID**, not state left behind by the last call, so it cannot go stale
+  or be read for the wrong chapter. In all three themes it is literally the
+  same one-line call `Pages()` uses to build its own request, which is what
+  keeps the two from drifting apart into a header naming a page we did not
+  read.
+
+Tests: sent when supplied, absent when not, never defaulted, and never leaked
+to a later request on the same client (`backend/fetch/referrer_test.go`). Each
+theme asserts that its `PageReferer` equals the URL its `Pages()` actually
+fetched.
+
+### Still open: the two call sites
+
+**The themes name the page; nothing yet passes the name to the fetch.** Page
+images are not fetched by themes. They are fetched in two places, both outside
+the scope this work was given:
+
+- `backend/service/download.go` — `sourceFetcher.Get`, the download queue
+- `backend/probe/prober/capability.go` — `fetchOnePageImage`, §7.5 stage 5
+
+Each needs to ask the theme for `PageReferer` and call `GetRetrievalFrom` /
+`GetFrom` instead of the plain form. Until that lands, these three themes
+extract page URLs correctly and their stage-5 image fetch still returns
+`partial`. Everything they need is in place; what is missing is the two lines
+that connect it.
+
+### The strip problem, which is separate and not solved
+
+`webtoons` pages are strips: single images several thousand pixels tall. PLAN
+§6 M4 fits a page image into a 3:4 PDF page, so a strip becomes a small centred
+sliver with white space either side — output that is technically correct and
+unreadable. M4's memory guard bounds the damage and does not change the result.
+
+Making that platform genuinely useful needs real strip-splitting — cutting a
+tall image into screen-shaped pages at sensible boundaries — which is its own
+design decision and **was deliberately not attempted** while writing the theme.
+A theme that quietly half-solved it would be worse than one that does not try.
+
+---
+
+### `webtoons` — a first-party publisher, and a vertical-scroll platform
+
+Implemented in `backend/theme/webtoons/`. The first **publisher** in the
+registry rather than an aggregator or a CMS family, and the first theme whose
+site has an app, a mobile web surface and a desktop one that disagree.
+
+#### Fingerprint signals
+
+| Page | Signal | Weight | What it is |
+|---|---|---|---|
+| Viewer | `#_imageList` | 50 | The defining one. One element ID, the images hang off it, nothing else emits it |
+| Viewer | `/viewer?title_no=` | 15 | The episode link shape, in the navigation |
+| Any listing | `.webtoon_list` | 25 | The card grid |
+| Any listing | `data-title-no=` | 25 | The numeric series identifier, on every card |
+| Any listing | `.info_text .title` | 15 | The card's title block |
+| Any listing | `.image_wrap` | 10 | Its cover wrapper |
+| Series | `h1.subj, h3.subj` | 20 | The title — **two heading levels for the same class**, one per tier |
+| Series | `.detail_header` | 15 | The metadata block |
+| Series | `#_listUl, ._episodeItem` | 20 | The (paginated) episode list |
+| Any | `list?title_no=` | 15 | The series link shape every surface agrees on |
+| **Negative** | `/wp-content/`, `ts_reader.run(`, `data-chapter-url-template`, `checkNewChapter(` | **→ 0** | madara/mangathemesia, mangathemesia, mangakakalot, weebcentral |
+
+Scores 80–100 on its own four fixtures, 0 on every other theme's.
+
+#### Endpoint shapes
+
+| What | Shape |
+|---|---|
+| Search / Browse | `GET /{lang}/search?keyword=` — or `/{lang}/search/{tier}?keyword=&page=N` when scoped |
+| Series | `GET /{lang}/{genre}/{slug}/list?title_no={n}` |
+| Chapter list | `GET https://m.{host}/api/v1/{webtoon\|canvas}/{n}/episodes?pageSize=5000` → JSON |
+| Reader | the episode's own `viewerLink` |
+
+Four things are worth dwelling on.
+
+**The chapter list is on a different hostname.** `m.` rather than `www.`, under
+the same registrable domain — so PLAN §7.4's boundary permits it with no
+`AllowedHosts` entry, and the declaration this theme *does* make is for the
+image CDN alone. The desktop series page paginates its episode list ten at a
+time; the API returns all of them in one response (652 episodes, measured).
+
+**The two tiers have different names in the path and in the API.** A series at
+`/{lang}/canvas/...` is `canvas` to the API; everything else is `webtoon`, a
+word that appears nowhere in the site path. The tier is readable from the
+series URL, which is why it is not an override. Only the user-submitted tier
+takes `readingLanguageCode`; the publisher's own rejects it.
+
+**The chapter number is not in the title.** Episodes are titled `[Season 2]
+Ep. 1`, where a number-finding heuristic returns **2** — the season. Ordering by
+that puts season 2 episode 1 before season 1 episode 3, which is a volume that
+reads out of order: exactly the failure PLAN §7.2's contract exists to prevent.
+The API's own `episodeNo` is authoritative and monotonic across seasons, so that
+is `Chapter.Number`, and the season becomes `Chapter.Volume` — which is what M4
+wants anyway, and is better than its runs-of-ten fallback.
+
+**The unscoped search has no second page.** It answers a fixed set of best
+matches per tier and ignores `page`. Sending it anyway would invent results, so
+`Search` returns an empty page instead and makes no request.
+
+#### `overrides` keys, and why each exists
+
+| Key | Default | Why |
+|---|---|---|
+| `searchScope` | `all` | The user-submitted tier is very large and dominates a text search: a query for a licensed title can return a page of fan work before the publisher's own edition. Which tier a reader wants is a preference |
+| `fullQualityImages` | `false` | Page URLs carry a rendition parameter and dropping it yields the unresized original. Off by default because M4 downscales to 1620×2160 anyway — the extra bytes are fetched and discarded, and these are already the largest images Quire handles |
+
+#### `AllowedHosts`
+
+`webtoon-phinf.pstatic.net`, `swebtoon-phinf.pstatic.net`.
+
+**Named exactly, with no wildcard** — the only theme so far to do that, and
+deliberately. The parent domain is the platform's parent company's general CDN
+and carries a great deal that has nothing to do with comics, so `*.` there would
+widen §7.4's boundary far past anything this theme needs. Both labels are single
+hosts with nothing beneath them.
+
+| Host | Status |
+|---|---|
+| `webtoon-phinf.pstatic.net` | **Observed** serving pages and thumbnails on both tiers and in two locales, 2026-09-16 |
+| `swebtoon-phinf.pstatic.net` | **Inferred.** Not seen in the sample taken; included because a missing host is a download that fails with an SSRF rejection naming something the user has never heard of |
+
+Same treatment as `weebcentral`'s `*.leanbox.us`, and recorded here for the same
+reason: the guard makes the distinction invisible once it works.
+
+#### Quirks
+
+**The real URL is in `data-url`, not `src`.** `src` holds a transparent GIF
+until the reader scrolls. A theme reading `src` returns a chapter of blank
+pixels — which is why `Pages()` does not use `theme.ImageURL`: that helper knows
+the lazy-load attributes WordPress plugins use, and this is not one of them.
+
+**The author block holds a button.** Removing only the `<button>` rather than
+reading the profile link is what makes both tiers work: the publisher's own
+credits are a bare text node with a "more info" button beside it, and the
+user-submitted tier's is an anchor.
+
+**There is no status, only a schedule.** The platform publishes "EVERY MONDAY"
+where other sites publish a status. That is not one of PLAN §7.2's five values,
+so it normalises to `ongoing`, and a series that says it is completed maps to
+`completed`. Passing the schedule through would make the UI render a site's own
+vocabulary, which §7.2 forbids.
+
+**And the strips.** See above — recorded there because it is a platform
+property, not a parsing one, and because someone will otherwise download a
+volume and wonder why it looks wrong.
+
+#### What was measured, 2026-09-16
+
+| Step | Result |
+|---|---|
+| Home page | **200**, 244 KB, no challenge |
+| Search | **200**, series and both tiers parsed; tabs and promo links correctly dropped |
+| Series page | **200**, title, cover, author, genres, description, schedule all parsed |
+| Episode API | **200**, **652 episodes in one response**, ascending, `OrderUnknown=false` |
+| Viewer | **200**, page URLs extracted from `data-url` |
+| **Page image, no `Referer`** | **403**, Akamai `Referral Denied` |
+| **Page image, `Referer` = the viewer page** | **200**, `image/jpeg` |
+
+---
+
+### `fanfox` — the oldest generation here, and real volume structure
+
+Implemented in `backend/theme/fanfox/`. Server-rendered PHP with numbered
+utility class names that have plainly accreted over a decade, which makes it
+both the least elegant thing in the registry and the easiest to fingerprint.
+
+#### Fingerprint signals
+
+| Page | Signal | Weight | What it is |
+|---|---|---|---|
+| Reader | `#viewer .reader-page` | 45 | The mobile scroll reader |
+| Reader | `.roll-page` | 20 | Its page counter between the images |
+| Listing | `.manga-list-{1,2,4}-list` | 30 | The grid families. Nothing else in the registry names a grid this way |
+| Listing | `.manga-list-{1,2,4}-item-title` | 20 | Their title blocks |
+| Listing | `.manga-list-{1,4}-cover` | 15 | Their covers |
+| Series | `.detail-info-right` | 25 | The metadata block |
+| Series | `ul.detail-main-list` | 25 | The chapter list, in the page |
+| Series | `.detail-main-list-main .title3` | 15 | A chapter row's name |
+| Series | `.detail-info-cover-img` | 10 | The cover |
+| Any | `/manga/` | 5 | The link shape — weak on purpose |
+| **Negative** | `/wp-content/`, `ts_reader.run(`, `data-chapter-url-template`, `checkNewChapter(` | **→ 0** | as above |
+| **Negative (selector)** | `#_imageList` | **→ 0** | webtoons' viewer |
+
+Note the negatives are **two lists**, strings and selectors. A substring search
+for `#_imageList` finds nothing in a document that spells it `id="_imageList"`,
+which is a mistake worth making impossible rather than remembering.
+
+Scores 70–85 on its own five fixtures, 0 on every other theme's.
+
+#### Endpoint shapes
+
+| What | Shape |
+|---|---|
+| Search | `GET /search?title=&page=N&stype=1` → `ul.manga-list-4-list` |
+| Browse | `GET /directory/` , `/directory/{N}.html` , optionally `?latest` |
+| Series | `GET /manga/{slug}/` — chapter list included |
+| Reader | `GET https://m.{host}/roll_manga/{slug}/v01/c006/1.html` |
+
+Four things are worth dwelling on.
+
+**`stype=1` is load-bearing.** Without it the search endpoint searches nothing
+and answers an empty list, which looks exactly like "no results" and is not.
+
+**Browse pages are files and the sort has no value.** `/directory/3.html`, not
+`?page=3`; and `?latest`, which `url.Values` would render as `latest=` — at
+which point the server ignores it and sorts by rank instead. Both are unlike
+anything else in the registry and both have a test.
+
+**The desktop reader is unusable and the mobile one is not.** The desktop reader
+hands out one page at a time behind an obfuscated script. The mobile host serves
+a scroll view that ships every page URL in the markup at once, so `Pages()`
+changes host **and** rewrites one path segment — `manga` → `roll_manga`. The
+mobile host is a sibling under the same registrable domain, so §7.4 permits it
+with no `AllowedHosts` entry.
+
+**The volume is in the URL.** `/{slug}/v01/c006/1.html`. This is one of the few
+sites here that publishes real volume structure, so `Chapter.Volume` is read
+from the path rather than from the rendered title — the path is generated and
+the title is a free-text field an uploader fills in. `v00` is a real volume
+(extras and prologues live there), so its zeros are not trimmed away to nothing.
+
+#### `overrides` keys, and why each exists
+
+| Key | Default | Why |
+|---|---|---|
+| `browseOrder` | `popular` | Browse is a search with an empty query (§7.5, M3 correction 1) and this site's search cannot answer one, so Browse reads the directory. The directory has two orders answering different questions — "what is popular" and "what moved today" |
+| `dateFormat` | `MMM d,yyyy` | Chapter dates follow a server-side locale setting, as in madara and mangathemesia. Relative dates ("Today", "3 days ago") are recognised without it; this is for the absolute ones |
+
+#### `AllowedHosts`
+
+`*.mangafox.me`, `*.mfcdn.net`.
+
+Two different registrable domains, neither of them the site's: pages come from
+one and covers from the other, both leftovers from names the platform used to
+operate under. Both observed serving on 2026-09-16. The wildcard form is the
+honest one — the hosts are shard labels (`zjcdn`, `fmcdn`) and the apexes serve
+nothing.
+
+#### Quirks
+
+**The real URL is in `data-original`; `src` is a loading animation.** Same
+lesson as `webtoons`, different attribute. A theme reading `src` returns a
+chapter of spinners.
+
+**Image URLs are protocol-relative.** `//host/path` throughout, which inherits
+the base's scheme — https — so a page image never silently downgrades. There is
+a test asserting it.
+
+**Licensed series are visible and unreadable.** A series the publisher has
+licensed keeps its page, its chapter list and its working links, and its reader
+answers **200** with "it's licensed and not available" where the images should
+be. `Pages()` matches that and says so. Two reasons it matters: an empty chapter
+reads as a Quire bug rather than the site's decision, and one of those two is
+worth retrying while the other never will be. It is emphatically **not** a
+challenge — no interstitial, no 403, no CDN marker — and the error does not call
+it one.
+
+#### What was measured, 2026-09-16
+
+| Step | Result |
+|---|---|
+| Home page | **200**, 163 KB, no challenge |
+| Search (`stype=1`) | **200**, rows parsed |
+| Browse (`/directory/2.html?latest`) | **200**, rows parsed |
+| Series page | **200**, title, status, authors, genres, cover, full description, and the whole chapter list with volumes |
+| Mobile reader | **200**, all 6 page URLs of the chapter |
+| **Page image, no `Referer`** | **403**, Cloudflare `Attention Required!` |
+| **Page image, `Referer` = the reader page** | **200**, `image/jpeg` |
+
+---
+
+### `comick` — an application's own backend, and a mirror set that disagrees
+
+Implemented in `backend/theme/comick/`. The second JSON API in the registry
+after `mangadex`, and a different animal from it: `mangadex` is a documented,
+versioned, public API with published rate limits, and this is an application's
+own frontend backend — undocumented, and half of it not endpoints at all but
+JSON embedded in an HTML page.
+
+#### Mirrors — read this before pointing anything at it
+
+**The mirrors do not behave alike.** On 2026-09-16 one hostname answered a
+**browser challenge (403, ~5.6 KB interstitial)** on the same `/api/search` path
+another answered **200 JSON** on. PLAN §7.6 is clear about what a challenge
+means and §7.5 stage 3 refuses such a source outright, so a user who points
+Quire at the challenged host gets `blocked_challenge` and a verdict that says
+why.
+
+**The theme therefore names no host, and neither does this file.** PLAN §1.3 is
+the answer: Quire ships no source URLs, the user supplies the host, and the
+probe tells them whether it works. Recommending a mirror would be shipping a
+source list one entry at a time, and it would age badly — the challenged and
+unchallenged hosts can trade places without notice. This is also why
+`Fingerprint` has **no host gate**, unlike `mangadex`'s: a host gate here would
+mean a theme that stops recognising its own site the week it moves.
+
+#### Fingerprint signals
+
+| Page | Signal | Weight | What it is |
+|---|---|---|---|
+| Series | `#comic-data` | 45 | The series page's own JSON payload |
+| Reader | `#sv-data` | 45 | The chapter page's |
+| API | `"next_cursor"` **and** `"data"` | 35 | The search envelope, for a probe that lands on it |
+| Any | `/api/comics/` | 25 | The chapter-list API path |
+| Any | `/chapter-list` | 20 | Its suffix |
+| Any | `/api/search` | 15 | The search path |
+| Any | `/comic/` | 10 | The link shape |
+| Any | `"hid"` | 15 | The identifier vocabulary — weak, plenty of JSON has one |
+| Any | `"chap"` | 10 | Likewise |
+| **Negative** | `/wp-content/`, `ts_reader.run(`, `data-chapter-url-template`, `checkNewChapter(` | **→ 0** | as above |
+| **Negative (selector)** | `#_imageList`, `#chapter-images`, `#viewer .reader-page` | **→ 0** | webtoons, weebcentral, fanfox |
+
+Scores 65–70 on its own three fixtures and 0 on every other theme's — including
+`mangadex`'s, which is the pair worth checking: two JSON APIs in one registry is
+where "it answered JSON" would have become a fingerprint if anyone let it.
+
+#### Endpoint shapes
+
+| What | Shape |
+|---|---|
+| Search | `GET /api/search?q=&type=comic[&page=N]` → `{data:[…], next_cursor, …}` |
+| Series | `GET /comic/{slug}` → HTML carrying `<script type="application/json" id="comic-data">` |
+| Chapter list | `GET /api/comics/{slug}/chapter-list?lang={lang}` → `{data:[{hid,chap,title,vol,lang,group_name,created_at}]}` |
+| Reader | `GET /comic/{slug}/{hid}-chapter-{chap}-{lang}` → HTML carrying `<script type="application/json" id="sv-data">` |
+
+Four things are worth dwelling on.
+
+**Two of the four are embedded payloads, and that is an upgrade rather than a
+fallback.** They are not a scrape of rendered markup — they are the data the
+page is built from, served as JSON in a script element of declared type. The
+payload is *more* complete than the page (which truncates the description and
+hides the alternate titles behind a control) and considerably more stable than
+whatever its JavaScript does with it afterwards.
+
+**The payload is matched by identifier *and* declared type.** The page carries a
+dozen other script elements, several third-party, and one deliberately named
+`sv-data-init`. Matching on the identifier alone means eventually handing
+someone else's payload to a JSON parser.
+
+**A chapter is addressed by a composite of three fields** — `{hid}-chapter-
+{chap}-{lang}` — and it wants all three. The identifier alone answers **404**,
+which was checked rather than assumed. A one-shot has no chapter number and the
+segment is built with it empty, which is what the site's own frontend does with
+the same template; that case is **inferred rather than observed**.
+
+**`type=comic` is not optional.** Without it the search endpoint also answers
+with people and groups, which are not series and have no chapters.
+
+#### `overrides` keys, and why each exists
+
+| Key | Default | Why |
+|---|---|---|
+| `maxContentRating` | `suggestive` | Every result carries a rating. **Applied to the response, not sent as a query parameter**: the endpoint accepts a parameter of that name but its semantics are undocumented — maximum, exact match or repeated key — and guessing wrong drops results silently. Filtering what came back cannot. An entry the site never rated is *kept*: refusing to show something because the site forgot to classify it is the wrong way round |
+| `includeAllLanguages` | `false` | The chapter list is filtered to the source's language. Listing every language produces duplicate chapter numbers, and §7.2's ordering contract has nothing sensible to do with two chapter 5s |
+
+#### `AllowedHosts`
+
+`*.comicknew.pictures`.
+
+One entry, wildcard, and both halves deliberate: the payload names the shard in
+a `cdn_id` field and the hostnames are numbered labels on that one domain, so
+the wildcard is the shape of the fact and the apex serves nothing. **No second
+domain is named**, although this software has used others in the past —
+widening §7.4's boundary on the strength of a hostname nobody observed is worse
+than a download that fails with the host named in the error.
+
+#### Quirks
+
+**Status is an integer.** `1` ongoing, `2` completed, `3` cancelled — all three
+observed directly across a search of forty series on 2026-09-16. `4` → hiatus is
+**inferred** from the gap and from the vocabulary every site of this kind uses.
+Anything else becomes `StatusUnknown` rather than being invented.
+
+**Chapter titles come from two fields.** A number and, separately and often
+emptily, a name. Neither alone is enough — a bare number is a poor PDF title and
+a bare name loses the position in the series — so they are combined, and a
+chapter with neither is called "Oneshot".
+
+#### What was measured, 2026-09-16
+
+| Step | Result |
+|---|---|
+| `/api/search?q=&type=comic` | **200**, JSON, 61 KB |
+| `/comic/{slug}` | **200**, `#comic-data` payload present and parsed |
+| `/api/comics/{slug}/chapter-list?lang=en` | **200**, whole list, descending, ascending after the reversal |
+| Reader page | **200**, `#sv-data` payload, **113 page URLs** |
+| `robots.txt` | `Allow: /`, with `/user*` and an auth callback disallowed |
+| **A second mirror, same `/api/search`** | **403**, challenge interstitial — terminal under §7.6 |
+| **Page image, no `Referer`** | **403**, Cloudflare `Attention Required!` |
+| **Page image, `Referer` = the chapter page** | **200**, `image/webp` |
 
 ---
 
