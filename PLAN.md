@@ -1146,36 +1146,46 @@ Non-negotiable, and not configurable by a source entry:
   fetch layer, never a per-source flag a user can flip. Requests must carry
   their kind explicitly — do not infer it from the URL.
 
-  **OWNER OVERRIDE (added 2026-09-16, per-source, opt-in, off by default).**
-  A source may carry `ignoreRobots: true`, which skips the robots check for that
-  source only. Recorded here with the argument on both sides, because it changes
-  a rule this document previously called non-bypassable.
+  **SUPERSEDED 2026-09-16 — robots.txt is no longer consulted by default.**
+  The owner's decision, recorded with the reasoning because it reverses what
+  this section previously called non-bypassable.
 
-  *For:* `robots.txt` is the Robots **Exclusion** Protocol and RFC 9309 scopes it
-  to crawlers. **No comparable reader consults it at all** — verified against
-  `keiyoushi/extensions-source`, where nothing fetches `robots.txt` in any
-  extension or shared library. Mihon-class readers treat every request as a user
-  agent acting on direct instruction, as a browser does. Quire's
-  discovery/retrieval split was therefore already *stricter than the entire
-  ecosystem*, not equal to it. The operator selects every source by hand and
+  *The argument:* RFC 9309 scopes robots.txt to "automatic clients known as
+  crawlers". A person typing a search and tapping a result is driving every
+  request — that is a browser, not a crawler — and browsers do not consult it.
+  **No comparable reader consults it either:** verified against
+  `keiyoushi/extensions-source`, where nothing anywhere fetches `robots.txt`.
+  Quire's discovery/retrieval split was therefore stricter than the entire
+  ecosystem, not equal to it. The operator chooses every source by hand, and
   §1.3 puts that determination with them.
 
-  *Against:* a `Disallow` is still a site operator expressing a preference about
-  automated access, and honouring it by default is why the exception granted for
-  MangaDex could be kept narrow. Turning it off is a real change of posture, not
-  a configuration detail.
+  *Where the argument does not reach, recorded honestly:* two things Quire does
+  are automated however they were initiated — the **probe** (§7.5 fetches
+  homepage, search, series, chapters and pages in sequence, unattended) and
+  **watch checks** (§12.2 polls on open, per-source cooldown). Calling those
+  manual browsing would be a stretch. They are in scope of the setting like
+  everything else; this note exists so nobody later mistakes the decision for a
+  claim that Quire never crawls.
 
-  **Constraints, so this stays honest:**
-  - **Off by default**, per-source, never global, and never inferred. The user
-    sets it deliberately on a source they chose.
-  - **Log it every time it suppresses a check**, at info level. A safeguard that
-    is off silently is worse than one that was never there.
-  - **It changes nothing else.** Rate limits, per-host delays, the honest
-    `User-Agent`, the SSRF guard and §7.6's absolute no-circumvention rule all
-    still apply in full. In particular §7.6 is untouched: this does not license
-    UA spoofing, TLS impersonation, CAPTCHA solving or challenge bypass, and a
-    `blocked_challenge` verdict remains terminal.
-  - Surface it in the UI as what it is, not as a tick-box with no consequence.
+  **Implementation, so it stays honest:**
+  - A **single global setting**, default **off** (robots not consulted). Not
+    per-source — one switch, one behaviour, nothing to reason about per site.
+  - **Keep the machinery and the switch.** The parser, the three-way
+    unreadable-robots handling and their tests stay, so turning it back on is a
+    setting rather than a rewrite. Quire may not always have one user.
+  - **Log at info when a fetch proceeds past a `Disallow`**, naming the path.
+    A safeguard that is off silently is worse than one that was never there,
+    and this is the record of what the setting actually did.
+  - **Nothing else changes.** Rate limits, per-host minimum delays, the honest
+    `User-Agent`, the response size cap, byte accounting and the SSRF guard all
+    still apply in full.
+  - **§7.6 is untouched and is not weakened by this.** No UA spoofing, no TLS
+    impersonation, no CAPTCHA solving, no challenge bypass. A
+    `blocked_challenge` verdict stays terminal. A site that actively refuses us
+    is still a site we do not argue with — that is a different thing from an
+    advisory file aimed at crawlers.
+  - The `Kind` (discovery/retrieval) plumbing may stay as documentation of
+    intent, but it no longer gates anything while the setting is off.
 
   **Worked classifications — when in doubt, classify as discovery.** The rule
   above is a narrow exception and should stay narrow; "the user is ultimately
