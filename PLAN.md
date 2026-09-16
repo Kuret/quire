@@ -1261,13 +1261,39 @@ and diffing against one that doesn't; record both the method and the result.
 
 **Stage 5 — Capability check.** With the candidate theme, exercise the full path
 against the live site: a search (or the popular/latest listing if search needs a
-query), one series detail, one chapter list, and one page-image extraction.
+query), one series detail, one chapter list, and one page image — **extracted
+*and fetched***.
+
+**CORRECTION 2026-09-16 — extraction is not the question, forced by a real
+probe.** A site of the `mangakakalot` family extracted 76 page URLs perfectly
+and then answered **403 with a challenge interstitial on its image host**.
+Checking extraction alone returns `ok` for that site, and the user discovers it
+is useless minutes later when a download fails — a **false `ok`**, which is what
+this section and §6 M3 exist to prevent. "If page extraction fails the source is
+useless, so refuse" plainly meant *can we get pages*. So stage 5 fetches **one
+image, not a chapter**: proportionate, and enough to answer it.
+
+The fetch goes through the **real fetch client**, so the SSRF guard and the
+`allowedHosts` seeded from the theme (§7.2) are exercised here rather than at
+download time. Three outcomes, and they must not be collapsed:
+
+- **A browser challenge on the image host is `blocked_challenge`, and terminal**
+  (§7.6). The verdict must say *where* — "the host it serves its pages from
+  requires a browser challenge" — because a bare `blocked_challenge` after a
+  search that worked is baffling.
+- **Any other refusal, or a body that is not an image, is `partial`**, naming
+  page fetching as the failing step. A 403 with no challenge markers is a site
+  refusing this request; asserting a challenge we did not observe is the same
+  class of lie as a false `ok`.
+- **A guard rejection is reported as itself**, not as a challenge: a theme
+  extracting images from a host it never declared is a theme bug, and naming the
+  host is what makes it fixable.
 **Extract pages from the *newest* chapter, not the oldest.** A site that has
 changed its reader markup leaves its back catalogue exactly as it was, so
 probing the earliest chapter can report a capability the user will not actually
 have on anything they read. The newest chapter is the one that reflects the
 site as it is now.
-Require all four to produce plausible non-empty results. This is what separates
+Require all five to produce plausible non-empty results. This is what separates
 "looks like Madara" from "works as Madara".
 
 Partial success → verdict `partial`, naming the failing step. Offer to add in a
