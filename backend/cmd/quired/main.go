@@ -34,6 +34,7 @@ import (
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
+	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
 )
 
@@ -424,6 +425,7 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	reg := theme.NewRegistry()
 	reg.MustRegister(madara.New(client))
 	reg.MustRegister(mangathemesia.New(client))
+	reg.MustRegister(mangakakalot.New(client))
 	reg.MustRegister(mangadex.New(client))
 	reg.MustRegister(generic.New(client))
 
