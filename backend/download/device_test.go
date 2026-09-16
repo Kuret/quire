@@ -3,6 +3,7 @@ package download_test
 import (
 	"context"
 	"fmt"
+	"image"
 	"io"
 	"math"
 	"os"
@@ -245,4 +246,130 @@ func procMem() (hwm, rss int64) {
 		}
 	}
 	return hwm, rss
+}
+
+// TestDeviceStripSplitRun measures the strip splitter on the device, which is
+// the only place the number means anything: strips are the largest inputs this
+// package handles, and the device has already OOM-killed us once over a
+// smaller input (docs/DEVICE-NOTES.md §10.4).
+//
+// What is being checked is that splitting *before* the fit-and-pad resize
+// (PLAN §12.3) keeps the peak below the whole-strip path rather than above it.
+// Decoding a 20000-row strip is unavoidable; resampling one is not, and each
+// piece resizes as an ordinary ~800 × 1067 page instead.
+//
+// QUIRE_SPLIT=never reruns the same input through the pre-§12.3 behaviour, so
+// the two peaks can be compared on the same hardware in the same session.
+//
+//	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o download.test ./backend/download
+//	COPYFILE_DISABLE=1 tar -cf - strips | ssh root@10.11.99.1 'tar -C /home/root/quire-strip -xf -'
+//	ssh root@10.11.99.1 'cd /home/root/quire-strip && QUIRE_DEVICE_MEASURE=1 \
+//	    QUIRE_WORK_DIR=/home/root/quire-strip/work QUIRE_SRC_DIR=/home/root/quire-strip/strips \
+//	    ./download.test -test.run=TestDeviceStripSplitRun -test.v -test.timeout=30m'
+//
+// Write only under /home: / has ~47 MB free (docs/DEVICE-NOTES.md §3.3).
+// Recorded results live in docs/DEVICE-NOTES.md §12.
+func TestDeviceStripSplitRun(t *testing.T) {
+	if os.Getenv("QUIRE_DEVICE_MEASURE") != "1" {
+		t.Skip("set QUIRE_DEVICE_MEASURE=1 to run the on-device measurement")
+	}
+	work := os.Getenv("QUIRE_WORK_DIR")
+	if work == "" {
+		t.Fatal("QUIRE_WORK_DIR is required; it must be under /home")
+	}
+	srcDir := os.Getenv("QUIRE_SRC_DIR")
+	if srcDir == "" {
+		t.Fatal("QUIRE_SRC_DIR is required: a directory of strip images")
+	}
+
+	mode := imageproc.SplitAuto
+	if s := os.Getenv("QUIRE_SPLIT"); s != "" {
+		m, err := imageproc.ParseSplitMode(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mode = m
+	}
+
+	var paths []string
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jpg") && !strings.HasPrefix(e.Name(), ".") {
+			paths = append(paths, filepath.Join(srcDir, e.Name()))
+		}
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		t.Fatalf("no strips in %s", srcDir)
+	}
+
+	// One chapter, as a webtoon episode is: every image is a strip, so
+	// corroboration is satisfied and the deferral path is exercised for any
+	// image below the extreme ratio.
+	ch := download.Chapter{ID: "ep-1", Title: "Episode 1", Number: "1"}
+	for i := range paths {
+		ch.PageURLs = append(ch.PageURLs, fmt.Sprintf("file://%d", i))
+	}
+
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatal(err)
+	}
+	opts := download.Options{
+		Concurrency:   6,
+		EncodeWorkers: 2,
+		MinFreeBytes:  -1,
+		SplitStrips:   mode,
+	}
+	opts.Image = imageproc.DefaultOptions()
+	opts.Image.MaxBytes = 0 // measuring memory, not enforcing the page budget
+	q := download.New(&fileFetcher{paths: paths}, opts)
+	t.Logf("splitStrips: %s", mode)
+	t.Logf("memory limit: %d MiB, resample guard %d MiB",
+		debug.SetMemoryLimit(-1)>>20, opts.Image.MaxResampleBytes>>20)
+
+	for i, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, err := image.DecodeConfig(f)
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, _ := os.Stat(p)
+		t.Logf("strip %d: %d×%d  h:w %.1f  %.1f MiB on disk",
+			i, cfg.Width, cfg.Height, imageproc.Aspect(cfg.Width, cfg.Height), float64(st.Size())/(1<<20))
+	}
+
+	start := time.Now()
+	out, stats, err := q.Run(t.Context(), filepath.Join(work, "pages"), []download.Chapter{ch})
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	dlElapsed := time.Since(start)
+	hwmAfterDownload, _ := procMem()
+
+	vol := assemble.GroupIntoVolumes("Strip", out, len(out))[0]
+	start = time.Now()
+	m, err := assemble.Assemble(context.Background(), filepath.Join(work, "library"), vol, assemble.DefaultOptions())
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	asmElapsed := time.Since(start)
+	hwm, rss := procMem()
+
+	t.Logf("source images    %d", stats.PagesTotal)
+	t.Logf("split            %d images → %d pages", stats.PagesSplit, stats.PagesFromSplit)
+	t.Logf("PDF              %d pages, %.1f MiB (%.0f KiB/page)",
+		m.PageCount, float64(m.Bytes)/(1<<20), float64(m.Bytes)/float64(m.PageCount)/1024)
+	t.Logf("download         %s", dlElapsed.Round(time.Millisecond))
+	t.Logf("assemble         %s", asmElapsed.Round(time.Millisecond))
+	t.Logf("pages guarded    %d", stats.PagesGuarded)
+	t.Logf("scaler cache     %.0f MiB retained at the end", float64(imageproc.ScalerCacheBytes())/(1<<20))
+	t.Logf("VmHWM after dl   %.0f MiB", float64(hwmAfterDownload)/1024)
+	t.Logf("VmHWM / VmRSS    %.0f MiB / %.0f MiB   <-- peak RSS for the whole run", float64(hwm)/1024, float64(rss)/1024)
 }

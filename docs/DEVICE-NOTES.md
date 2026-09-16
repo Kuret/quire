@@ -999,3 +999,68 @@ margins either side — a page nobody can read. That is the known webtoon
 limitation in PLAN §6 M4. Strip-splitting is the fix if the user asks for it,
 and it wants real banding rather than this guard, so the two concerns are kept
 separate in the code.
+
+**Superseded 2026-09-16 by strip splitting (PLAN §12.3), and the correction is
+worth reading — see §12.** The prediction above was that splitting "wants real
+banding". It does not. Cutting the strip *before* the fit-and-pad resize means
+each piece resamples as an ordinary ~800 × 1067 page, so the intermediate never
+gets large in the first place and this guard never fires on a strip at all
+(measured: 0 pages guarded across seven strips up to 800 × 20000). The two
+concerns stay separate in the code for the reason given, but the guard is not
+what makes splitting affordable.
+
+---
+
+## 12. Strip splitting on device (PLAN §12.3)
+
+Measured on the tablet 2026-09-16, xochitl running, over USB, with
+`TestDeviceStripSplitRun` in `backend/download`. Seven strips of deliberately
+varied geometry (800 × 20000, 1080 × 15000, 800 × 12000, 720 × 9600,
+800 × 8000, 900 × 5400, 800 × 4200), one chapter, two encode workers, the
+shipped soft heap limit and resample guard.
+
+```
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o download.test ./backend/download
+COPYFILE_DISABLE=1 tar -cf - strips download.test | ssh root@10.11.99.1 'tar -C /home/root/quire-strip -xf -'
+ssh root@10.11.99.1 'cd /home/root/quire-strip && QUIRE_DEVICE_MEASURE=1 \
+    QUIRE_WORK_DIR=/home/root/quire-strip/work \
+    QUIRE_SRC_DIR=/home/root/quire-strip/strips \
+    ./download.test -test.run=TestDeviceStripSplitRun -test.v -test.timeout=40m'
+```
+
+| configuration | pages out | peak RSS (VmHWM) | wall clock | pages guarded |
+|---|---|---|---|---|
+| `splitStrips: auto` — shipped | **70** | **519 MiB** | 21.4 s | 0 |
+| `splitStrips: never` — the pre-§12.3 behaviour | 7 | **536 MiB** | 11.1 s | 0 |
+
+**Splitting does not cost memory; it saves a little.** Ten times the output
+pages at a *lower* peak than leaving the strips whole, against ~1.64 GB
+available with xochitl up — roughly 1.1 GB of headroom, in line with §10.4's
+shipped figure of 637 MiB for ordinary pages.
+
+**Why, and it is the whole reason PLAN §12.3 insists on the ordering.** The
+intermediate x/image allocates is `destinationWidth × sourceHeight × 32`. Fit a
+whole 800 × 20000 strip into a 3:4 page and the destination is an 86 px sliver,
+so the intermediate is 86 × 20000 × 32 = 55 MB — small, but the *decoded strip*
+is held across the whole resize either way. Split first and each piece
+resamples as an ordinary ~800 × 1067 page, so nothing large is ever resampled
+and §10.5's guard never engages (0 of 7, both runs). The decode of a
+20000-row strip is the irreducible cost and it is the same in both columns.
+
+**Wall clock roughly doubles, and that is the honest price:** 70 pages are
+encoded instead of 7. Per *output* page it is 0.31 s against 1.58 s, because a
+split piece is a small image and a whole strip is not. Extrapolating §10.2's
+figures, a webtoon episode of ten strips is about 30 s of background CPU.
+
+**The fixtures are synthetic and that is a real limitation.** PLAN §1.3 forbids
+committing source content, so the strips are generated: measured *geometry*
+from §12.3's table, panel art with authored gutters, speech bubbles and
+lettering, encoded at q88 to land at 0.2–0.8 MiB each — the size range a real
+strip occupies. That is fair for a memory and throughput measurement, which
+depends on pixel dimensions and compressed size rather than on the art. It is
+**not** evidence about cut *quality* on real authored gutters, and §9's
+circular-fixture warning applies: the first real webtoon episode a user
+downloads is the measurement that has not been taken.
+
+**Scratch was removed after the run** (`/home/root/quire-strip`). Write only
+under `/home`: `/` has ~47 MB free (§3.3).
