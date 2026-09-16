@@ -67,19 +67,6 @@
       },
       "default": { "requestsPerMinute": 30, "concurrency": 2 }
     },
-    "grouping": {
-      "type": "string",
-      "description": "How this source's chapters are grouped into documents, PLAN §6 M4 (reversed 2026-09-16). 'chapter' is the default and gives one PDF per chapter, even where the source publishes volume labels: the first thing anyone does with an unfamiliar series is read a few pages to decide whether they want the rest, and a 7-10 minute wait before *anything* is readable makes that impossible, whereas per chapter the first file arrives in about a minute. A failed download also costs one chapter rather than ten, and cancelling costs less. A source's volume labels are therefore information, not an instruction. 'volume' restores the old behaviour -- group on the source's own Chapter.Volume label wherever there is one, and fall back to runs of groupSize where there is not -- for a reader who would rather have one document per volume and reading position carried across chapters. 'count' ignores volume labels and always groups into fixed runs of groupSize. Whatever is chosen, a document that would exceed xochitl's upload cap still splits into parts, and a series whose reading order the theme could not establish is still saved one chapter per file, because a volume is a *run* of chapters and building one from an unordered list produces a silently scrambled book.",
-      "enum": ["chapter", "volume", "count"],
-      "default": "chapter"
-    },
-    "groupSize": {
-      "type": "integer",
-      "description": "Chapters per document when grouping is 'count', and the fallback run length when grouping is 'volume' and the source publishes no labels. Ignored when grouping is 'chapter'.",
-      "minimum": 1,
-      "maximum": 100,
-      "default": 10
-    },
     "splitStrips": {
       "type": "string",
       "description": "Vertical-scroll ('webtoon') strip splitting, PLAN §12.3. Tall single-image pages are cut into panel-shaped pages instead of being fitted into a 3:4 page as an unreadable centred sliver. Detection is per *image*, never per source -- a single index, and a single series, hosts both formats -- and it is biased hard toward doing nothing: a strip left unsplit is a sliver the reader can see, whereas a manga page wrongly split is mangled art across a whole volume, silently. 'auto' requires an aspect past the measured threshold (h:w 3.76, the empty middle between two stacked pages at 2.83 and the shortest real strip at 5.0) AND either corroboration from the rest of the chapter or a ratio past 10:1 that nothing else explains. 'never' disables it for this source. 'always' waives detection and hands every image to the splitter, which still leaves anything that already fits one page alone. This is an escape hatch: detection will eventually be wrong and the user should not have to wait for a release.",
