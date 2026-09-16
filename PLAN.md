@@ -1173,9 +1173,15 @@ Non-negotiable, and not configurable by a source entry:
   - **Keep the machinery and the switch.** The parser, the three-way
     unreadable-robots handling and their tests stay, so turning it back on is a
     setting rather than a rewrite. Quire may not always have one user.
-  - **Log at info when a fetch proceeds past a `Disallow`**, naming the path.
-    A safeguard that is off silently is worse than one that was never there,
-    and this is the record of what the setting actually did.
+  - **Log at info every time the check is suppressed**, with host, path and
+    request `kind`. *(Corrected 2026-09-16: an earlier draft said "when a fetch
+    proceeds past a `Disallow`", which cannot be implemented — knowing a path
+    was disallowed means fetching `robots.txt`, the exact request the setting
+    exists to avoid. Logging the suppressed check is the same record without
+    the extra request.)* A safeguard that is off silently is worse than one
+    that was never there. Log the `kind`, not a claim about who asked: the
+    probe and watch checks run unattended, so wording that implied every
+    request was person-driven would be untrue.
   - **Nothing else changes.** Rate limits, per-host minimum delays, the honest
     `User-Agent`, the response size cap, byte accounting and the SSRF guard all
     still apply in full.
