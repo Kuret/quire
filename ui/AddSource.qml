@@ -223,7 +223,7 @@ Item {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         visible: screen.phase === "form"
         layout: "url"
-        onKeyTyped: screen.url += character
+        onKeyTyped: screen.url += text
         onBackspace: screen.url = screen.url.substring(0, screen.url.length - 1)
         onClearAll: screen.url = ""
         onSubmit: screen.start()

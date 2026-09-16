@@ -564,7 +564,7 @@ Item {
         Keyboard {
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
             layout: "text"
-            onKeyTyped: screen.renameText += character
+            onKeyTyped: screen.renameText += text
             onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
             onClearAll: screen.renameText = ""
             onSubmit: screen.commitRename()

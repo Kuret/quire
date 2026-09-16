@@ -29,7 +29,9 @@ Item {
     // query ever needs.
     property bool shifted: false
 
-    signal keyTyped(string character)
+    // The argument is what to insert, which since the .com and .org keys is not
+    // always one character.
+    signal keyTyped(string text)
     signal backspace()
     signal clearAll()
     signal submit()

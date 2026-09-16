@@ -301,7 +301,7 @@ Item {
         anchors { left: parent.left; right: parent.right; bottom: pagerBar.top }
         visible: screen.searching
         layout: "text"
-        onKeyTyped: screen.query += character
+        onKeyTyped: screen.query += text
         onBackspace: screen.query = screen.query.substring(0, screen.query.length - 1)
         onClearAll: screen.query = ""
         onSubmit: {
