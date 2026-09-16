@@ -10,10 +10,12 @@ package service_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -218,5 +220,106 @@ func TestSplitStripsRejectsAnInvalidValueAtTheStore(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(err.Error()), []byte("splitStrips")) {
 		t.Errorf("the refusal does not name the field the user has to fix: %v", err)
+	}
+}
+
+// TestSourceListCarriesSplitStrips — the control has to have a value to show on
+// every row, including a source stored before the field existed.
+func TestSourceListCarriesSplitStrips(t *testing.T) {
+	svc, store, _, _, rec := newDownloadServiceWith(t, stripRoutes(t))
+	addSource(t, store) // no splitStrips set at all
+
+	handle(t, svc, rec, appload.MessageListSources, `{}`)
+	var msg struct {
+		Sources []struct {
+			ID          string `json:"id"`
+			SplitStrips string `json:"splitStrips"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSources), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.Sources) != 1 {
+		t.Fatalf("%d sources, want 1", len(msg.Sources))
+	}
+	if msg.Sources[0].SplitStrips != "auto" {
+		t.Errorf("a source with nothing set reports splitStrips %q; the UI would show it blank",
+			msg.Sources[0].SplitStrips)
+	}
+}
+
+// TestSetSourceSplitStripsStoresAndEchoes is the round trip the control makes:
+// the value is stored, and the reply is the source list so the row redraws with
+// what was actually saved rather than with what the UI hoped for.
+func TestSetSourceSplitStripsStoresAndEchoes(t *testing.T) {
+	svc, store, _, _, rec := newDownloadServiceWith(t, stripRoutes(t))
+	addSource(t, store)
+
+	handle(t, svc, rec, appload.MessageSetSourceSplitStrips,
+		`{"sourceId":"example-reader","splitStrips":"never"}`)
+
+	var msg struct {
+		Sources []struct {
+			SplitStrips string `json:"splitStrips"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSources), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.Sources) != 1 || msg.Sources[0].SplitStrips != "never" {
+		t.Fatalf("the reply reports %+v, want splitStrips never", msg.Sources)
+	}
+
+	// And it is on the stored source, not only in the reply.
+	src, ok := store.Get("example-reader")
+	if !ok {
+		t.Fatal("the source vanished")
+	}
+	if src.SplitStrips != "never" {
+		t.Errorf("stored splitStrips = %q, want never", src.SplitStrips)
+	}
+}
+
+// TestSetSourceSplitStripsRefusesAnUnknownMode keeps a bad value out of the
+// store, and answers in words rather than with a code.
+func TestSetSourceSplitStripsRefusesAnUnknownMode(t *testing.T) {
+	svc, store, _, _, rec := newDownloadServiceWith(t, stripRoutes(t))
+	addSource(t, store)
+
+	handle(t, svc, rec, appload.MessageSetSourceSplitStrips,
+		`{"sourceId":"example-reader","splitStrips":"sometimes"}`)
+
+	var errMsg struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageError), &errMsg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errMsg.Message, "automatic") {
+		t.Errorf("the refusal does not say what is allowed: %q", errMsg.Message)
+	}
+	if src, _ := store.Get("example-reader"); src.SplitStrips != "" {
+		t.Errorf("a refused mode was stored anyway: %q", src.SplitStrips)
+	}
+}
+
+// TestSetSourceSplitStripsEmptyClearsToTheDefault — "Automatic" is expressible
+// as the absence of a value, so choosing it must not pin the source to a
+// literal the schema would then have to keep meaning forever.
+func TestSetSourceSplitStripsEmptyClearsToTheDefault(t *testing.T) {
+	svc, store, _, _, rec := newDownloadServiceWith(t, stripRoutes(t))
+	addSource(t, store)
+
+	handle(t, svc, rec, appload.MessageSetSourceSplitStrips,
+		`{"sourceId":"example-reader","splitStrips":"always"}`)
+	rec.wait(t, appload.MessageSources)
+
+	handle(t, svc, rec, appload.MessageSetSourceSplitStrips,
+		`{"sourceId":"example-reader","splitStrips":""}`)
+	rec.wait(t, appload.MessageSources)
+
+	src, _ := store.Get("example-reader")
+	if src.SplitStrips != "" {
+		t.Errorf("stored splitStrips = %q, want it cleared", src.SplitStrips)
 	}
 }

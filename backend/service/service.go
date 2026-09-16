@@ -22,6 +22,7 @@ import (
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/download"
 	"github.com/rickl/quire/backend/fetch"
+	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/state"
@@ -336,6 +337,23 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.sendSources(out)
 
+	case appload.MessageSetSourceSplitStrips:
+		var req struct {
+			SourceID    string `json:"sourceId"`
+			SplitStrips string `json:"splitStrips"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		switch err := s.store.SetSplitStrips(req.SourceID, req.SplitStrips); {
+		case errors.Is(err, state.ErrBadSplitStrips):
+			return true, s.sendError(out, "bad_request",
+				"Splitting can be set to automatic, never or always.")
+		case err != nil:
+			return true, s.sendError(out, "not_found", plain(err))
+		}
+		return true, s.sendSources(out)
+
 	case appload.MessageCancelDownload:
 		var req downloadRequest
 		if err := decode(payload, &req); err != nil {
@@ -408,6 +426,13 @@ type sourceView struct {
 	Lang    string `json:"lang"`
 	Enabled bool   `json:"enabled"`
 
+	// SplitStrips is the strip-splitting override (PLAN §12.3), always one of
+	// "auto", "never" or "always" — never empty, even though the stored value
+	// can be. Resolving "unset" to "auto" here rather than in the UI means the
+	// control has a value to show on every row, and means one place decides
+	// what absent means.
+	SplitStrips string `json:"splitStrips"`
+
 	// Status and StatusDetail are the last probe, in plain language. A source
 	// that has never been probed says so rather than showing an empty row.
 	Status       string `json:"status"`
@@ -419,10 +444,15 @@ func (s *Service) sendSources(out Sender) error {
 	list := s.store.List()
 	views := make([]sourceView, 0, len(list))
 	for _, src := range list {
+		split := src.SplitStrips
+		if split == "" {
+			split = imageproc.SplitAuto.String()
+		}
 		v := sourceView{
 			ID: src.ID, Name: src.Name, BaseURL: src.BaseURL,
 			Theme: src.Theme, Lang: src.Lang, Enabled: src.IsEnabled(),
-			Status: "Not checked yet",
+			SplitStrips: split,
+			Status:      "Not checked yet",
 		}
 		if src.LastProbe != nil {
 			v.Status = VerdictHeadline(src.LastProbe.Verdict)
