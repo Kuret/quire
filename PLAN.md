@@ -1810,3 +1810,64 @@ longer matches — say so on the series rather than showing zero or, worse, a
 false badge. §6 M7's re-probe applies here: a watched series that starts
 returning nothing is evidence the source changed, and is exactly the trigger
 that machinery exists for.
+
+### 12.3 Strip splitting — making vertical-scroll sources readable
+
+**Requested 2026-09-16.** `webtoons` parses and downloads correctly and the
+result is unusable: its pages are single images thousands of pixels tall, and
+§6 M4 fits a page into a 3:4 PDF page, so a strip becomes **a small centred
+sliver with white margins either side**. Technically correct, unreadable. The
+M4 memory guard bounds the cost and does not change the outcome.
+
+The fix is to cut a tall strip into panel-shaped pages. **Do not cut blindly.**
+
+**Why this is tractable at all:** vertical-scroll comics are *authored* with
+horizontal gutters — bands of flat background between panels. That is a format
+convention, not luck, and it is what a splitter exploits.
+
+**The algorithm, in order of preference:**
+
+1. **Gutter detection.** A row is a candidate cut when it is near-uniform across
+   the full width. Allow tolerance — JPEG noise and gradients mean "uniform"
+   is never exact.
+2. **Search a window, not a point.** Around each target height (one panel page),
+   look ±20% and take the best candidate. Pages come out slightly uneven and
+   nearly every cut lands where the author already put a break. Cutting at
+   exactly the target is what produces mid-panel slices.
+3. **Minimum-energy seam as the fallback.** Where no gutter exists in the
+   window, cut at the row of least gradient energy. Always finds something;
+   degrades gracefully on art with no clean gutters.
+4. **Small overlap (≈5%) across every cut.** A panel spanning a boundary then
+   appears whole on both pages. Costs a little space and guarantees nothing is
+   lost — which matters because a reader cannot scroll across our page break.
+
+**The unavoidable case, stated honestly:** a single panel taller than one page
+*must* be cut, or scaled below legibility. Rare — a full-height splash — but
+real. Cut it, and let the overlap carry the loss.
+
+**Constraints:**
+
+- **Only engage for strips.** Gate on source aspect: a page whose height:width
+  ratio is far from the panel's must not be touched. **An ordinary manga page
+  must never be split**, and a test must pin that — this is the regression that
+  would ruin every existing source.
+- **The chapter→(PDF, page offset) map must follow the new page count.** It is
+  M6's input, and §6 M4's volume splitting already records rather than derives
+  it. One source image becoming eight pages changes every downstream offset; a
+  splitter that does not update the map silently breaks "Read".
+- **Renumber pages from 0 per chapter.** `assemble` rejects a chapter whose
+  `Page.Index` does not start at 0 and run in order — found the hard way during
+  volume splitting.
+- **Mind the memory.** Strips are the largest inputs we handle and §10.5's guard
+  exists for them. Split **before** the fit-and-pad resize where possible, so
+  each piece is resized rather than the whole strip.
+- Surface it: a `Stats` counter as `PagesGuarded` and `PagesRequantised` do, so
+  a source being split unexpectedly is visible rather than silent.
+
+**Testing.** Synthetic strips built with *known* gutter positions, so a test can
+assert the cuts landed in them. Include: clean gutters at regular intervals;
+gutters at irregular intervals; **no usable gutter at all** (forces the
+energy fallback); a single panel taller than a page; and an ordinary 3:4 manga
+page that must come through untouched. §9's warning applies with force — a
+generated strip that is *convenient* proves nothing, so make the awkward cases
+genuinely awkward.
