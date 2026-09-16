@@ -1,10 +1,6 @@
 package service
 
 import (
-	"errors"
-	"io/fs"
-	"os"
-
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
 )
@@ -148,22 +144,21 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 			continue
 		}
 
-		// The assembled PDF is reclaimable space PLAN §6 M7 already wants back,
-		// and it is of no use once the document it produced is in the Trash. A
-		// PDF that is already gone is not a failure: the UUID outlives the file
-		// by design (library.Record.PDF).
-		if rec.PDF != "" {
-			if err := os.Remove(rec.PDF); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				s.log.Warn("could not remove the assembled PDF", "path", rec.PDF, "err", err)
-			}
-		}
-
 		if err := s.libStore.Remove(rec.Key); err != nil {
 			s.log.Error("could not forget a trashed volume", "uuid", req.DocumentUUID, "err", err)
 			return s.sendError(out, "not_forgotten", DeleteNotForgottenRemedy)
 		}
+
+		// The PDF, its manifest and the cached pages behind them all go (PLAN
+		// §12.4). Read *after* the record is removed, so "is any other record
+		// still using this chapter?" is asked of the records that are staying —
+		// asking before would find this one and keep everything it named.
+		freed := s.reclaimPages(rec, s.libStore.List())
+
 		s.log.Info("a downloaded volume was deleted from the reMarkable",
-			"document", req.DocumentUUID, "name", rec.VisibleName, "trashEmptied", req.Emptied)
+			"document", req.DocumentUUID, "name", rec.VisibleName, "trashEmptied", req.Emptied,
+			"chapters", len(rec.Chapters), "pagesFreedBytes", freed,
+			"pagesFreedMiB", freed>>20)
 		break
 	}
 
