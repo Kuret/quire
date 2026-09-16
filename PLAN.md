@@ -1572,6 +1572,18 @@ to do nothing — a stale cache looks identical to a broken patch.
 > built from *search-page* markup, so we were scoring the wrong rendering — and
 > the home page is what the probe judges.
 >
+> **A second form of the same loop, found 2026-09-16 by the same method.** The
+> first was an invented *string*. This one is an invented *relationship*: every
+> fixture in the repository put its links on exactly the host its test
+> configured as the base, so "a site's links are on the base host" was a claim
+> no test could disprove. A real Madara install redirects its apex to `www.`
+> and renders absolute links there — so a user who pasted the apex got a
+> **perfect fingerprint and a search that returned nothing**. Not an error: an
+> empty list, which reads as "this site has nothing". Six themes shared the
+> defect. The fix is `theme.SameSite`; the durable half is that six fixtures
+> now carry a link on the sibling host, so removing the rule turns six suites
+> red. A fixture that cannot disagree with the code is not evidence.
+>
 > **This is the specific risk created by §6 M2's synthetic-but-faithful
 > fixtures.** That trade remains right — §1.3 forbids committing aggregator
 > HTML — but "faithful" is a claim, and a claim needs checking against reality

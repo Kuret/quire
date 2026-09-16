@@ -392,6 +392,76 @@ UI.
 
 ---
 
+## Live fingerprint scores — measured, not assumed
+
+PLAN §9 requires every fingerprint to be measured against a real page at least
+once, with the score and the date recorded. This is that record. All measured
+by running the **real prober's registry** against the live root with the honest
+User-Agent, 2026-09-16.
+
+| Theme | Live home page | Note |
+|---|---|---|
+| `madara` | **100** | Was 43 before the fingerprint rebuild — the failure that started all of this |
+| `mangathemesia` | 85 | |
+| `mangakakalot` | 70 | The weakest real landing page we ship, and the number `margin` is derived from |
+| `weebcentral` | 95 | |
+| `webtoons` | 90 | |
+| `fanfox` | 70 | |
+| `comick` | **100** | Was 25 before its fingerprint was rebuilt against the root |
+
+The threshold is 60 and `TestFingerprintsClearTheThresholdWithMargin` requires
+a landing page to beat it by 10. **The threshold is never the thing to move**:
+it is load-bearing across every theme, and lowering it to accommodate one
+erodes the false-positive protection of all the others.
+
+Two renderings are recorded as scoring *below* the threshold, on purpose,
+because no probe fetches them: `comick`'s bare API response (50) and
+`weebcentral`'s htmx search *fragment* (65, against 75 for the real `/search`
+page). Both are pinned by tests that explain why inflating them would be tuning
+against a fixture rather than a site.
+
+---
+
+## Same-site link filtering — `theme.SameSite`
+
+Added 2026-09-16, after the real prober found a live Madara install that
+**fingerprinted at 100 and then searched to zero results**.
+
+Every theme filters the links it parses to "on this site", because a listing
+page is full of navigation, adverts and outbound links — and because a theme
+returns *paths*, so a link from another host rewritten onto the source's base
+names a resource that does not exist. Until this landed, that filter was
+`host == base.Hostname()` in six themes.
+
+The user had typed the apex. The site redirects to its `www.` host and renders
+absolute links there. Every result was therefore discarded as off-site and
+`Search` returned an empty list — **not an error**, which is what makes it
+dangerous: an empty list reads as "this site has nothing".
+
+**The rule:** a host matches if it is the base host, or if the two are equal
+once a leading `www.` is removed from either. That equivalence is true by
+construction, and the choice between apex and `www.` is an operator's redirect
+policy rather than something a user should have to get right when pasting a
+URL.
+
+**Deliberately not "same registrable domain",** which was the obvious
+generalisation and is wrong here. Themes discard the host and keep the path, so
+accepting `images.example.com/manga/x` would produce the ID `/manga/x` and then
+fetch it from the *base* host — a different resource, or a 404, arrived at
+silently. The registrable domain is the right boundary for §7.4's redirect
+guard, which keeps the whole URL. It is the wrong one for a rule whose output
+is a bare path.
+
+`webtoons` and `fanfox` compose this with their own extra sibling (`m.`), which
+is where a theme-specific host belongs.
+
+**The durable half of the fix is in the fixtures.** Six themes' search fixtures
+now put at least one result on the sibling host, so removing `SameSite` turns
+six suites red rather than none. See PLAN §9: a fixture that cannot disagree
+with the code is not evidence.
+
+---
+
 ## Per-theme notes
 
 ### `madara` — WordPress `wp-manga` plugin
@@ -466,6 +536,27 @@ Comments are stripped from the body before any substring signal is tested
 (`probe.Page.Contains`). A signal found in a comment is not evidence: sites
 carry commented-out markup from the theme they used to run, and without this a
 page that merely *mentions* another theme gets assigned to it.
+
+**SEARCH REPAIRED 2026-09-16, and it was a second circular fixture.** With the
+fingerprint fixed the same live install then answered a search with **zero
+results**. The cause was one layer down and had nothing to do with Madara: the
+site redirects its apex to `www.`, renders absolute links there, and every
+theme compared link hosts to the base host exactly — so a user who pasted the
+apex had all 12 results discarded as off-site. Fixed by `theme.SameSite`
+(above), which six themes now share. Measured after the fix, from the apex:
+**12 results, 25 chapters ascending, 16 page URLs, image 200 `image/jpeg`.**
+
+**Chapter dates on a real install were dotted, and needed the override.** The
+same site renders `09.09.2026` in its AJAX chapter list — day-first, dotted —
+which neither the `dateFormat` default nor `ParseDate`'s unambiguous fallbacks
+read, so every chapter came back with the zero time. That is tolerated by
+design (§7.2: a chapter with an unreadable date is still a chapter) and it is
+what the override exists for: `"dateFormat": "dd.MM.yyyy"` parses it, verified
+live. It is deliberately **not** added to `ParseDate`'s fallback list —
+`09.09.2026` is ambiguous between day-first and month-first, and guessing wrong
+mislabels dates silently, which is worse than admitting ignorance. Recent
+chapters on the same install render as `17 hours ago` and parse without any
+override.
 
 **Endpoint shapes**
 
@@ -1534,23 +1625,55 @@ mean a theme that stops recognising its own site the week it moves.
 
 #### Fingerprint signals
 
+**Rebuilt 2026-09-16 after the real prober scored the live root at 25.** The
+first version scored the two embedded payloads and the API envelope — all of
+which are on the pages this theme *reads*, and **none** of which are on the
+page the probe *judges*. A logged-out root here is almost entirely a marketing
+landing page: no comic grid, no `#comic-data`, no JSON at all. The 25 it did
+score came from the two weakest signals it had, and the verdict was
+`unrecognised` for a site whose API worked perfectly.
+
+What is on the root, and on every other rendering measured, is the application
+shell — a Laravel/Vite build with named entry chunks, and an Alpine component
+vocabulary with a namespace of its own. That is the fingerprint now.
+
 | Page | Signal | Weight | What it is |
 |---|---|---|---|
-| Series | `#comic-data` | 45 | The series page's own JSON payload |
+| **Every page** | `Utils.loadTheme(` | 30 | The app's Alpine theme helper, in `x-data` on `<html>` |
+| **Every page** | `Header.loadDataHeader(` | 25 | Its header component (absent on the reader) |
+| **Every page** | `/build/assets/settings-sync-` | 15 | A build chunk named after one of this app's own modules |
+| **Every page** | `/build/assets/owl-carousel-` | 10 | Another |
+| **Every page** | `/build/assets/` | 10 | The Vite output directory — a common convention, so weighted low |
+| Header | `/group/popular` | 10 | A listing path particular to this software |
+| Header | `/publisher/popular` | 10 | Another |
+| Series | `#comic-data` | 45 | The series page's embedded payload |
 | Reader | `#sv-data` | 45 | The chapter page's |
-| API | `"next_cursor"` **and** `"data"` | 35 | The search envelope, for a probe that lands on it |
-| Any | `/api/comics/` | 25 | The chapter-list API path |
-| Any | `/chapter-list` | 20 | Its suffix |
+| API body | `"next_cursor"` **and** `"data"` | 35 | The search envelope |
+| API body | `"hid"` | 15 | The identifier vocabulary |
+| API body | `"chap"` | 10 | Likewise |
+| Any | `/api/comics/` | 20 | The chapter-list API path |
+| Any | `/chapter-list` | 15 | Its suffix |
 | Any | `/api/search` | 15 | The search path |
 | Any | `/comic/` | 10 | The link shape |
-| Any | `"hid"` | 15 | The identifier vocabulary — weak, plenty of JSON has one |
-| Any | `"chap"` | 10 | Likewise |
-| **Negative** | `/wp-content/`, `ts_reader.run(`, `data-chapter-url-template`, `checkNewChapter(` | **→ 0** | as above |
+| **Negative** | `/wp-content/`, `ts_reader.run(`, `data-chapter-url-template`, `checkNewChapter(` | **→ 0** | madara/mangathemesia, mangathemesia, mangakakalot, weebcentral |
 | **Negative (selector)** | `#_imageList`, `#chapter-images`, `#viewer .reader-page` | **→ 0** | webtoons, weebcentral, fanfox |
 
-Scores 65–70 on its own three fixtures and 0 on every other theme's — including
-`mangadex`'s, which is the pair worth checking: two JSON APIs in one registry is
-where "it answered JSON" would have become a fingerprint if anyone let it.
+**Measured live 2026-09-16:** root **100**, search page **100**, series page
+**100**, chapter page **100**. Before the rebuild the root was 25.
+
+**A bare API response scores 50, and is deliberately left there.** Nothing in
+the probe fetches `/api/search` — stage 2 fetches the root the user pasted — so
+the shell signals cannot fire and only the envelope remains. Padding weights to
+lift a body no probe sees would be tuning against a fixture rather than a site,
+which is the mistake that produced the 25 in the first place. The number is
+pinned by a test that says so.
+
+**And a smaller instance of the same lesson, caught in passing.** The first
+`search.json` fixture wrote URLs with unescaped slashes. The server's JSON
+encoder escapes them — the bytes on the wire read `api\/search` — so a path
+signal scored 15 against the fixture and 0 against reality. The fixture had
+invented an encoding and then confirmed it. It is now byte-faithful, and
+fixture and live response agree exactly at 50.
 
 #### Endpoint shapes
 
