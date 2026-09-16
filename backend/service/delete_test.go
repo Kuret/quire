@@ -158,3 +158,49 @@ func TestDeletingNothingIsRefused(t *testing.T) {
 		t.Errorf("code %q", e.Code)
 	}
 }
+
+// The confirmation names the document it is about to remove, so the name has to
+// reach the row. It is the stored VisibleName rather than the chapter title:
+// for a split volume those differ, and "(part 2 of 3)" is the part the user
+// needs to see before they tap.
+func TestChapterRowsCarryTheDocumentName(t *testing.T) {
+	svc, store, libStore, _, rec := newDownloadService(t)
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	done := waitForPhase(t, rec, "done")
+	uuid, _ := done["documentUuid"].(string)
+	want := recordFor(t, libStore, uuid).VisibleName
+	if want == "" {
+		t.Fatal("the record has no VisibleName, so this test proves nothing")
+	}
+
+	fresh := &recorder{}
+	handle(t, svc, fresh, appload.MessageSeriesDetail,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`"}`)
+	var detail struct {
+		Chapters []struct {
+			DocumentUUID string `json:"documentUuid"`
+			DocumentName string `json:"documentName"`
+		} `json:"chapters"`
+	}
+	if err := json.Unmarshal(fresh.wait(t, appload.MessageSeriesDetailResult), &detail); err != nil {
+		t.Fatal(err)
+	}
+	named := 0
+	for _, c := range detail.Chapters {
+		if c.DocumentUUID != uuid {
+			continue
+		}
+		named++
+		if c.DocumentName != want {
+			t.Errorf("row names the document %q, want %q", c.DocumentName, want)
+		}
+	}
+	if named == 0 {
+		t.Fatalf("no row carries %q", uuid)
+	}
+}

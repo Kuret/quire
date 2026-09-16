@@ -789,6 +789,11 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		// "Read" (PLAN §6 M6) — without it, a volume downloaded last week is
 		// indistinguishable from one never fetched.
 		DocumentUUID string `json:"documentUuid,omitempty"`
+
+		// DocumentName is that document's name on the tablet, so deleting it
+		// can say which file is going (PLAN §12.4). For a split volume the
+		// rows of each part carry that part's own name.
+		DocumentName string `json:"documentName,omitempty"`
 		VolumeLabel  string `json:"volumeLabel,omitempty"`
 	}
 	stored := s.storedVolumes(sourceID, seriesID, series.Title, chapters)
@@ -801,6 +806,7 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		}
 		if rec, ok := stored[c.ID]; ok {
 			r.DocumentUUID, r.VolumeLabel = rec.DocumentUUID, rec.Volume
+			r.DocumentName = rec.VisibleName
 		}
 		rows = append(rows, r)
 	}
