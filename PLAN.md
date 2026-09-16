@@ -1611,6 +1611,27 @@ on granting it at all.
 store (§6 M7), so "new" is meaningful across restarts. Seeing the series clears
 it. A watched series whose source is removed is dropped with it.
 
+**At-a-glance summary (added 2026-09-16).** The point of the feature is knowing
+*without looking*, so `WatchList` carries a composed summary alongside the rows:
+
+```json
+"summary": {
+  "seriesWithNew": 3,      "newChapters": 11,      "failed": 1,
+  "short":  "3 new",                      // for the entry point, may be ""
+  "phrase": "3 series have new chapters"  // for the watched screen, may be ""
+}
+```
+
+The **backend composes the wording**, including plurals and the failure case —
+§2 keeps QML dumb, and "3 series have new chapters" is a sentence, not data.
+QML renders `short` and `phrase` verbatim or shows neither. Counts travel too,
+so the view can decide *whether* to show something without deciding *what* it
+says. Empty strings mean nothing to report: an entry point that always shows a
+badge teaches people to ignore it.
+
+Prefer text to a dot. The panel is greyscale, and "3 new" survives a partial
+refresh legibly in a way a small coloured marker does not.
+
 **Failure is not "new".** If a check fails — network, challenge, a theme that no
 longer matches — say so on the series rather than showing zero or, worse, a
 false badge. §6 M7's re-probe applies here: a watched series that starts
