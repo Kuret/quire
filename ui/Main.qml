@@ -22,6 +22,7 @@ import QtQuick 2.5
 import net.asivery.AppLoad 1.0
 import "Messages.js" as Msg
 import "Style.js" as Style
+import "Watch.js" as WatchJs
 
 Rectangle {
     id: root
@@ -40,6 +41,10 @@ Rectangle {
     property string currentSourceId: ""
     property string currentSourceName: ""
     property string currentSeriesId: ""
+
+    // Which screen the open series was reached from, so Back goes where the
+    // user came from rather than always to the grid they may never have seen.
+    property string seriesCameFrom: "browse"
 
     // Backend status, shown on the settings screen.
     property string backendStatus: "Not yet asked."
@@ -93,6 +98,7 @@ Rectangle {
     ListModel { id: sourcesModel }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
+    ListModel { id: watchedModel }
 
     // ---- transport ---------------------------------------------------------
 
@@ -155,6 +161,14 @@ Rectangle {
 
         case Msg.SeriesDetailResult:
             root.fillChapters(msg)
+            return
+
+        case Msg.WatchList:
+            root.reconcileWatched(msg ? msg.watched : [])
+            return
+
+        case Msg.WatchUpdate:
+            root.applyWatchUpdate(msg ? msg.watch : null)
             return
 
         case Msg.DownloadProgress:
@@ -254,6 +268,33 @@ Rectangle {
             ? msg.series.description : ""
     }
 
+    // ---- watched series (PLAN §12.2) ---------------------------------------
+    //
+    // Every string on a watch row — the badge, the status line, the failure
+    // detail — was composed in backend/service/watch.go and is stored and drawn
+    // as it arrived. Nothing here pluralises, formats a date or maps a state to
+    // words (PLAN §2). The model bookkeeping is in Watch.js, which is where it
+    // can be driven by the offscreen harness.
+
+    function reconcileWatched(list) {
+        WatchJs.reconcile(watchedModel, list)
+        root.refreshWatchedFlag()
+    }
+
+    function applyWatchUpdate(w) {
+        WatchJs.applyUpdate(watchedModel, w)
+        root.refreshWatchedFlag()
+    }
+
+    // The series screen's button follows the store, never a local toggle: PLAN
+    // §12.2 has the backend clear a badge when a series is opened and push the
+    // result, and a view that guessed would disagree with it after a failed
+    // round trip.
+    function refreshWatchedFlag() {
+        chapterListScreen.watched = WatchJs.indexOf(
+            watchedModel, root.currentSourceId, root.currentSeriesId) >= 0
+    }
+
     // The backend decides what a download looks like; this only finds the row.
     // Every sentence shown here was composed in backend/service (PLAN §2).
     function applyDownloadProgress(msg) {
@@ -318,6 +359,7 @@ Rectangle {
 
     function openSeries(seriesId, title) {
         root.currentSeriesId = seriesId
+        root.seriesCameFrom = root.screen === "watching" ? "watching" : "browse"
         root.screen = "series"
         chaptersModel.clear()
         chapterListScreen.seriesTitle = title
@@ -326,13 +368,17 @@ Rectangle {
         chapterListScreen.confirmingId = ""
         chapterListScreen.confirmingMessage = ""
         chapterListScreen.busy = true
+        root.refreshWatchedFlag()
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
     }
 
     function goBack() {
         switch (root.screen) {
         case "series":
-            root.screen = "browse"
+            root.screen = root.seriesCameFrom
+            break
+        case "watching":
+            root.screen = "sources"
             break
         case "browse":
         case "add":
@@ -348,6 +394,7 @@ Rectangle {
         switch (root.screen) {
         case "add": return "Add a source"
         case "browse": return root.currentSourceName
+        case "watching": return "Watching"
         case "series": return chapterListScreen.seriesTitle
         case "settings": return "Settings"
         }
@@ -441,6 +488,7 @@ Rectangle {
             visible: root.screen === "sources"
             model: sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.screen = "add" }
+            onWatchingRequested: root.screen = "watching"
             onOpenRequested: root.openSource(sourceId, name)
             notice: root.notice
             onNoticeDismissed: root.notice = ""
@@ -461,6 +509,22 @@ Rectangle {
                 root.screen = "sources"
             }
             onDoneRequested: root.screen = "sources"
+        }
+
+        WatchList {
+            id: watchListScreen
+            objectName: "watchList"
+            anchors.fill: parent
+            visible: root.screen === "watching"
+            model: watchedModel
+            onCheckRequested: root.send(Msg.CheckWatched, {})
+            onUnwatchRequested: root.send(Msg.UnwatchSeries,
+                {"sourceId": sourceId, "seriesId": seriesId})
+            onOpenRequested: {
+                root.currentSourceId = sourceId
+                root.currentSourceName = sourceName
+                root.openSeries(seriesId, title)
+            }
         }
 
         SeriesGrid {
@@ -495,6 +559,11 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "series"
             model: chaptersModel
+            onWatchRequested: root.send(Msg.WatchSeries,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "title": chapterListScreen.seriesTitle})
+            onUnwatchRequested: root.send(Msg.UnwatchSeries,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId})
             onDownloadRequested: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "volumeId": chapterId})
             onDownloadCancelled: root.send(Msg.CancelDownload,

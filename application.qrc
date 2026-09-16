@@ -16,6 +16,7 @@
         <file>ui/AddSource.qml</file>
         <file>ui/SeriesGrid.qml</file>
         <file>ui/ChapterList.qml</file>
+        <file>ui/WatchList.qml</file>
         <file>ui/ReaderHandoff.qml</file>
         <file>ui/Settings.qml</file>
         <file>ui/Keyboard.qml</file>
