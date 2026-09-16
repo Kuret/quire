@@ -17,6 +17,14 @@ Item {
     property string backendStatus: ""
     property string lastError: ""
 
+    // PLAN §7.4's one global robots.txt switch, off by default. It is held as a
+    // plain bool rather than read off the status object: the status is a fresh
+    // object on every Pong, so binding to it would redraw the toggle each time
+    // the settings screen pings, and a flash for no change is exactly what an
+    // e-ink panel should not do. Assigning the same bool emits no change
+    // signal, so an identical status writes nothing.
+    property bool consultRobots: false
+
     // The log, most recent last, as the backend sent it. Empty until asked for.
     property var logLines: []
     property bool logShown: false
@@ -34,6 +42,15 @@ Item {
     signal pingRequested()
     signal logRequested()
     signal clearErrorRequested()
+    signal consultRobotsRequested(bool on)
+
+    // toggleRobots asks for the opposite of what is currently stored. It does
+    // not flip the property: the backend persists and applies, and the value
+    // comes back on the status, so the switch can never end up showing a state
+    // the store does not hold.
+    function toggleRobots() {
+        screen.consultRobotsRequested(!screen.consultRobots)
+    }
 
     Column {
         anchors {
@@ -79,6 +96,85 @@ Item {
                 id: pingArea
                 anchors.fill: parent
                 onClicked: screen.pingRequested()
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        Rectangle {
+            width: parent.width
+            height: Style.hairline
+            color: Style.rule
+        }
+
+        Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "Fetching"
+            font.pointSize: Style.headingSize
+            color: Style.ink
+        }
+
+        // The setting says what it does rather than hiding behind a label.
+        // PLAN §7.4: RFC 9309 scopes robots.txt to crawlers, and a person
+        // searching and tapping is driving every request — so this is off by
+        // default and the sentence below is the honest description of that,
+        // not an apology for it.
+        //
+        // The claim about logging is checkable from this very screen, which is
+        // the point of making it: the log viewer is a few lines down.
+        Text {
+            objectName: "robotsExplanation"
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: screen.consultRobots
+                  ? "On: Quire does not fetch pages a site\u2019s robots.txt asks crawlers not to."
+                  : "Off: Quire fetches pages a site\u2019s robots.txt asks crawlers not to. " +
+                    "Every such fetch is logged."
+            font.pointSize: Style.bodySize
+            color: Style.muted
+        }
+
+        Rectangle {
+            objectName: "robotsToggle"
+            width: parent.width
+            height: Style.buttonHeight
+            color: robotsArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors {
+                    left: parent.left; leftMargin: Style.gap
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "Consult robots.txt"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            // A word rather than a switch, for the same reason the source list
+            // uses one: a switch wants an animation to read as one.
+            Text {
+                objectName: "robotsToggleState"
+                anchors {
+                    right: parent.right; rightMargin: Style.gap
+                    verticalCenter: parent.verticalCenter
+                }
+                text: screen.consultRobots ? "On" : "Off"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: robotsArea
+                anchors.fill: parent
+                onClicked: screen.toggleRobots()
             }
         }
 
