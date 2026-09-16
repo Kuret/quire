@@ -210,7 +210,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 			break
 		}
 	}
-	cap.Image, cap.Challenge, cap.ImageHost = r.fetchOnePageImage(ctx, src, first)
+	cap.Image, cap.Challenge, cap.ImageHost = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
 	return cap
 }
 
@@ -231,7 +231,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 // "the probe's crawl" there without qualification: the user asked to add a
 // site, not for this image, and the probe is automated from the moment it
 // starts.
-func (r *run) fetchOnePageImage(ctx context.Context, src *theme.Source, rawurl string) (stepResult, *challengeSignal, string) {
+func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.Source, chapterID, rawurl string) (stepResult, *challengeSignal, string) {
 	var step stepResult
 	if rawurl == "" {
 		step.Note = "the chapter's image addresses were not usable."
@@ -248,7 +248,23 @@ func (r *run) fetchOnePageImage(ctx context.Context, src *theme.Source, rawurl s
 		return step, nil, host
 	}
 
-	resp, err := r.p.fetch.Get(ctx, pol, rawurl)
+	// The Referer of the chapter page this image address came out of, when the
+	// theme has one to name (PLAN §7.6). Three sites answer 403 on the image
+	// host without it and 200 with it, so a probe that omitted it would report
+	// "page fetching failed" for a source that works perfectly.
+	//
+	// It is *this* chapter's page — the one whose markup was just parsed — and
+	// never a stand-in: a theme that cannot say yields the zero Referrer and
+	// the request carries no header at all, which is the honest answer.
+	from, err := theme.PageRefererFor(th, src, chapterID)
+	if err != nil {
+		// A theme naming a page address Quire cannot use is a theme bug. Say
+		// so in the step note rather than inventing a substitute.
+		step.Note = plainError(err)
+		return step, nil, host
+	}
+
+	resp, err := r.p.fetch.GetFrom(ctx, pol, rawurl, from)
 	if err != nil {
 		// The SSRF guard lives here, and its refusal is reported as itself.
 		// A theme extracting images from a host it never declared in
