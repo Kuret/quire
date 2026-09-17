@@ -881,6 +881,54 @@ when a folder is missing still governs every fallback.)*
   are kept apart by a registry of sorts in flight keyed by document uuid: the
   attach pass skips anything already asked about.
 
+#### Noticing a document the user deleted on the tablet
+
+**Asked 2026-09-17: "if i delete a manga from the regular filesystem, will quire
+pick this up and clear its own leftover cache files?"** It did not, twice over.
+Quire only noticed when the user tapped Read, and even then it forgot the record
+and left the pages — which orphans them for good, because once the record is
+gone no later delete can name those chapters. It is the same orphan class the
+cache control exists to mop up.
+
+Both halves are fixed. The Read path reclaims as it forgets, and **attach asks**:
+the backend sends the recorded document uuids, the frontend answers which no
+longer resolve via `Library.entryForId`, and the records that went take their
+pages with them. `entryForId` is the only question asked — **a document the user
+filed into a folder of their own still resolves and is not deleted**, so folder
+membership is never consulted.
+
+> ### ⚠️ A frontend that cannot check must produce no deletions at all.
+>
+> The reply carries `checked` as **data**. A frontend with no bridge cannot ask
+> xochitl anything, and its empty list of missing documents means *"I do not
+> know"* — never *"none of them exist"*. An empty list from a frontend that
+> never looked must be impossible to confuse with an empty list from one that
+> looked and found everything present.
+>
+> This is stated this bluntly because the failure is not a stale button. It is
+> **every record dropped and the entire page cache deleted**, on the user's
+> device, silently, because a QML file did not load. It is the bridge-not-loaded
+> trap from the sorting pass with an outcome that is not comparable.
+>
+> Three rules, each with a test that fails when the rule is removed:
+>
+> 1. **Act only on `checked: true`.**
+> 2. **Act only on ids that were asked about.** A reply that widens the list is
+>    an answer to a different question.
+> 3. **Refuse a total wipe** of more than **three** records. Everything missing
+>    at once is likelier to be a bug than a user who emptied their library
+>    between two launches, and from here the two are indistinguishable. Refusing
+>    costs a tap — Read still cleans up any one of them individually — while
+>    obeying a bug costs the cache. Three, because at that size "I deleted the
+>    couple of things I had" is an ordinary afternoon.
+>
+> **The first of those tests was worthless when written** and had to be
+> rewritten: it sent `checked: false` with an *empty* missing list, which
+> deletes nothing whatever the flag says, and it passed with the guard removed.
+> The dangerous reply is one that names documents *while admitting it could not
+> check them* — a frontend that failed part way, a malformed message — and that
+> is what the test sends now.
+
   **The folder name comes from `library.Record.SeriesTitle`** (added the same
   day), which the download writes from the same variable it passes to the sort.
   Both paths naming the series from one string is what stops a re-sort and a
