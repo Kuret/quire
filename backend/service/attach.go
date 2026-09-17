@@ -66,6 +66,13 @@ func (s *Service) FrontendAttached(out Sender) error {
 	s.goBackground(context.Background(), func(ctx context.Context) {
 		s.resortOnAttach(ctx, out)
 	})
+
+	// And the other half of keeping the library honest: documents the user
+	// deleted on the tablet. Only the frontend can tell us which those are, so
+	// attach is again the moment to ask (PLAN §12.4).
+	s.goBackground(context.Background(), func(ctx context.Context) {
+		s.askToCheck(ctx, out)
+	})
 	return nil
 }
 

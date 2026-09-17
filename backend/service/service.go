@@ -359,6 +359,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.clearCache(out, req)
 
+	case appload.MessageDocumentsChecked:
+		var req checkedRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.documentsChecked(req)
+
 	case appload.MessageDocumentsSorted:
 		var req sortedRequest
 		if err := decode(payload, &req); err != nil {
