@@ -228,6 +228,27 @@ const (
 	// file did not load.
 	MessageDocumentsChecked MessageType = 57
 
+	// Deleting every download of one series, from the downloaded overview
+	// (PLAN §12.5). Asked for as a single action on the row: "we should add a
+	// delete button to the entries in the download overview, which directly
+	// deletes everything from that manga".
+	//
+	// MessageDeleteSeries is UI→BE, JSON {sourceId, seriesId, confirmed,
+	// results}. Without `confirmed` it is a request for the question, answered
+	// with MessageDeleteSeriesConfirm, JSON {sourceId, seriesId, documentUuids,
+	// message}: the sentence, and the documents it is about.
+	//
+	// **It asks, where the multi-select queue does not.** Queueing is
+	// reversible and costs only time; this destroys every download of a series
+	// at once and there is no way back but to fetch them all again.
+	//
+	// `results` is what the frontend observed, one entry per document —
+	// {documentUuid, trashed, removed} — and not what it intended. Each
+	// document fails separately, so a single flag for the lot of them would
+	// have to lie about one end or the other.
+	MessageDeleteSeries        MessageType = 58
+	MessageDeleteSeriesConfirm MessageType = 59
+
 	// The 60s are PLAN §12.2's watched series: mark a series watched, and know
 	// when it has gained chapters since you last looked.
 	//
@@ -362,6 +383,8 @@ var messageNames = map[MessageType]string{
 	MessageDocumentsSorted:       "DocumentsSorted",
 	MessageCheckDocuments:        "CheckDocuments",
 	MessageDocumentsChecked:      "DocumentsChecked",
+	MessageDeleteSeries:          "DeleteSeries",
+	MessageDeleteSeriesConfirm:   "DeleteSeriesConfirm",
 	MessageDownloadDeleted:       "DownloadDeleted",
 	MessageWatchSeries:           "WatchSeries",
 	MessageUnwatchSeries:         "UnwatchSeries",

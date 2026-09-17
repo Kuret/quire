@@ -66,6 +66,8 @@ var DocumentsSorted = 55
 // looked must never read as "none of them exist".
 var CheckDocuments = 56
 var DocumentsChecked = 57
+var DeleteSeries = 58
+var DeleteSeriesConfirm = 59
 var DownloadDeleted = 52
 
 var WatchSeries = 60
