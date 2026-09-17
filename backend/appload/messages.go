@@ -307,6 +307,27 @@ const (
 	MessageListDownloaded MessageType = 65
 	MessageDownloadedList MessageType = 66
 
+	// The empty series folder left behind when a series' last download goes
+	// (PLAN §12.5).
+	//
+	// MessageDeleteFolder is BE→UI, JSON {folderId, folderName}: the backend
+	// has *listed* that folder over the web interface and found it empty, and
+	// asks the frontend — the only side that can delete anything — to remove
+	// it. MessageFolderDeleted is the answer, JSON {folderId, folderName,
+	// trashed, removed}.
+	//
+	// **The backend asks only for a folder it listed and found empty.** The
+	// folder is the user's once it exists and may hold something of theirs, so
+	// emptiness is measured rather than inferred from "we deleted everything we
+	// knew about" — and a listing that fails is never an empty folder.
+	//
+	// `folderName` is composed by the backend and echoed back untouched: by the
+	// time the answer arrives the records it was taken from are gone, and the
+	// frontend inventing a name for the sentence would be the view writing
+	// copy (PLAN §2).
+	MessageDeleteFolder  MessageType = 67
+	MessageFolderDeleted MessageType = 68
+
 	// The 70s are device-wide settings — things that are about Quire rather
 	// than about any one source.
 	//
@@ -393,6 +414,8 @@ var messageNames = map[MessageType]string{
 	MessageWatchUpdate:           "WatchUpdate",
 	MessageListDownloaded:        "ListDownloaded",
 	MessageDownloadedList:        "DownloadedList",
+	MessageDeleteFolder:          "DeleteFolder",
+	MessageFolderDeleted:         "FolderDeleted",
 	MessageSetConsultRobots:      "SetConsultRobots",
 	MessageGetCacheSize:          "GetCacheSize",
 	MessageCacheStatus:           "CacheStatus",
