@@ -40,7 +40,14 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 
 	// The document is gone. Drop the record so the row goes back to offering a
 	// download, and so nothing else keeps pointing at a UUID that opens
-	// nothing.
+	// nothing — and take the cached pages with it, exactly as deleting from
+	// inside Quire does (PLAN §12.4).
+	//
+	// **Reclaiming here is not a tidiness nicety.** Once the record is gone,
+	// no later delete can ever name those chapters again: they are orphaned
+	// for good, and only the cache control can reach them. This is the same
+	// orphan class, created by the user deleting the document on the tablet
+	// instead of through Quire.
 	if s.libStore != nil {
 		for _, rec := range s.libStore.List() {
 			if rec.DocumentUUID != req.DocumentUUID {
@@ -48,7 +55,14 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 			}
 			if err := s.libStore.Remove(rec.Key); err != nil {
 				s.log.Error("could not forget a deleted volume", "uuid", req.DocumentUUID, "err", err)
+				break
 			}
+			// After the removal and against the records that remain, so a
+			// chapter another document still holds survives. Same ordering and
+			// same reasoning as deleteDownload.
+			freed := s.reclaimPages(rec, s.libStore.List())
+			s.log.Info("reclaimed the pages of a volume deleted on the tablet",
+				"document", req.DocumentUUID, "freedBytes", freed, "freedMiB", freed>>20)
 			break
 		}
 	}

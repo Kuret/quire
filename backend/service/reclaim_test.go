@@ -281,3 +281,71 @@ func TestDeletingAlsoRemovesTheRestitchedPages(t *testing.T) {
 		t.Error("the series directory was left behind")
 	}
 }
+
+// A document the user deleted on the tablet is noticed when they tap Read, and
+// its pages must go with its record. Before this, the record was dropped and
+// the pages were orphaned for good — no later delete could name them, because
+// the record naming them was gone.
+func TestOpeningAMissingDocumentAlsoReclaimsItsPages(t *testing.T) {
+	svc, store, libStore, root := serviceWithDownloadRoot(t)
+	addSource(t, store)
+
+	only := "/manga/the-lantern-keeper/chapter-1/"
+	seriesDir := pageCache(t, root, "example-reader", "the-lantern-keeper", only)
+	pages := download.ChapterDir(seriesDir, only)
+
+	if err := libStore.Put(library.Record{
+		Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "v1"},
+		DocumentUUID: "doc-deleted-on-tablet",
+		Chapters:     []string{only},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recorder{}
+	handle(t, svc, rec, appload.MessageOpenInReader,
+		`{"documentUuid":"doc-deleted-on-tablet","missing":true}`)
+	rec.wait(t, appload.MessageError)
+
+	if n := len(libStore.List()); n != 0 {
+		t.Errorf("%d records left; the dead UUID must be forgotten", n)
+	}
+	if exists(t, pages) {
+		t.Error("the cached pages survived; they are now orphaned for good")
+	}
+}
+
+// And a chapter another record still holds is left alone, exactly as on the
+// delete path: the reclaim is asked of the records that remain.
+func TestOpeningAMissingDocumentKeepsPagesAnotherRecordNeeds(t *testing.T) {
+	svc, store, libStore, root := serviceWithDownloadRoot(t)
+	addSource(t, store)
+
+	shared := "/manga/the-lantern-keeper/chapter-1/"
+	seriesDir := pageCache(t, root, "example-reader", "the-lantern-keeper", shared)
+
+	for _, r := range []library.Record{
+		{
+			Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "v1"},
+			DocumentUUID: "doc-gone",
+			Chapters:     []string{shared},
+		},
+		{
+			Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "v2"},
+			DocumentUUID: "doc-staying",
+			Chapters:     []string{shared},
+		},
+	} {
+		if err := libStore.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := &recorder{}
+	handle(t, svc, rec, appload.MessageOpenInReader, `{"documentUuid":"doc-gone","missing":true}`)
+	rec.wait(t, appload.MessageError)
+
+	if !exists(t, download.ChapterDir(seriesDir, shared)) {
+		t.Error("pages another record still lists were reclaimed")
+	}
+}
