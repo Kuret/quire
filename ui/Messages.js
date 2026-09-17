@@ -60,6 +60,12 @@ var DeleteConfirm = 53
 // 2026-09-17). Creating and moving are QML; finding an existing folder is HTTP.
 var SortDocuments = 54
 var DocumentsSorted = 55
+
+// Reconciling the library with the tablet (PLAN §12.4). `checked` says whether
+// the frontend could look at all: an empty `missing` from a frontend that never
+// looked must never read as "none of them exist".
+var CheckDocuments = 56
+var DocumentsChecked = 57
 var DownloadDeleted = 52
 
 var WatchSeries = 60

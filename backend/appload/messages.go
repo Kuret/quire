@@ -206,6 +206,28 @@ const (
 	// nothing about it is reported as a failure.
 	MessageDocumentsSorted MessageType = 55
 
+	// Reconciling the library with the tablet (PLAN §12.4). A document the user
+	// deleted in xochitl leaves a record claiming it and a page cache nothing
+	// can reach, and until this existed Quire only noticed when they tapped
+	// Read.
+	//
+	// MessageCheckDocuments is BE→UI, JSON {documentUuids}: which of these
+	// still resolve? Only the frontend can ask — Library.entryForId is QML.
+	MessageCheckDocuments MessageType = 56
+
+	// MessageDocumentsChecked is UI→BE, JSON {checked, documentUuids, missing}.
+	//
+	// **`checked` is the whole safety of this exchange and it is data, not an
+	// absence.** A frontend that could not look — no bridge, a call that threw
+	// — answers `checked: false`, and an empty `missing` from it must be
+	// impossible to confuse with an empty `missing` from a frontend that looked
+	// and found everything present. The backend acts only on `checked: true`.
+	//
+	// The consequence of getting that wrong is not a stale button: it is every
+	// record dropped and the whole page cache deleted, silently, because a QML
+	// file did not load.
+	MessageDocumentsChecked MessageType = 57
+
 	// The 60s are PLAN §12.2's watched series: mark a series watched, and know
 	// when it has gained chapters since you last looked.
 	//
@@ -322,6 +344,8 @@ var messageNames = map[MessageType]string{
 	MessageDeleteConfirm:         "DeleteConfirm",
 	MessageSortDocuments:         "SortDocuments",
 	MessageDocumentsSorted:       "DocumentsSorted",
+	MessageCheckDocuments:        "CheckDocuments",
+	MessageDocumentsChecked:      "DocumentsChecked",
 	MessageDownloadDeleted:       "DownloadDeleted",
 	MessageWatchSeries:           "WatchSeries",
 	MessageUnwatchSeries:         "UnwatchSeries",
