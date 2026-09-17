@@ -2701,11 +2701,33 @@ than reinvented.
 - **A row whose source has been removed still offers Delete.** Its downloads are
   on the tablet and this screen is the only way left to reach them. Only
   *opening* is disabled.
-- **The empty series folder is left behind, knowingly.** After the last download
-  goes, the series folder sits in `Comics` empty. Removing it would be the
-  natural completion, but only if it is *actually* empty — the folder is the
-  user's once it exists and may hold something of theirs. **Quire has no
-  measured way to enumerate a folder's children**, so emptiness cannot be
-  established, and it is not guessed at: a stray empty folder is a far smaller
-  sin than deleting a folder with something in it. Closing this needs a hardware
-  probe of the child-enumeration API, not a change of mind.
+- **The empty series folder is removed, and only when it has been measured
+  empty.** After the last download goes, the series folder would otherwise sit
+  in `Comics` empty. It is deleted through the same trash-then-`deleteEntries`
+  path a document gets — folders and documents are both entries to that API, and
+  the `quiredelete` probe made and removed folders exactly this way.
+
+  **Emptiness is asked of the backend, and this correction matters.** It was
+  first written here that Quire has no measured way to enumerate a folder's
+  children. That is true of the **frontend** — ten QML candidates were tried on
+  hardware and none of them listed a folder — and not true of Quire:
+  `library.Library.List` enumerates a folder over the web interface and is what
+  the sorting pass already uses, on every download, to find an existing series
+  folder. So the backend lists the folder and decides; the frontend, which is
+  the only side that can delete anything, is asked to act. Written as it was, it
+  would have sent the next reader looking for a capability the repository
+  already has.
+
+  Every way of *not knowing* leaves the folder alone, which is the same rule as
+  `checked` on the reconcile pass (§12.4): a listing that errors, a web
+  interface that does not answer, a Comics folder that will not resolve, a
+  folder id Quire never recorded. **Comics itself is never deleted**, guarded by
+  id and tested — a user who deletes their only series should still have the
+  folder every future download goes into. A partial delete never even asks: the
+  documents that survived are still in the folder, and that is asserted rather
+  than left to fall out of the listing.
+
+  The tidy-up is reported only when it happened, in one sentence, and the folder
+  that stayed is not mentioned at all: it is a tidy-up rather than the thing the
+  user asked for, and claiming one that did not happen would be worse than
+  saying nothing.
