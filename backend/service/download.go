@@ -629,6 +629,7 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		lastPlace  library.Placement
 		lastName   string
 		totalPages int
+		stored     []string
 	)
 	for _, part := range parts {
 		if err := ctx.Err(); err != nil && cancelled(err) {
@@ -695,7 +696,15 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		s.log.Info("volume stored", "document", res.DocumentUUID, "folder", res.FolderUUID,
 			"name", res.VisibleName, "pages", manifest.PageCount,
 			"part", part.Part, "parts", part.Parts)
+		stored = append(stored, res.DocumentUUID)
 	}
+
+	// Every part of a split volume is its own document, and they all belong in
+	// the same folder — so they are sorted together, in one selection, after
+	// the last of them is in the library (PLAN §6 M5, corrected 2026-09-17).
+	// The download is already a success by this point; sorting can only make
+	// the library tidier or leave it exactly as it has always been.
+	s.askToSort(ctx, out, src.ID, req.SeriesID, series.Title, stored, lastPlace)
 
 	p.DocumentUUID = lastResult.DocumentUUID
 	p.FolderPath = lastPlace.Path
