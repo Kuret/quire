@@ -1296,6 +1296,78 @@ Window {
                  LibraryOps.argsFor(["a93dfa8f-8e58-4792-82d3-81a00ca982f4", "I, Claudius"]),
                  "a93dfa8f-8e58-4792-82d3-81a00ca982f4,I, Claudius")
 
+        // ---- deleting one document on the librarian path -------------------
+        //
+        // Measured on hardware: `deleteEntry` on a live entry returns **ok** and
+        // does nothing, and only removes an entry that is already in the Trash.
+        // So the operation is two calls with the state read back between them,
+        // and every case below builds its own device.
+
+        function librarianStub(opts) {
+            var o = opts || {}
+            var parent = o.parent === undefined ? "comics" : o.parent
+            var gone = false
+            return {
+                calls: [],
+                send: function (signal, params) {
+                    this.calls.push(signal)
+                    if (signal === "trashEntry") {
+                        if (o.trashSilentlyFails)
+                            return "ok"          // the measured failure shape
+                        if (o.trashRefuses)
+                            return "ERROR: not found"
+                        parent = "trash"
+                        return "ok"
+                    }
+                    if (signal === "deleteEntry") {
+                        // The precondition: only an entry already in the Trash
+                        // is removed. Anything else is accepted and ignored.
+                        if (parent === "trash" && !o.deleteSilentlyFails)
+                            gone = true
+                        return "ok"
+                    }
+                    return ""
+                },
+                parentOf: function () { return parent },
+                exists: function () { return !gone }
+            }
+        }
+
+        // The ordinary case: trashed, then removed, both verified.
+        var dev = librarianStub({})
+        var res = LibraryOps.deleteOne(dev, "doc-1")
+        win.want("a document is deleted", res.ok, true)
+        win.want("by trashing it first", dev.calls[0], "trashEntry")
+        win.want("and then deleting that one entry", dev.calls[1], "deleteEntry")
+
+        // `ok` that changed nothing is the failure this is written around.
+        dev = librarianStub({trashSilentlyFails: true})
+        res = LibraryOps.deleteOne(dev, "doc-1")
+        win.want("an ok that did not trash it is not success", res.ok, false)
+        win.want("and says the call claimed ok",
+                 res.detail.indexOf("said ok") >= 0, true)
+        win.want("and it never reached deleteEntry", dev.calls.length, 1)
+
+        // The same shape one step later: trashed, but the delete did nothing.
+        dev = librarianStub({deleteSilentlyFails: true})
+        res = LibraryOps.deleteOne(dev, "doc-1")
+        win.want("an ok that did not delete it is not success", res.ok, false)
+        win.want("and the document is reported as in the Trash",
+                 res.detail.indexOf("in the Trash") >= 0, true)
+        win.want("which it is", res.trashed, true)
+
+        // A refusal librarian understood.
+        dev = librarianStub({trashRefuses: true})
+        res = LibraryOps.deleteOne(dev, "doc-1")
+        win.want("a refusal to trash stops there", res.ok, false)
+        win.want("and nothing was deleted", dev.calls.length, 1)
+
+        // No librarian at all: the caller uses the legacy path instead, and
+        // this must not pretend otherwise.
+        res = LibraryOps.deleteOne(null, "doc-1")
+        win.want("no librarian deletes nothing", res.ok, false)
+        win.want("and says why", res.detail, "librarian is not available")
+
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
     }

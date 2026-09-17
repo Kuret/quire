@@ -119,3 +119,99 @@ function reply(raw) {
 function argsFor(parts) {
     return parts.join(",")
 }
+
+// ---- deleting one document, on the librarian path --------------------------
+//
+// **`ok` means the call was accepted, not that anything happened.** Measured
+// twice on hardware, 2026-09-17: `deleteEntry` on a live folder returned `ok`
+// and changed nothing — the `.metadata` was untouched and survived a restart —
+// and the same on a live document, with all three files still on disk. So every
+// result here is read back from state, never taken from the reply. That is the
+// same rule the legacy QML path already follows, and it now has two independent
+// reasons behind it.
+//
+// **The precondition is the finding.** `deleteEntry` only removes an entry that
+// is *already in the Trash*, so deleting is two calls:
+//
+//	trashEntry:<uuid>    → parent becomes "trash"     (verify)
+//	deleteEntry:<uuid>   → only <uuid>.tombstone left (verify)
+//
+// Measured with a second entry sitting in the Trash beside it: that one
+// survived. **That is what makes the new confirmation sentence true** — this
+// removes one document and leaves the user's Trash alone, where the legacy path
+// has to empty the whole Trash to remove anything at all.
+//
+// `api.parentOf(uuid)` is the second opinion, read through whatever the caller
+// has: on 3.25 and 3.27 that is `Library.parentIdForId`.
+function deleteOne(api, uuid) {
+    var out = {ok: false, trashed: false, detail: ""}
+    if (!uuid) {
+        out.detail = "no document to delete"
+        return out
+    }
+    if (!api || typeof api.send !== "function") {
+        out.detail = "librarian is not available"
+        return out
+    }
+
+    // Step one: into the Trash, and read the parent back rather than believing
+    // the reply.
+    var trashed = reply(send(api, "trashEntry", uuid))
+    if (!trashed.ok) {
+        out.detail = "could not trash it: " + trashed.text
+        return out
+    }
+    if (parentOf(api, uuid) !== "trash") {
+        out.detail = "the call said ok and the document is not in the Trash"
+        return out
+    }
+    out.trashed = true
+
+    // Step two: remove that one entry. A bare deleteEntry without the trash
+    // step is the silent no-op above, which is why these are one operation.
+    var removed = reply(send(api, "deleteEntry", uuid))
+    if (!removed.ok) {
+        out.detail = "could not delete it: " + removed.text + "; it is in the Trash"
+        return out
+    }
+    if (exists(api, uuid)) {
+        out.detail = "the call said ok and the document is still there; it is in the Trash"
+        return out
+    }
+
+    out.ok = true
+    out.detail = "deleted"
+    return out
+}
+
+function send(api, signal, params) {
+    try {
+        return api.send(signal, params)
+    } catch (e) {
+        return ""
+    }
+}
+
+function parentOf(api, uuid) {
+    if (!api || typeof api.parentOf !== "function")
+        return ""
+    try {
+        var p = api.parentOf(uuid)
+        return p === undefined || p === null ? "" : String(p)
+    } catch (e) {
+        return ""
+    }
+}
+
+function exists(api, uuid) {
+    if (!api || typeof api.exists !== "function")
+        return false
+    try {
+        return api.exists(uuid) ? true : false
+    } catch (e) {
+        // Unable to check is not the same as gone, and this function is asked
+        // "is it still there?" in a context where a wrong "no" would report a
+        // delete that did not happen.
+        return true
+    }
+}
