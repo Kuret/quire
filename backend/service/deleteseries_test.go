@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -342,5 +343,151 @@ func TestDeletingOneSeriesLeavesTheOtherAlone(t *testing.T) {
 	}
 	if dir := download.ChapterDir(otherDir, otherChapter); !exists(t, dir) {
 		t.Error("another series' pages were reclaimed")
+	}
+}
+
+// filedSeriesFixture is a series whose documents are recorded as filed into a
+// folder inside Comics, plus the fake web interface that folder lives on.
+//
+// Its own fixture, and its own folder: a tidy-up that works because an earlier
+// case left the library empty is not a tidy-up anyone has tested.
+func filedSeriesFixture(t *testing.T, n int) (*service.Service, *library.Store, *fakeLibrary, []string) {
+	t.Helper()
+	svc, store, libStore, fake, _ := newDownloadServiceWith(t, downloadRoutes(t),
+		func(o *service.Options) { o.DownloadDir = filepath.Join(t.TempDir(), "downloads") })
+	addSource(t, store)
+
+	fake.mu.Lock()
+	fake.entries = append(fake.entries, library.Entry{
+		ID: "lantern", Parent: "comics", Type: library.Collection, VisibleName: "The Lantern Keeper"})
+	for i := range n {
+		fake.entries = append(fake.entries, library.Entry{
+			ID: "doc-" + string(rune('a'+i)), Parent: "lantern", Type: library.Document})
+	}
+	fake.mu.Unlock()
+
+	var uuids []string
+	for i := range n {
+		uuid := "doc-" + string(rune('a'+i))
+		if err := libStore.Put(library.Record{
+			Key: library.Key{Source: "example-reader", Series: "the-lantern-keeper",
+				Volume: string(rune('1' + i))},
+			DocumentUUID: uuid,
+			SeriesTitle:  "The Lantern Keeper",
+			FolderUUID:   "lantern",
+			FolderPath:   []string{"Comics", "The Lantern Keeper"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		uuids = append(uuids, uuid)
+	}
+	return svc, libStore, fake, uuids
+}
+
+// emptyFolder takes the series' documents out of the fake library, which is
+// what the frontend's delete does on the tablet.
+func emptyFolder(fake *fakeLibrary, parent string) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var left []library.Entry
+	for _, e := range fake.entries {
+		if e.Parent != parent {
+			left = append(left, e)
+		}
+	}
+	fake.entries = left
+}
+
+// The feature: the last download of a series goes, the folder is *listed*, it
+// comes back empty, and the frontend is asked to remove it.
+func TestAnEmptySeriesFolderIsOfferedForDeletion(t *testing.T) {
+	svc, _, fake, uuids := filedSeriesFixture(t, 2)
+	rec := &recorder{}
+	emptyFolder(fake, "lantern")
+
+	handle(t, svc, rec, appload.MessageDeleteSeries,
+		`{"sourceId":"example-reader","seriesId":"the-lantern-keeper","confirmed":true,`+
+			`"results":`+results(uuids, 2, true)+`}`)
+
+	var ask struct {
+		FolderID   string `json:"folderId"`
+		FolderName string `json:"folderName"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageDeleteFolder), &ask); err != nil {
+		t.Fatal(err)
+	}
+	if ask.FolderID != "lantern" {
+		t.Errorf("asked to delete %q, want the series folder", ask.FolderID)
+	}
+	if ask.FolderName != "The Lantern Keeper" {
+		t.Errorf("the folder is named %q", ask.FolderName)
+	}
+}
+
+// A folder the listing still shows something in is left alone -- here because
+// the frontend's delete did not actually take the documents off the tablet,
+// which is exactly the state a silent failure leaves behind.
+func TestAFolderThatStillHasDocumentsIsNotOffered(t *testing.T) {
+	svc, _, _, uuids := filedSeriesFixture(t, 2)
+	rec := &recorder{}
+
+	handle(t, svc, rec, appload.MessageDeleteSeries,
+		`{"sourceId":"example-reader","seriesId":"the-lantern-keeper","confirmed":true,`+
+			`"results":`+results(uuids, 2, true)+`}`)
+
+	rec.wait(t, appload.MessageDownloadedList)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a folder that still lists its documents was offered for deletion")
+	}
+}
+
+// A partial delete leaves the folder, and it is never even asked about: the
+// documents that survived are still in it.
+func TestAPartialSeriesDeleteNeverOffersTheFolder(t *testing.T) {
+	svc, _, fake, uuids := filedSeriesFixture(t, 3)
+	rec := &recorder{}
+	// Even with the folder listing empty -- which it would not be in reality --
+	// a run with a failure must not reach the question at all.
+	emptyFolder(fake, "lantern")
+
+	handle(t, svc, rec, appload.MessageDeleteSeries,
+		`{"sourceId":"example-reader","seriesId":"the-lantern-keeper","confirmed":true,`+
+			`"results":`+results(uuids, 2, true)+`}`)
+
+	rec.wait(t, appload.MessageError)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a partial delete offered the series folder for deletion")
+	}
+}
+
+// The report: a folder that went is accounted for, once, and in the backend's
+// words.
+func TestARemovedFolderIsReported(t *testing.T) {
+	svc, _, _, _ := filedSeriesFixture(t, 1)
+	rec := &recorder{}
+
+	handle(t, svc, rec, appload.MessageFolderDeleted,
+		`{"folderId":"lantern","folderName":"The Lantern Keeper","trashed":true,"removed":true}`)
+
+	code, msg := waitForError(t, rec)
+	if code != "folder_removed" {
+		t.Errorf("code %q", code)
+	}
+	if !strings.Contains(msg, "The Lantern Keeper") {
+		t.Errorf("note %q does not name the folder", msg)
+	}
+}
+
+// A folder that did not go is not mentioned. Claiming a tidy-up that did not
+// happen is worse than saying nothing about one nobody asked for.
+func TestAFolderThatStayedIsNotMentioned(t *testing.T) {
+	svc, _, _, _ := filedSeriesFixture(t, 1)
+	rec := &recorder{}
+
+	handle(t, svc, rec, appload.MessageFolderDeleted,
+		`{"folderId":"lantern","folderName":"The Lantern Keeper","trashed":true,"removed":false}`)
+
+	if hasFrame(rec, appload.MessageError) {
+		t.Error("a folder that stayed was reported as removed")
 	}
 }

@@ -73,6 +73,27 @@ func (r *recorder) wait(t *testing.T, msgType int32) []byte {
 	return nil
 }
 
+// hasFrame is the negative of wait: it gives the background a moment and then
+// reports whether the message ever arrived.
+//
+// A bare "not in the list" check would pass on a race rather than on the
+// behaviour, so it waits the same way wait does -- just without failing.
+func hasFrame(r *recorder, msgType int32) bool {
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		for _, f := range r.sent {
+			if f.Type == msgType {
+				r.mu.Unlock()
+				return true
+			}
+		}
+		r.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
 type allowGuard struct{}
 
 func (allowGuard) CheckURL(context.Context, *url.URL, *fetch.Policy) error { return nil }

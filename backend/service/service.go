@@ -381,7 +381,14 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		return true, s.deleteSeries(out, req)
+		return true, s.deleteSeries(ctx, out, req)
+
+	case appload.MessageFolderDeleted:
+		var req folderDeletedRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.folderDeleted(out, req)
 
 	case appload.MessageDeleteDownload:
 		var req deleteRequest

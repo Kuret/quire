@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/rickl/quire/backend/appload"
@@ -116,7 +117,7 @@ func countOf(n int, one, many string) string {
 }
 
 // deleteSeries asks the question, or acts on the answer.
-func (s *Service) deleteSeries(out Sender, req deleteSeriesRequest) error {
+func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeriesRequest) error {
 	if req.SeriesID == "" {
 		return s.sendError(out, "bad_request", "Quire was asked to delete nothing.")
 	}
@@ -139,6 +140,11 @@ func (s *Service) deleteSeries(out Sender, req deleteSeriesRequest) error {
 			"message":       deleteSeriesQuestion(downloadedTitle(recs), len(recs)),
 		})
 	}
+
+	// Both read before anything is forgotten: the folder id and the title come
+	// off the records, and the records are about to go.
+	folderID := s.recordedFolder(req.SourceID, req.SeriesID)
+	folderName := folderName(downloadedTitle(s.recordsFor(req.SourceID, req.SeriesID)))
 
 	var deleted, kept, failed, freed int64
 	for _, res := range req.Results {
@@ -171,6 +177,14 @@ func (s *Service) deleteSeries(out Sender, req deleteSeriesRequest) error {
 	// finished state with a note about it rather than a note over a stale list.
 	if err := s.sendDownloaded(out); err != nil {
 		return err
+	}
+
+	// The empty series folder, but only when the whole series went. **A partial
+	// delete leaves the folder**, which also falls out of the listing — the
+	// surviving documents are in it — but it is asserted here rather than left
+	// to fall out, because "it would have been caught later" is not a guard.
+	if failed == 0 && deleted > 0 {
+		s.tidySeriesFolder(ctx, out, folderID, folderName)
 	}
 
 	switch {
