@@ -114,6 +114,28 @@ Rectangle {
             "results": outcome.results})
     }
 
+    // deleteFolder removes the now-empty series folder the backend asked about.
+    //
+    // A folder is an entry like any other to this API, so it goes through the
+    // same trash-then-delete as a document — the `quiredelete` probe created
+    // folders in Comics and removed them exactly this way.
+    //
+    // The name is echoed back untouched. The backend composed it and will put
+    // it in a sentence (PLAN §2); by the time this answer arrives the records
+    // it came from are gone.
+    function deleteFolder(folderId, folderName) {
+        if (!folderId)
+            return
+        var result = readerHandoff.status === Loader.Ready && readerHandoff.item
+                     ? readerHandoff.item.trash(folderId)
+                     : "failed"
+        root.send(Msg.FolderDeleted, {
+            "folderId": folderId,
+            "folderName": folderName ? folderName : "",
+            "trashed": result === "ok" || result === "kept",
+            "removed": result === "ok"})
+    }
+
     function openInReader(documentUuid) {
         if (!documentUuid)
             return
@@ -339,6 +361,15 @@ Rectangle {
 
         case Msg.DownloadedList:
             root.fillDownloaded(msg)
+            return
+
+        case Msg.DeleteFolder:
+            // The backend listed that folder and found it empty; this side is
+            // the only one that can delete anything. Nothing here decides
+            // whether it should go — a view that second-guessed the listing
+            // would be deciding what to delete from a screen that cannot see
+            // the folder at all.
+            root.deleteFolder(msg ? msg.folderId : "", msg ? msg.folderName : "")
             return
 
         case Msg.DeleteSeriesConfirm:
