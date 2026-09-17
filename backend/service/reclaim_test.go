@@ -237,3 +237,47 @@ func TestReclaimingDoesNotChangeWhatTheUserIsTold(t *testing.T) {
 		}
 	}
 }
+
+// A re-stitched chapter keeps its re-cut pages in a subdirectory beside the
+// sources (PLAN §12.3). Deleting the download has to take both, and it does so
+// for free — reclaim removes the chapter directory whole — but "for free" is
+// exactly the kind of claim that stops being true silently, so it is asserted
+// against the real reclaim path rather than reasoned about.
+func TestDeletingAlsoRemovesTheRestitchedPages(t *testing.T) {
+	svc, store, libStore, root := serviceWithDownloadRoot(t)
+	addSource(t, store)
+
+	only := "/manga/the-lantern-keeper/chapter-1/"
+	seriesDir := pageCache(t, root, "example-reader", "the-lantern-keeper", only)
+
+	// The re-cut pages, where the download package puts them.
+	recut := filepath.Join(download.ChapterDir(seriesDir, only), download.RestitchDirName)
+	if err := os.MkdirAll(recut, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"0000.jpg", "0001.jpg", "quire-restitch.json"} {
+		if err := os.WriteFile(filepath.Join(recut, name), make([]byte, 2048), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := libStore.Put(library.Record{
+		Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "v1"},
+		DocumentUUID: "doc-restitched",
+		Chapters:     []string{only},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteDocument(t, svc, "doc-restitched")
+
+	if exists(t, recut) {
+		t.Error("the re-cut pages survived the delete")
+	}
+	if exists(t, download.ChapterDir(seriesDir, only)) {
+		t.Error("the chapter directory survived the delete")
+	}
+	if exists(t, seriesDir) {
+		t.Error("the series directory was left behind")
+	}
+}

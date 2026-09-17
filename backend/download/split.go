@@ -98,7 +98,14 @@ func existingPages(dir string, page int) (pageFiles, bool) {
 		found []string
 		total = -1
 	)
+	// Directories are skipped explicitly rather than left to the filename
+	// pattern: the chapter directory now holds a `restitched/` subdirectory
+	// (PLAN §12.3), and a scanner that relies on a name not matching is a
+	// scanner that breaks the next time a name is added.
 	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
 		name := e.Name()
 		if len(name) < len(prefix) || name[:len(prefix)] != prefix {
 			continue
@@ -135,6 +142,12 @@ func removePageFiles(dir string, page int) {
 	}
 	prefix := fmt.Sprintf("%04d-", page)
 	for _, e := range entries {
+		// Directories skipped explicitly, for the reason given in
+		// existingPages: `restitched/` lives here too, and it is not a page
+		// file however its name reads.
+		if e.IsDir() {
+			continue
+		}
 		if name := e.Name(); len(name) >= len(prefix) && name[:len(prefix)] == prefix && pieceRE.MatchString(name) {
 			os.Remove(filepath.Join(dir, name))
 		}

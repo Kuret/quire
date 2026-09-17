@@ -185,6 +185,14 @@ type Progress struct {
 	// can report, so it is counted beside PagesGuarded and PagesRequantised.
 	PagesSplit     int
 	PagesFromSplit int
+
+	// ChaptersRestitched is the number of chapters the *source* had pre-sliced,
+	// rejoined and re-cut on their own gutters, and PagesFromRestitch the pages
+	// that came out of them (PLAN §12.3, extended 2026-09-17). Separate from
+	// PagesSplit because it is a different decision about a different thing: a
+	// chapter rather than an image.
+	ChaptersRestitched int
+	PagesFromRestitch  int
 }
 
 // Options configures a Queue. The zero value is usable and implies the
@@ -211,6 +219,11 @@ type Options struct {
 	// Split tunes the splitter itself. The zero value is the defaults in
 	// imageproc: a ±20% search window, a 5% overlap across each cut.
 	Split imageproc.SplitOptions
+
+	// Restitch tunes the chapter-level decision — whether the *source* cut a
+	// strip into chunks, which the per-image splitter cannot see (PLAN §12.3,
+	// extended 2026-09-17). The zero value is the measured defaults.
+	Restitch imageproc.RestitchOptions
 
 	// OnSplit, if set, is called once per source image that was cut up, with
 	// the number of pages it became.
@@ -370,6 +383,11 @@ func (q *Queue) Run(ctx context.Context, dir string, chapters []Chapter) ([]asse
 		// chapter before they could be judged.
 		err = r.resolveDeferred(ctx)
 	}
+	if err == nil {
+		// And the chapter-level decision, which needs every page of the
+		// chapter on disk before it can be taken at all (PLAN §12.3).
+		err = r.restitchChapters(ctx, chapters)
+	}
 	if err != nil {
 		r.dropParked()
 	}
@@ -502,8 +520,14 @@ type run struct {
 	pagesGuarded     atomic.Int64
 	pagesSplit       atomic.Int64
 	pagesFromSplit   atomic.Int64
-	bytesStored      atomic.Int64
-	bytesFetched     atomic.Int64
+
+	// A chapter the *source* pre-sliced, re-cut on its own gutters, and the
+	// pages that came out of it. Split silently is split nobody can report
+	// (PLAN §12.3).
+	chaptersRestitched atomic.Int64
+	pagesFromRestitch  atomic.Int64
+	bytesStored        atomic.Int64
+	bytesFetched       atomic.Int64
 
 	// results[chapter][page] is what each source image became on disk. Workers
 	// own distinct slots, so it needs no lock; resolveDeferred reads it whole,
@@ -525,15 +549,17 @@ type run struct {
 
 func (r *run) snapshot() Progress {
 	return Progress{
-		PagesDone:        int(r.pagesDone.Load()),
-		PagesTotal:       r.total,
-		PagesFetched:     int(r.pagesFetched.Load()),
-		PagesRequantised: int(r.pagesRequantised.Load()),
-		PagesGuarded:     int(r.pagesGuarded.Load()),
-		PagesSplit:       int(r.pagesSplit.Load()),
-		PagesFromSplit:   int(r.pagesFromSplit.Load()),
-		BytesStored:      r.bytesStored.Load(),
-		BytesFetched:     r.bytesFetched.Load(),
+		PagesDone:          int(r.pagesDone.Load()),
+		PagesTotal:         r.total,
+		PagesFetched:       int(r.pagesFetched.Load()),
+		PagesRequantised:   int(r.pagesRequantised.Load()),
+		PagesGuarded:       int(r.pagesGuarded.Load()),
+		PagesSplit:         int(r.pagesSplit.Load()),
+		ChaptersRestitched: int(r.chaptersRestitched.Load()),
+		PagesFromRestitch:  int(r.pagesFromRestitch.Load()),
+		PagesFromSplit:     int(r.pagesFromSplit.Load()),
+		BytesStored:        r.bytesStored.Load(),
+		BytesFetched:       r.bytesFetched.Load(),
 	}
 }
 
