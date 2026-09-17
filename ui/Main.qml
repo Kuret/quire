@@ -148,6 +148,24 @@ Rectangle {
         root.send(Msg.DocumentsSorted, answer)
     }
 
+    // checkDocuments answers the backend's reconcile question (PLAN §12.4).
+    //
+    // **The failure answer is explicit.** With no bridge there is no way to ask
+    // xochitl anything, and the honest reply is "I could not check" — never an
+    // empty list of missing documents, which the backend would otherwise be
+    // entitled to read as "none of them exist" and act on by deleting every
+    // record and the whole page cache.
+    function checkDocuments(msg) {
+        var uuids = msg && msg.documentUuids ? msg.documentUuids : []
+        var answer
+        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
+            answer = readerHandoff.item.check(uuids)
+        } else {
+            answer = {"checked": false, "documentUuids": uuids, "missing": []}
+        }
+        root.send(Msg.DocumentsChecked, answer)
+    }
+
     // forgetDocument clears a dead UUID off every row that carried it, so the
     // button goes back to offering a download straight away.
     //
@@ -270,6 +288,10 @@ Rectangle {
 
         case Msg.CacheConfirm:
             settingsScreen.cacheQuestion = msg && msg.message ? msg.message : ""
+            return
+
+        case Msg.CheckDocuments:
+            root.checkDocuments(msg)
             return
 
         case Msg.SortDocuments:

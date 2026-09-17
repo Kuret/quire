@@ -27,6 +27,7 @@ import QtQuick 2.5
 import device.global
 import com.remarkable
 import "Sorting.js" as Sorting
+import "Reconcile.js" as Reconcile
 
 QtObject {
     id: handoff
@@ -98,6 +99,23 @@ QtObject {
                 NavigationManager.treeExplorerForNavigation.selection.clear()
             }
         }, req)
+    }
+
+    // check reports which of these documents are still on the tablet.
+    //
+    // `Library.entryForId` is the question, and it is the *only* question: a
+    // document the user has filed into a folder of their own still resolves and
+    // is not missing. Folder membership is never consulted.
+    //
+    // The decisions are in Reconcile.js so the harness can drive them; what is
+    // here is the one call, and the guarantee that a failure is reported as a
+    // failure rather than as an empty list.
+    function check(uuids) {
+        return Reconcile.check({
+            resolves: function (id) {
+                return Library.entryForId(id) ? true : false
+            }
+        }, uuids)
     }
 
     // trash deletes a document: into xochitl's Trash, and then the Trash is
