@@ -88,6 +88,12 @@ Window {
     property int cacheClearAsks: 0
     property int cacheClears: 0
 
+    // What a downloaded row asked to delete: the question, and the answer.
+    property int downloadedDeleteAsks: 0
+    property string downloadedAskedSeries: ""
+    property int downloadedDeletes: 0
+    property string downloadedDeletedSeries: ""
+
     // What a downloaded row asked to open.
     property int downloadedOpens: 0
     property string downloadedOpenedSource: ""
@@ -222,6 +228,14 @@ Window {
             win.downloadedOpens++
             win.downloadedOpenedSource = sourceId
             win.downloadedOpenedSeries = seriesId
+        }
+        onDeleteRequested: {
+            win.downloadedDeleteAsks++
+            win.downloadedAskedSeries = seriesId
+        }
+        onDeleteConfirmed: {
+            win.downloadedDeletes++
+            win.downloadedDeletedSeries = seriesId
         }
     }
     PagerBar    { id: lonePager;   width: 1620 }
@@ -1379,6 +1393,133 @@ Window {
         win.want("the series screen is not refetched here", Screens.refreshOnShow("series"), "")
         win.want("the source list is not refetched", Screens.refreshOnShow("sources"), "")
         win.want("an unknown screen asks for nothing", Screens.refreshOnShow("no-such-screen"), "")
+
+        // ---- deleting every download of a series (PLAN §12.5) --------------
+        //
+        // One action on the row, several documents underneath it, and each of
+        // them fails on its own.
+
+        // The report is per document, and a run does not stop at the first
+        // failure: four deletable downloads must not be abandoned because the
+        // first one would not move.
+        var world = {
+            gone: {},
+            refuse: {},
+            exists: function (id) { return !this.gone[id] },
+            parentOf: function (id) { return this.gone[id] ? "" : this.trashed === id ? "trash" : "comics" },
+            idFor: function (id) { return id },
+            select: function (id) { this.picked = id; return 1 },
+            selectionSize: function () { return 0 },
+            moveToTrash: function () {
+                if (this.refuse[this.picked])
+                    return
+                this.trashed = this.picked
+            },
+            clearSelection: function () {},
+            deleteEntries: function (ids) {
+                if (this.trashed === ids[0])
+                    this.gone[ids[0]] = true
+            }
+        }
+        world.refuse["doc-b"] = true
+        var many = Deleting.deleteMany(world, ["doc-a", "doc-b", "doc-c"])
+        win.want("every document is reported", many.results.length, 3)
+        win.want("the first went", many.results[0].removed, true)
+        win.want("the one that would not move is reported as not trashed",
+                 many.results[1].trashed, false)
+        win.want("and the run carried on past it", many.results[2].removed, true)
+        win.want("two deleted", many.deleted, 2)
+        win.want("one failed", many.failed, 1)
+
+        // A document already off the tablet counts as deleted: it is not on the
+        // reMarkable, which is the state the user asked for, and calling it a
+        // failure would keep a record for a document that does not exist.
+        var absent = {
+            exists: function () { return false },
+            parentOf: function () { return "" },
+            idFor: function (id) { return id },
+            select: function () { return 1 },
+            selectionSize: function () { return 0 },
+            moveToTrash: function () {},
+            clearSelection: function () {},
+            deleteEntries: function () {}
+        }
+        var already = Deleting.deleteMany(absent, ["doc-a"])
+        win.want("a document already gone counts as deleted", already.deleted, 1)
+        win.want("and is reported as trashed", already.results[0].trashed, true)
+
+        // No bridge: nothing was deleted, and every document says so rather
+        // than the batch reporting one vague failure.
+        var nothing = Deleting.deleteMany(null, ["doc-a", "doc-b"])
+        win.want("with no library nothing is deleted", nothing.deleted, 0)
+        win.want("and every document is still reported", nothing.results.length, 2)
+        win.want("each as a failure", nothing.results[0].trashed, false)
+
+        // Nothing to delete is not an error, and produces no claims.
+        win.want("an empty list reports nothing", Deleting.deleteMany(world, []).results.length, 0)
+
+        // ---- the row's delete button ---------------------------------------
+
+        downloadedRows([{
+            "sourceId": "src-a", "sourceName": "Example Reader",
+            "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+            "detail": "3 downloads", "openable": true, "note": ""}])
+
+        // Asking is not deleting: the tap asks the backend for a sentence and
+        // nothing else happens.
+        var asksBefore = win.downloadedDeleteAsks
+        win.findChild(downloadedList, "deleteSeriesArea").clicked(null)
+        win.want("the row asks to delete", win.downloadedDeleteAsks, asksBefore + 1)
+        win.want("naming its own series", win.downloadedAskedSeries, "/manga/lantern/")
+        win.want("and nothing is deleted yet", win.downloadedDeletes, 0)
+
+        // The strip is closed until the backend answers, and the question is
+        // the backend's sentence rather than one composed here.
+        var strip = win.findChild(downloadedList, "downloadedConfirmStrip")
+        win.want("no question is open before the backend answers", strip.visible, false)
+        downloadedList.confirmingSourceId = "src-a"
+        downloadedList.confirmingSeriesId = "/manga/lantern/"
+        downloadedList.confirmingMessage = "Delete all 3 downloads of “The Lantern Keeper”?"
+        win.want("the backend's answer opens the question", strip.visible, true)
+        win.want("in the backend's words",
+                 win.findChild(downloadedList, "downloadedConfirmMessage").text,
+                 "Delete all 3 downloads of “The Lantern Keeper”?")
+
+        // Keep is the way out, and it deletes nothing.
+        win.findChild(downloadedList, "keepSeriesArea").clicked(null)
+        win.want("Keep closes the question", strip.visible, false)
+        win.want("and deletes nothing", win.downloadedDeletes, 0)
+
+        // Confirming deletes that series, once, and closes the question.
+        downloadedList.confirmingSourceId = "src-a"
+        downloadedList.confirmingSeriesId = "/manga/lantern/"
+        downloadedList.confirmingMessage = "Delete all 3 downloads of “The Lantern Keeper”?"
+        win.findChild(downloadedList, "confirmDeleteSeriesArea").clicked(null)
+        win.want("confirming deletes once", win.downloadedDeletes, 1)
+        win.want("the series it named", win.downloadedDeletedSeries, "/manga/lantern/")
+        win.want("and the question closes behind it", strip.visible, false)
+
+        // The row body still opens the series -- explicitly asked for -- so the
+        // tap target stops where the button starts instead of covering it.
+        var rowArea = win.findChild(downloadedList, "downloadedRowArea")
+        var button = win.findChild(downloadedList, "deleteSeriesButton")
+        win.want("the row body does not cover the delete button",
+                 rowArea.width + button.width <= downloadedList.width, true)
+        win.downloadedOpens = 0
+        rowArea.clicked(null)
+        win.want("and tapping the row still opens the series", win.downloadedOpens, 1)
+
+        // A row whose source is gone can still be deleted: those downloads are
+        // on the tablet and this screen is the only way left to reach them.
+        downloadedRows([{
+            "sourceId": "src-x", "sourceName": "src-x",
+            "seriesId": "/manga/orphan/", "title": "Orphaned",
+            "detail": "1 download", "openable": false, "note": "The source has been removed."}])
+        asksBefore = win.downloadedDeleteAsks
+        win.findChild(downloadedList, "deleteSeriesArea").clicked(null)
+        win.want("a row with no source still offers Delete",
+                 win.downloadedDeleteAsks, asksBefore + 1)
+        win.want("for its own series", win.downloadedAskedSeries, "/manga/orphan/")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)

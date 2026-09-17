@@ -24,6 +24,7 @@ import "Messages.js" as Msg
 import "Style.js" as Style
 import "Watch.js" as WatchJs
 import "Screens.js" as Screens
+import "Deleting.js" as Deleting
 
 Rectangle {
     id: root
@@ -74,6 +75,43 @@ Rectangle {
         id: readerHandoff
         source: "ReaderHandoff.qml"
         asynchronous: false
+    }
+
+    // The documents the open question is about, straight from the backend's
+    // MessageDeleteSeriesConfirm. Held here rather than worked out in the view:
+    // which documents belong to a series is the backend's answer (PLAN §2), and
+    // a second answer computed from the rows would be a second answer.
+    property var confirmingSeriesUuids: []
+
+    // deleteSeries deletes every download of one series and reports each one.
+    //
+    // Nothing is guessed at. Every document gets its own result, because each
+    // fails on its own, and the backend composes the "five of seven" sentence
+    // from exactly those results.
+    function deleteSeries(sourceId, seriesId) {
+        var uuids = root.confirmingSeriesUuids
+        root.confirmingSeriesUuids = []
+        if (!uuids || !uuids.length)
+            return
+
+        var outcome
+        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
+            outcome = readerHandoff.item.trashMany(uuids)
+        } else {
+            // The bridge is the one file that imports xochitl's QML. With no
+            // bridge nothing was deleted, and every document says so rather
+            // than the whole thing reporting one vague failure.
+            outcome = Deleting.deleteMany(null, uuids)
+        }
+
+        for (var i = 0; i < outcome.results.length; ++i)
+            root.forgetDocument(outcome.results[i].documentUuid)
+
+        root.send(Msg.DeleteSeries, {
+            "sourceId": sourceId,
+            "seriesId": seriesId,
+            "confirmed": true,
+            "results": outcome.results})
     }
 
     function openInReader(documentUuid) {
@@ -301,6 +339,16 @@ Rectangle {
 
         case Msg.DownloadedList:
             root.fillDownloaded(msg)
+            return
+
+        case Msg.DeleteSeriesConfirm:
+            // The strip carries the documents as well as the sentence: the
+            // frontend is what deletes them, and the backend is what knows
+            // which ones they are.
+            root.confirmingSeriesUuids = msg && msg.documentUuids ? msg.documentUuids : []
+            downloadedListScreen.confirmingSourceId = msg ? msg.sourceId : ""
+            downloadedListScreen.confirmingSeriesId = msg ? msg.seriesId : ""
+            downloadedListScreen.confirmingMessage = msg ? msg.message : ""
             return
 
         case Msg.WatchUpdate:
@@ -804,6 +852,9 @@ Rectangle {
                 root.currentSourceName = sourceName
                 root.openSeries(seriesId, title)
             }
+            onDeleteRequested: root.send(Msg.DeleteSeries,
+                {"sourceId": sourceId, "seriesId": seriesId})
+            onDeleteConfirmed: root.deleteSeries(sourceId, seriesId)
         }
 
         SeriesGrid {

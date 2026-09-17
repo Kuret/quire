@@ -140,7 +140,14 @@ QtObject {
     // to need a xochitl restart. It is never touched here. `add` also takes an
     // id string, not a Document (Navigator.qml:733).
     function trash(uuid) {
-        return Deleting.deleteDocument({
+        return Deleting.deleteDocument(handoff.library(), uuid)
+    }
+
+    // library is the seven calls Deleting.js works against, in one place so
+    // that the single delete and the row delete cannot drift apart. The
+    // judgement is all in Deleting.js; this is the device.
+    function library() {
+        return {
             exists: function (id) {
                 return Library.entryForId(id) ? true : false
             },
@@ -166,12 +173,23 @@ QtObject {
                 NavigationManager.treeExplorerForNavigation.selectionMoveToTrash()
             },
             clearSelection: function () {
-                // Never Library.documentSelection: see above.
+                // Never Library.documentSelection: see the file comment above.
                 NavigationManager.treeExplorerForNavigation.selection.clear()
             },
             deleteEntries: function (ids) {
                 LibraryController.deleteEntries(ids)
             }
-        }, uuid)
+        }
+    }
+
+    // trashMany deletes several documents, one at a time, and reports each.
+    //
+    // The row delete on the downloaded overview (PLAN §12.5). It runs the same
+    // two-step delete per document rather than batching the ids into one
+    // `deleteEntries` call: the batch would be one result for several
+    // documents, and the whole point of the reporting is that each of them
+    // fails on its own.
+    function trashMany(uuids) {
+        return Deleting.deleteMany(handoff.library(), uuids)
     }
 }

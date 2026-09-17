@@ -143,3 +143,42 @@ function idFor(api, uuid) {
     }
     return id ? String(id) : ""
 }
+
+// deleteMany deletes several documents and reports each one separately.
+//
+// The downloaded overview's row delete (PLAN §12.5): one action for the user,
+// several documents underneath. **Each document is reported on its own**,
+// because each fails on its own — a single flag for the batch would have to lie
+// about one end of a partial run or the other, and the backend composes the
+// "five of seven" sentence from exactly these entries.
+//
+// It does not stop at the first failure. The documents are independent, and a
+// run that abandons four deletable downloads because the first one would not
+// move leaves the user worse off than one that carries on and says so.
+//
+// "gone" — a document already off the tablet — counts as trashed and removed.
+// It is not on the reMarkable, which is the state the user asked for, and
+// reporting it as a failure would keep a record for a document that does not
+// exist.
+function deleteMany(api, uuids) {
+    var out = {results: [], deleted: 0, kept: 0, failed: 0}
+    if (!uuids)
+        return out
+
+    for (var i = 0; i < uuids.length; ++i) {
+        var uuid = uuids[i]
+        if (!uuid)
+            continue
+        var word = deleteDocument(api, uuid)
+        var trashed = word === "ok" || word === "kept" || word === "gone"
+        var removed = word === "ok" || word === "gone"
+        out.results.push({documentUuid: uuid, trashed: trashed, removed: removed})
+        if (!trashed)
+            out.failed += 1
+        else if (!removed)
+            out.kept += 1
+        else
+            out.deleted += 1
+    }
+    return out
+}
