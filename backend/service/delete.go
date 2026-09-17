@@ -25,12 +25,17 @@ type deleteRequest struct {
 	// the document is still on the tablet.
 	Trashed bool `json:"trashed,omitempty"`
 
-	// Emptied says the Trash was emptied afterwards, which is what makes the
-	// delete permanent (PLAN §12.4). It is reported separately from Trashed
-	// because the two fail separately: a document in the Trash is deleted as
-	// far as the user's library is concerned, whether or not the emptying that
-	// should have followed it worked.
-	Emptied bool `json:"emptied,omitempty"`
+	// Removed says the document was then deleted out of the Trash, which is
+	// what makes the delete permanent (PLAN §12.4). It is reported separately
+	// from Trashed because the two fail separately: a document in the Trash is
+	// deleted as far as the user's library is concerned, whether or not the
+	// second step that should have followed it worked.
+	//
+	// It used to be `emptied`, when the second step was emptying the whole
+	// Trash. It is now `LibraryController.deleteEntries` on that one entry —
+	// measured 2026-09-17, with a control folder sitting in the Trash beside
+	// two that were deleted and surviving both.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // DeleteFailedRemedy is what the user is told when the trash call did not take.
@@ -49,10 +54,10 @@ const DeleteFailedRemedy = "Quire could not remove that document from your reMar
 // right by leaving Quire to notice on the next tap (§6 M6 already handles a
 // UUID that no longer resolves).
 //
-// It does not mention the Trash. On this path the delete itself worked, which
-// since PLAN §12.4's emptying means the document is gone rather than sitting
-// somewhere it could be fetched back from. Only DeleteNotEmptiedNote may talk
-// about the Trash, because that is the one path where the document is in it.
+// It does not mention the Trash. On this path the delete itself worked, so the
+// document is gone rather than sitting somewhere it could be fetched back from.
+// Only DeleteLeftInTrashNote may talk about the Trash, because that is the one
+// path where the document is in it.
 const DeleteNotForgottenRemedy = "That download is deleted, but Quire could not update its own record of " +
 	"it. Tapping Read will sort itself out."
 
@@ -64,16 +69,20 @@ const DeleteNotForgottenRemedy = "That download is deleted, but Quire could not 
 const DeleteUnknownRemedy = "Quire has no record of that download any more, so there is nothing for it " +
 	"to delete."
 
-// DeleteNotEmptiedNote is said when the document went to the Trash but the
-// Trash would not empty.
+// DeleteLeftInTrashNote is said when the document reached the Trash but the
+// second step, which removes it from there, did not take.
 //
 // It is not phrased as a failure, because the delete was not one: the download
-// is out of the library and the record is gone. What it corrects is the promise
-// the confirmation made — the user agreed to their Trash being emptied and it
-// was not, so they are told rather than left to find a Trash they thought was
-// empty.
-const DeleteNotEmptiedNote = "That download is deleted and now sits in your reMarkable’s Trash, but Quire " +
-	"could not empty the Trash afterwards, so it is still holding what was in it."
+// is out of the library and the record is gone. What it corrects is the state
+// of the Trash — the confirmation said the download would be gone for good, and
+// instead it is recoverable, which is a difference the user can act on. So it
+// says where the document is and who can finish the job, rather than implying
+// something went wrong with their download.
+//
+// It is the one sentence in this file allowed to mention the Trash.
+const DeleteLeftInTrashNote = "That download is deleted and out of your library, but Quire could not " +
+	"remove it from your reMarkable’s Trash, so it is sitting in there. Emptying the Trash on the tablet " +
+	"will finish it off."
 
 // deleteQuestion is the sentence the confirm strip asks.
 //
@@ -82,22 +91,26 @@ const DeleteNotEmptiedNote = "That download is deleted and now sits in your reMa
 // and the *document* is "… (part 2 of 3)". Naming the file is what makes it
 // legible that one part is going and the others are staying.
 //
-// **It says "for good", and it says the whole Trash goes.** Deleting empties
-// the Trash straight afterwards (PLAN §12.4), and the probe watched that call
-// replace a document's metadata and content with a tombstone — so this is
-// destruction, not the recoverable Trash the earlier wording promised. The
-// user asked for the emptying and accepted losing the rest of the Trash with
-// it; they are still owed the sentence at the moment they confirm, because the
-// thing being destroyed may be something of theirs that Quire never put there.
+// **It says "for good", and it says nothing else is touched.** Deleting is now
+// two steps on that one document — into the Trash, then out of it with
+// `LibraryController.deleteEntries` — and neither touches anything else. The
+// old wording had to warn that the whole Trash went with it; that warning is
+// gone because the behaviour it described is gone, measured on hardware
+// 2026-09-17 with a control folder left sitting in the Trash beside two
+// deletions and surviving both.
+//
+// The second half of the sentence is not padding. A user who has read the old
+// warning once will assume it still applies, and the Trash is exactly where
+// people keep things they have not decided about yet.
 func deleteQuestion(name string) string {
 	if name == "" {
 		// A record from before names were kept. "That download" is vague, but
 		// it is not wrong, and inventing a name would be.
-		return "Delete that download from your reMarkable for good, and empty the Trash — including anything " +
-			"else already in it — at the same time?"
+		return "Delete that download from your reMarkable for good? Nothing else is touched, and the rest " +
+			"of your Trash is left alone."
 	}
-	return "Delete “" + name + "” from your reMarkable for good, and empty the Trash — including anything " +
-		"else already in it — at the same time?"
+	return "Delete “" + name + "” from your reMarkable for good? Nothing else is touched, and the rest " +
+		"of your Trash is left alone."
 }
 
 // deleteDownload forgets a document the frontend has moved to xochitl's Trash,
@@ -156,7 +169,7 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 		freed := s.reclaimPages(rec, s.libStore.List())
 
 		s.log.Info("a downloaded volume was deleted from the reMarkable",
-			"document", req.DocumentUUID, "name", rec.VisibleName, "trashEmptied", req.Emptied,
+			"document", req.DocumentUUID, "name", rec.VisibleName, "removedFromTrash", req.Removed,
 			"chapters", len(rec.Chapters), "pagesFreedBytes", freed,
 			"pagesFreedMiB", freed>>20)
 		break
@@ -170,12 +183,12 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 		return err
 	}
 
-	if !req.Emptied {
-		// The delete stands; only the promise about the Trash did not. Said
-		// after the row has already been put right, so the screen shows a
+	if !req.Removed {
+		// The delete stands; only the promise that it was permanent did not.
+		// Said after the row has already been put right, so the screen shows a
 		// finished delete with a note about it rather than a failure.
-		s.log.Warn("the Trash was not emptied after a delete", "document", req.DocumentUUID)
-		return s.sendError(out, "trash_not_emptied", DeleteNotEmptiedNote)
+		s.log.Warn("a trashed document was not removed from the Trash", "document", req.DocumentUUID)
+		return s.sendError(out, "left_in_trash", DeleteLeftInTrashNote)
 	}
 	return nil
 }

@@ -40,7 +40,7 @@ func TestTrashingADocumentForgetsItAndReclaimsThePDF(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"emptied":true}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"removed":true}`)
 
 	var reply struct {
 		DocumentUUID string `json:"documentUuid"`
@@ -126,7 +126,7 @@ func TestDeletingOnePartLeavesTheOtherParts(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+victim.DocumentUUID+`","confirmed":true,"trashed":true,"emptied":true}`)
+		`{"documentUuid":"`+victim.DocumentUUID+`","confirmed":true,"trashed":true,"removed":true}`)
 	fresh.wait(t, appload.MessageDownloadDeleted)
 
 	after := libStore.List()
@@ -146,7 +146,7 @@ func TestDeletingNothingIsRefused(t *testing.T) {
 	svc, store, _, _, rec := newDownloadService(t)
 	addSource(t, store)
 
-	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","confirmed":true,"trashed":true,"emptied":true}`)
+	handle(t, svc, rec, appload.MessageDeleteDownload, `{"documentUuid":"","confirmed":true,"trashed":true,"removed":true}`)
 
 	var e struct {
 		Code string `json:"code"`
@@ -190,14 +190,19 @@ func TestDeletingAsksFirstAndNamesTheDocument(t *testing.T) {
 	if !strings.Contains(q.Message, name) {
 		t.Errorf("question %q does not name %q", q.Message, name)
 	}
-	if !strings.Contains(q.Message, "Trash") {
-		t.Errorf("question %q does not say the Trash is emptied", q.Message)
-	}
 	if !strings.Contains(q.Message, "for good") {
 		t.Errorf("question %q does not say the delete is permanent", q.Message)
 	}
-	if !strings.Contains(q.Message, "anything else") {
-		t.Errorf("question %q does not warn that the rest of the Trash goes too", q.Message)
+	// The promise turned round on 2026-09-17. Deleting used to empty the whole
+	// Trash and the question had to warn about it; it now removes that one
+	// document, measured against a control folder that sat in the Trash
+	// through two deletions. So the question must say the rest of the Trash
+	// survives -- and must not still be promising to destroy it.
+	if !strings.Contains(q.Message, "Trash") || !strings.Contains(q.Message, "left alone") {
+		t.Errorf("question %q does not say the rest of the Trash is left alone", q.Message)
+	}
+	if strings.Contains(q.Message, "empty") || strings.Contains(q.Message, "anything else already") {
+		t.Errorf("question %q still promises to empty the Trash", q.Message)
 	}
 	if n := len(libStore.List()); n != 1 {
 		t.Errorf("%d records; asking must not delete anything", n)
@@ -223,10 +228,11 @@ func TestAskingAboutAnUnknownDocumentSaysSo(t *testing.T) {
 	}
 }
 
-// A Trash that would not empty is still a delete. The download is out of the
+// A document left in the Trash is still a delete. The download is out of the
 // library and the record is gone, so reporting a failure would tell the user
-// their download survived when it did not — but the confirmation promised an
-// empty Trash, so the note corrects that much.
+// their download survived when it did not — but the confirmation promised it
+// would be gone for good, and instead it is recoverable, so the note corrects
+// that much and says who can finish the job.
 func TestATrashThatWillNotEmptyIsStillADelete(t *testing.T) {
 	svc, store, libStore, _, rec := newDownloadService(t)
 	addSource(t, store)
@@ -240,7 +246,7 @@ func TestATrashThatWillNotEmptyIsStillADelete(t *testing.T) {
 
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"emptied":false}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"removed":false}`)
 
 	// The row is put right first: the delete happened.
 	fresh.wait(t, appload.MessageDownloadDeleted)
@@ -255,7 +261,7 @@ func TestATrashThatWillNotEmptyIsStillADelete(t *testing.T) {
 	if err := json.Unmarshal(fresh.wait(t, appload.MessageError), &e); err != nil {
 		t.Fatal(err)
 	}
-	if e.Code != "trash_not_emptied" {
+	if e.Code != "left_in_trash" {
 		t.Errorf("code %q", e.Code)
 	}
 	if !strings.Contains(e.Message, "deleted") {

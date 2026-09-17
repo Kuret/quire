@@ -62,7 +62,7 @@ func deleteDocument(t *testing.T, svc *service.Service, uuid string) *recorder {
 	t.Helper()
 	rec := &recorder{}
 	handle(t, svc, rec, appload.MessageDeleteDownload,
-		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"emptied":true}`)
+		`{"documentUuid":"`+uuid+`","confirmed":true,"trashed":true,"removed":true}`)
 	rec.wait(t, appload.MessageDownloadDeleted)
 	return rec
 }
