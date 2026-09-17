@@ -8,16 +8,26 @@ import (
 
 // ComicsFolder is the folder PLAN §6 M5 puts downloads in.
 //
-// It is **flat**. A volume goes straight into Comics, carrying its series in
-// the document name, because Quire cannot create folders at all (see Resolve).
-// A per-series subfolder is honoured if the user made one and is never
-// required: tidy nesting we cannot create is worth less than a correct file the
-// user can find.
+// A volume is uploaded into Comics and then *moved* into a per-series folder by
+// the frontend (PLAN §6 M5, corrected 2026-09-17: xochitl's QML creates folders
+// and moves documents, even though its web interface cannot — see Resolve).
+// Uploading flat and sorting afterwards keeps this path exactly as it was, so a
+// future OS that closes the QML door leaves downloads landing in Comics rather
+// than failing.
+//
+// A per-series subfolder that already exists is used directly by Place, which
+// is both the user-made case this was written for and, now, the second and
+// every later download of a series Quire has sorted before.
 const ComicsFolder = "Comics"
 
-// ComicsRemedy is the one-time setup instruction for the Comics folder, in the
-// same register as the WebInterfaceEnabled one — because it is the same kind of
-// thing. Both are things only the user can do, once, on the tablet.
+// ComicsRemedy is what the user is told when there is no Comics folder and
+// Quire could not make one.
+//
+// It is no longer the first thing they see: since 2026-09-17 Quire creates the
+// folder itself, and this is the fallback for a creation that failed. The words
+// are unchanged because they are still the right words — this is still
+// something the user can do on the tablet in a few seconds — and because the
+// path that reaches them is still a path where nothing else will.
 const ComicsRemedy = "Quire keeps downloaded comics in a folder called " +
 	"“Comics” on your reMarkable, and there isn’t one yet. On the tablet, in " +
 	"My Files, make a folder called Comics and Quire will use it from then on. " +
@@ -98,14 +108,23 @@ func (l *Library) Place(ctx context.Context, series string) (Placement, error) {
 // Resolve walks a folder path from the top level down, and reports how far it
 // got.
 //
-// It does not create anything, because it cannot. xochitl's web interface has
-// no folder-create route — the entire surface is /documents/, /download/ and
-// /upload, confirmed by reading the routes out of the binary and by probing
-// POST, PUT, PATCH and MKCOL on /documents/, all of which simply return the
-// listing. A folder can only be made by writing a CollectionType record to
-// disk, and xochitl will not notice that without a restart (see the package
-// comment). So a missing folder is reported, not invented, and the volume goes
-// into the deepest folder that does exist.
+// **It does not create anything, and that is still true of this package.**
+// xochitl's web interface has no folder-create route — the entire surface is
+// /documents/, /download/ and /upload, confirmed by reading the routes out of
+// the binary and by probing POST, PUT, PATCH and MKCOL on /documents/, all of
+// which simply return the listing. A folder written straight to disk as a
+// CollectionType record is not noticed without a restart (see the package
+// comment).
+//
+// **What changed on 2026-09-17 is who else can create one.** xochitl's own QML
+// can: `Library.createCollectionWrapper(parentId, name)`, reachable from the
+// frontend, proven on hardware (PLAN §6 M5). So a missing folder is still
+// reported rather than invented *here*, and the frontend is asked — which is
+// also why this file gained Child and ChildByID, since that QML enumerates
+// nothing.
+//
+// Until the answer comes back, the volume goes into the deepest folder that
+// does exist.
 func (l *Library) Resolve(ctx context.Context, path ...string) (Placement, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

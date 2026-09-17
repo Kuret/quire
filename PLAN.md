@@ -773,13 +773,82 @@ disk never appears in `GET /documents/`, because xochitl does not watch that
 directory (§11 Q1b). A folder can therefore only be made **by the user on the
 tablet**, or by a direct write plus a restart — which this milestone rules out.
 
-**Resolved design — flat, not nested:**
-- **`Comics` is a one-time user setup step**, alongside `WebInterfaceEnabled`.
-  Detect its absence and say so in plain language, with the remedy.
-- **Upload flat into `Comics`**, carrying the series in the document name
-  (`<Series> — Vol N`). Per-series subfolders are *optional*: if the user has
-  made one, use it; never require it. Tidy nesting we cannot create is worth
-  less than a correct file the user can find.
+> ### ⚠️ CORRECTION 2026-09-17 — the correction above was right about HTTP and wrong about QML.
+>
+> **Quire creates folders and moves documents into them.** Proven on hardware,
+> OS 3.25.1.1, over five probe rounds:
+>
+> ```qml
+> import com.remarkable
+> var id = Library.createCollectionWrapper(parentIdString, name)  // parent FIRST
+> var ex = NavigationManager.treeExplorerForNavigation
+> ex.selection.clear(); ex.selection.add(documentIdString)
+> ex.selectionMove(folderIdString)                                // id STRING
+> ```
+>
+> Everything in the 2026-09-15 correction about the *web interface* still holds
+> — there is no folder-create route and there never was. What was wrong was the
+> conclusion drawn from it, which quietly became "Quire cannot create folders at
+> all" and stood for two days while the reader handoff, the trash and the
+> empty-trash were all being driven through exactly the API that could.
+>
+> **Both arguments are id strings, and both slots have a trap.** An Entry object
+> in the parent slot is *accepted and ignored*: the folder lands at the root with
+> no error at all. `selectionMove` is the opposite — an Entry object throws
+> `Passing incompatible arguments`. So a created folder's parent is read back
+> with `Library.parentIdForId` before anything is moved into it, and a move is
+> confirmed by reading the document's parent, never by the call returning.
+>
+> **`parentIdForId` does answer for collections**, and an empty result means the
+> root. An earlier round could not tell that apart from "does not work on
+> folders", which is why both it and `entryForId(id).parentId` are read.
+>
+> **Nothing in that QML enumerates a folder's children.** Ten candidates were
+> tried; none exist. So "is there already a folder for this series?" can only be
+> asked over HTTP, and the feature is split across the socket: the backend
+> decides *where*, the frontend does it, and it reports back what actually
+> moved.
+>
+> **What each round got wrong, because the shape repeats:**
+> 1. the write step carried its own list of method names and reported a dead end
+>    its own read step had already disproved on the same screen;
+> 2. the bodies referenced a parameter the caller did not pass — and the
+>    off-device harness had *restated* the parameter list, so it tested a world
+>    where the bug did not exist;
+> 3. the key dump was filtered through a regex that hid `createCollectionWrapper`;
+> 4. only the first creator that existed was ever called, so the `…Wrapper`
+>    overload was never reached;
+> 5. the arguments were passed in the wrong order for three rounds, and every
+>    "success" was a folder named after its own parent — visible only by reading
+>    `.metadata` on the device.
+>
+> The lesson that generalises: *a measured list beats a list you invented*, and a
+> check that restates what it is checking is not a check. **If you are reading
+> the 2026-09-15 correction and about to conclude that folders are impossible:
+> they are not. Downloads land in `Comics/<Series>` today.**
+
+**Resolved design — flat, not nested:** *(superseded 2026-09-17; kept because
+the upload path below is unchanged, and because the reasoning about what to do
+when a folder is missing still governs every fallback.)*
+- ~~**`Comics` is a one-time user setup step**~~ **Quire creates `Comics`
+  itself** when it is missing, with the same call. `ComicsRemedy` stays for the
+  case where *creating* it fails — the words are still the right words, they are
+  just no longer the first thing the user sees.
+- **Upload into `Comics` exactly as before** — `GET /documents/<guid>` then
+  `POST /upload`, unchanged — and *then* move the document into its series
+  folder. Sorting after the upload rather than before it keeps the download path
+  free of a round trip through the frontend, and leaves the HTTP behaviour
+  intact if the QML door ever closes.
+- **A per-series folder is created when there is none**, named after the series
+  and nothing else: the user reads that name. The target is chosen in order of
+  how much it is worth trusting — the folder id recorded for this (source,
+  series) if it still resolves, then a folder of that name inside `Comics`, then
+  create. The id is recorded per (source, series) so a renamed folder still
+  works and two series of the same title from different sources stay apart.
+- **Failing to sort is not failing to download.** No bridge, a folder at the
+  wrong parent, a move that changes nothing: the volume stays in `Comics`, which
+  is where every download went before this, and the download is reported as the
+  success it is. Only a move whose parent reads back correctly is recorded.
 - If `Comics` is missing, upload into the deepest folder that does exist (root
   at worst) and tell the user where to create it. **Placing the volume slightly
   wrong beats refusing the download** — the bytes are fetched, and a file in the

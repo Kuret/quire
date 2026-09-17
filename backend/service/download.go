@@ -780,18 +780,21 @@ func (s *Service) storeVolume(ctx context.Context, vol volumePlan, dir string,
 	if err := s.library.EnsureReachable(ctx); err != nil {
 		return library.Result{}, library.Placement{}, err
 	}
-	// Flat into Comics, with the series in the document name. A per-series
-	// subfolder is used when the user has made one, and never required: Quire
-	// cannot create folders, so requiring one would be requiring the user to
-	// do housekeeping before every new series.
+	// Into Comics, with the series in the document name — and into the series
+	// subfolder directly when there already is one, which Place has always
+	// preferred. A folder that does not exist yet is made *after* the upload,
+	// by the frontend, and the volume moved into it (see askToSort): the upload
+	// itself is deliberately unchanged, so a future OS that closes the QML door
+	// leaves downloads landing in Comics rather than failing.
 	place, err := s.library.Place(ctx, vol.Series)
 	if err != nil {
 		return library.Result{}, library.Placement{}, err
 	}
 	if !place.Complete() {
-		// Not a failure. The pages are fetched and the PDF is built; the
-		// volume goes to the top of My Files and Placement.Remedy tells the
-		// user how to make the folder for next time.
+		// Not a failure. The pages are fetched and the PDF is built; the volume
+		// goes to the deepest folder that does exist, and the sort afterwards
+		// asks the frontend to make what is missing. Placement.Remedy is what
+		// the user is told if that fails too.
 		s.log.Info("library folder missing", "missing", place.Missing, "using", place.FolderID)
 	}
 
