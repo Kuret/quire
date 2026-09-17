@@ -2095,6 +2095,75 @@ page that must come through untouched. §9's warning applies with force — a
 generated strip that is *convenient* proves nothing, so make the awkward cases
 genuinely awkward.
 
+#### The case this section did not contemplate — a source that pre-slices
+
+**Measured 2026-09-17, Sinners' Game Ch 29 from comick, on the device.** 28
+source images; cached dimensions 1080×1440, 1125×1500 and one pair at 1500×2000
+— **every one exactly 3:4**. The assembled PDF: 28 pages, every page 514×685 pt,
+h/w 1.33, which is the screen's own ratio. The geometry was right. Page 0003 was
+nevertheless cut through a speech balloon at its top edge and through an arrow at
+its bottom, and one page of the user's was nothing but the gutter between two
+panels.
+
+**The splitter had never fired in real use.** `find` across the whole page cache
+returned no `*-of-*.jpg` at all, on any chapter. It was not misbehaving; it was
+never reached.
+
+Everything above assumes the choice is between one long strip and one real page.
+This is a third thing: **the source delivers a vertical-scroll comic already cut
+into fixed-ratio chunks, at arbitrary points.** `ShouldSplit` looked at each
+chunk, correctly saw something that is not tall, and correctly did nothing —
+after which Quire faithfully reproduced the site's own bad cuts. *We did not
+split it badly; we passed on someone else's split.*
+
+One symptom reported alongside it was withdrawn and is recorded so nobody
+optimises for it again: "pages are longer than the screen so I have to scroll"
+was the stock reader permitting a little overscroll on a page that already fits.
+**Page size and the fit-and-pad behaviour are correct and unchanged.** The only
+question is where the cuts fall.
+
+**The new path is a chapter-level decision taken before the per-image one.**
+`never` still disables everything, `always` still reaches the old splitter, and
+the 3.76 threshold is untouched.
+
+*Detection requires three independent signals, and any one failing leaves the
+chapter exactly as the source sent it* — §12.3's asymmetry applies with more
+force here, because a wrongly re-cut chapter is ruined art across all of it:
+
+1. **Six images at least.** "These are all the same shape" says nothing about
+   three images.
+2. **One shape.** Every image's h:w within 12% of the others. Mechanical slicing
+   produces one ratio; a real chapter carries a spread, a credits page, a plate.
+3. **Seams that continue.** The decisive signal: the bottom row of image N and
+   the top row of N+1 are compared, and a majority must *continue each other* —
+   what a cut through a drawing looks like, and what a page boundary never does.
+   A seam where both rows are flat background is evidence of neither and is
+   excluded from the majority; a chapter whose seams are all clean is either an
+   ordinary comic or a strip the source cut politely, and both are left alone.
+
+**Widths are deliberately not required to match.** The measured chapter has
+three of them. A shared-width rule — the obvious one — would have refused the
+very chapter this exists for. Comparison happens through a fixed 256-sample comb
+and stitching through a common width.
+
+**Cutting** reuses §12.3's gutter test, and adds two rules that come straight
+from the complaint: a page that is nearly all background is folded into a
+neighbour, and a cut prefers a gutter past the target over cutting through art —
+a tall unbroken panel is scaled to fit, as §6 M4 already does. Blank rows at the
+very top and tail are trimmed first; without that, a chapter ending in white had
+all of it merged onto the last page, measured at 15,841 rows against a
+1,440-row target.
+
+**Memory, on a 2 GB device.** Nothing decodes a chapter into one buffer. The
+scan holds one image at a time and keeps one byte per row (~40 KB for 28
+images); the renderer holds one source and one page. Measured for the 28×1080×1440
+case: **15.1 MiB peak live heap**, against 166 MiB for the chapter in one buffer
+and the 1.63 GB OOM that made this rule. The measurement itself took two
+corrections — `HeapAlloc` counts uncollected garbage, and Go's precise stack
+liveness collects the page *while it is nominally in hand* — so the test asserts
+the figure is not merely small but **explicable**: one source plus the tallest
+page, ±0.2 MiB.
+
 ### 12.4 Deleting a downloaded volume — proven reachable
 
 **Requested 2026-09-16: a delete button on a chapter, so removing a download
