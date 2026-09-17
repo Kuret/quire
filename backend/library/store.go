@@ -53,6 +53,20 @@ type Record struct {
 	// VisibleName is what the document is called on the tablet.
 	VisibleName string `json:"visibleName,omitempty"`
 
+	// SeriesTitle is the series' own title, as the source gives it.
+	//
+	// The Key holds the source's series *id*, which is a path or a slug and not
+	// something to show anyone or name a folder after. Before this existed, the
+	// attach-time filing pass had to recover the title by splitting VisibleName
+	// at the em dash assemble puts in "<Series> — Ch 0001" — which is a parse of
+	// a filename, and a series whose title legitimately contains an em dash is
+	// not a rare beast in manga.
+	//
+	// Optional, and empty on every record written before 2026-09-17: the field
+	// is omitempty, so an older library.json reads back with it blank and the
+	// old split is still used for those. No version bump, no migration.
+	SeriesTitle string `json:"seriesTitle,omitempty"`
+
 	// PDF is the assembled file, so a re-download can be skipped and so M7 has
 	// something to delete. It may be gone; the UUID outlives it.
 	PDF string `json:"pdf,omitempty"`

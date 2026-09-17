@@ -133,3 +133,55 @@ func TestOpenStoreRejectsAGarbledFile(t *testing.T) {
 		t.Errorf("error %q does not name the file", err)
 	}
 }
+
+// SeriesTitle was added on 2026-09-17, after people already had a library.json.
+// A new optional field has to read back from a file written without it — no
+// version bump, no migration — and this asserts that rather than assuming it.
+func TestAStoreWrittenBeforeSeriesTitleStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	old := `{
+  "version": 1,
+  "volumes": [
+    {
+      "source": "example-reader",
+      "series": "/manga/the-lantern-keeper/",
+      "volume": "1",
+      "documentUuid": "d1",
+      "folderUuid": "comics",
+      "folderPath": ["Comics"],
+      "visibleName": "The Lantern Keeper \u2014 Ch 0001.pdf"
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(dir, library.StoreFileName), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := library.OpenStore(dir)
+	if err != nil {
+		t.Fatalf("a library.json written before the field would not load: %v", err)
+	}
+	recs := s.List()
+	if len(recs) != 1 {
+		t.Fatalf("%d records, want the one that was there", len(recs))
+	}
+	if recs[0].DocumentUUID != "d1" || recs[0].VisibleName == "" {
+		t.Errorf("the record came back wrong: %+v", recs[0])
+	}
+	if recs[0].SeriesTitle != "" {
+		t.Errorf("SeriesTitle %q, want empty so the filename fallback is used", recs[0].SeriesTitle)
+	}
+
+	// And writing it back does not invent a value for the missing field.
+	recs[0].Pages = 12
+	if err := s.Put(recs[0]); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, library.StoreFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "seriesTitle") {
+		t.Errorf("an empty SeriesTitle was written out:\n%s", b)
+	}
+}
