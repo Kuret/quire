@@ -896,13 +896,32 @@ tablet**, or by a direct write plus a restart — which this milestone rules out
 > beside it survived. That is what lets the confirmation stop promising to empty
 > the user's whole Trash.
 >
-> **The lesson, and it now has four independent instances: on this surface a
+> **What Quire uses instead, measured 2026-09-17.**
+> `LibraryController.deleteEntries([entry.id])` deletes one document, after it
+> has been trashed:
+>
+> - `deleteEntries` is visible from QML (`Library.deleteEntries` is not).
+> - **`[uuid]` works and `[entry.id]` works — on 3.25 they are the same
+>   string.** The code uses `Library.entryForId(uuid).id` anyway, because
+>   librarian's 3.28 work had to introduce exactly that mapping when the
+>   controller stopped accepting raw UUIDs. It is free on 3.25 and 3.27 and is
+>   already the 3.28 form.
+> - **`[entry]` — the entry object itself — is accepted and ignored.** No throw,
+>   no complaint, nothing deleted. That is the fifth API on this surface to fail
+>   while looking successful.
+> - **A control folder left in the Trash survived two deletions beside it.**
+>   That is the measurement the confirmation sentence now asserts: deleting a
+>   download no longer empties the user's Trash, and `removeAllTrashed()` is
+>   gone from the frontend.
+>
+> **The lesson, and it now has five independent instances: on this surface a
 > return value is never evidence.** `ok` means the call was accepted. A UUID
 > means an id exists, not that it is the id of the thing you asked for —
 > `ensureFolder` returned a perfectly good one for a folder in the wrong place
-> that it had just invented. The only check that has ever caught one of these is
-> reading the state back afterwards: the parent, the existence, the `.metadata`
-> on disk.
+> that it had just invented. `deleteEntries` returns nothing at all and will not
+> tell you it ignored its argument. The only check that has ever caught one of
+> these is reading the state back afterwards: the parent, the existence, the
+> `.metadata` on disk.
 
 
 **Resolved design — flat, not nested:** *(superseded 2026-09-17; kept because
