@@ -463,3 +463,53 @@ func TestTheUploadBudgetLeavesMarginUnderTheCap(t *testing.T) {
 			library.MaxUploadBytes)
 	}
 }
+
+// Child answers the question the frontend cannot ask for itself: xochitl's QML
+// creates folders and moves documents but enumerates nothing, so "is there
+// already a folder for this series?" is asked over HTTP and handed over.
+func TestChildFindsAFolderInsideAnother(t *testing.T) {
+	f := newFake(
+		library.Entry{ID: "comics", Parent: "", Type: library.Collection, VisibleName: "Comics"},
+		library.Entry{ID: "wandance", Parent: "comics", Type: library.Collection, VisibleName: "Wandance"},
+		library.Entry{ID: "adoc", Parent: "comics", Type: library.Document, VisibleName: "Snotgirl"},
+	)
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	got, ok, err := lib.Child(context.Background(), "comics", "Wandance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.ID != "wandance" {
+		t.Errorf("Child found %q (%v), want wandance", got.ID, ok)
+	}
+
+	// A *document* of that name is not a folder to upload into.
+	if _, ok, err := lib.Child(context.Background(), "comics", "Snotgirl"); err != nil || ok {
+		t.Errorf("Child matched a document: ok=%v err=%v", ok, err)
+	}
+
+	if _, ok, err := lib.Child(context.Background(), "comics", "Nothing Here"); err != nil || ok {
+		t.Errorf("Child invented a folder: ok=%v err=%v", ok, err)
+	}
+}
+
+// A recorded folder id is only worth anything while it resolves. The user can
+// delete the folder Quire made, and the next download must go back to looking
+// it up by name rather than at an id that is not there.
+func TestChildByIDReportsAFolderThatHasGone(t *testing.T) {
+	f := newFake(
+		library.Entry{ID: "comics", Parent: "", Type: library.Collection, VisibleName: "Comics"},
+		library.Entry{ID: "wandance", Parent: "comics", Type: library.Collection, VisibleName: "Wandance"},
+	)
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	if _, ok, err := lib.ChildByID(context.Background(), "comics", "wandance"); err != nil || !ok {
+		t.Errorf("ChildByID lost a folder that is there: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := lib.ChildByID(context.Background(), "comics", "deleted-by-the-user"); err != nil || ok {
+		t.Errorf("ChildByID kept a folder that has gone: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := lib.ChildByID(context.Background(), "comics", ""); err != nil || ok {
+		t.Errorf("ChildByID answered for an empty id: ok=%v err=%v", ok, err)
+	}
+}

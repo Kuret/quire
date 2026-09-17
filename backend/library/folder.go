@@ -127,6 +127,51 @@ func (l *Library) Resolve(ctx context.Context, path ...string) (Placement, error
 	return p, nil
 }
 
+// Child finds the folder called name inside parentID.
+//
+// It exists because the *frontend* cannot: xochitl's QML can create a folder
+// and move documents into one (PLAN §6 M5, corrected 2026-09-17) but nothing on
+// it enumerates a folder's children — ten candidates were tried and none
+// worked. Listing is the half only this side can do, so "is there already a
+// folder for this series?" is asked here and the answer is handed over.
+func (l *Library) Child(ctx context.Context, parentID, name string) (Entry, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	entries, err := l.listLocked(ctx, parentID)
+	if err != nil {
+		return Entry{}, false, err
+	}
+	child, ok := findFolder(entries, name)
+	return child, ok, nil
+}
+
+// ChildByID reports whether id is still a folder inside parentID.
+//
+// A recorded folder id is only useful while it resolves: the user can delete
+// or move the folder Quire made, and a stale id must send the next download
+// back to looking the folder up by name rather than to a folder that is not
+// there.
+func (l *Library) ChildByID(ctx context.Context, parentID, id string) (Entry, bool, error) {
+	if id == "" {
+		return Entry{}, false, nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	entries, err := l.listLocked(ctx, parentID)
+	if err != nil {
+		return Entry{}, false, err
+	}
+	for _, e := range entries {
+		if e.Type == Collection && e.ID == id {
+			return e, true, nil
+		}
+	}
+	return Entry{}, false, nil
+}
+
 // findFolder matches a folder by visible name, case-insensitively.
 //
 // Case-insensitive because the user types the folder name on a tablet
