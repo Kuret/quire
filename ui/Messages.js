@@ -55,6 +55,11 @@ var OpenInReader = 50
 // can forget the record only when the document really went.
 var DeleteDownload = 51
 var DeleteConfirm = 53
+
+// Sorting a finished download into its series folder (PLAN §6 M5, corrected
+// 2026-09-17). Creating and moving are QML; finding an existing folder is HTTP.
+var SortDocuments = 54
+var DocumentsSorted = 55
 var DownloadDeleted = 52
 
 var WatchSeries = 60

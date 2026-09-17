@@ -43,6 +43,8 @@ func TestMessageTypeValues(t *testing.T) {
 		"DeleteDownload":        51,
 		"DownloadDeleted":       52,
 		"DeleteConfirm":         53,
+		"SortDocuments":         54,
+		"DocumentsSorted":       55,
 		"WatchSeries":           60,
 		"UnwatchSeries":         61,
 		"CheckWatched":          62,

@@ -177,6 +177,35 @@ const (
 	// updated, the row keeps saying "Read" — which is the truth.
 	MessageDownloadDeleted MessageType = 52
 
+	// Sorting a finished download into a per-series folder (PLAN §6 M5, the
+	// conclusion corrected 2026-09-17).
+	//
+	// It is split across the socket because neither side can do it alone.
+	// Creating a folder and moving a document into one are xochitl QML calls —
+	// `Library.createCollectionWrapper(parentId, name)` and
+	// `explorer.selectionMove(folderId)` — and nothing in that QML enumerates a
+	// folder's children, so "is there already a folder for this series?" can
+	// only be asked over HTTP, which only the backend speaks.
+	//
+	// MessageSortDocuments is BE→UI, JSON
+	// {documentUuids, folderId, createUnder, folderName, createComics, comicsName,
+	//  sourceId, seriesId}: everything the frontend needs to place one volume,
+	// including a folder id when the backend already found one.
+	//
+	// The uuids are a list because a volume too big for the upload cap arrives
+	// as several documents, and one selection moves them all in one call.
+	MessageSortDocuments MessageType = 54
+
+	// MessageDocumentsSorted is UI→BE, JSON
+	// {documentUuids, moved, folderId, folderName, created, detail}: what
+	// actually happened, measured by reading each document's parent back.
+	//
+	// `moved` is the documents whose parent really changed, not the ones the
+	// call was made for. A download that could not be sorted is still a
+	// download: the volume is in Comics, which is where it has always been, and
+	// nothing about it is reported as a failure.
+	MessageDocumentsSorted MessageType = 55
+
 	// The 60s are PLAN §12.2's watched series: mark a series watched, and know
 	// when it has gained chapters since you last looked.
 	//
@@ -291,6 +320,8 @@ var messageNames = map[MessageType]string{
 	MessageOpenInReader:          "OpenInReader",
 	MessageDeleteDownload:        "DeleteDownload",
 	MessageDeleteConfirm:         "DeleteConfirm",
+	MessageSortDocuments:         "SortDocuments",
+	MessageDocumentsSorted:       "DocumentsSorted",
 	MessageDownloadDeleted:       "DownloadDeleted",
 	MessageWatchSeries:           "WatchSeries",
 	MessageUnwatchSeries:         "UnwatchSeries",
