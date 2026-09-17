@@ -60,6 +60,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"sort"
 )
 
 // Defaults for RestitchOptions.
@@ -75,17 +76,57 @@ const (
 	// slicer does on the last chunk and refuses a chapter carrying a spread.
 	AspectSpread = 0.12
 
-	// SeamTolerance is the mean absolute difference, in 0..1 luminance, under
-	// which the two rows at a seam are held to continue each other.
+	// SeamCorrelation is how strongly the two rows either side of a seam must
+	// correlate, after removing their means, for the drawing to be held to
+	// continue across it.
 	//
-	// Generous, because the rows either side of a slice have been through two
-	// separate JPEG compressions: what survives is the shape of the content,
-	// not the exact values.
-	SeamTolerance = 24.0 / 255.0
+	// **Measured, not chosen.** On the corpus (one pre-sliced webtoon, two real
+	// manga chapters) the fraction of seams clearing each threshold was:
+	//
+	//	T      sliced webtoon   manga (uniform)   manga (as delivered)
+	//	0.30        78%               19%                 16%
+	//	0.50        70%                6%                  8%
+	//	0.70        37%                6%                  6%
+	//
+	// 0.5 sits where the gap is widest — 70% against 6–8% — and correlation
+	// rather than brightness because two unrelated dark pages are alike in tone
+	// and uncorrelated in structure. An earlier brightness-only test accepted 13
+	// of 13 seams on a chapter of unrelated full-bleed pages.
+	SeamCorrelation = 0.5
 
-	// MinContinuingSeams is how many seams must continue before the majority
-	// rule can fire, for the same reason MinCorroboratingPages exists.
-	MinContinuingSeams = 3
+	// MinContinuingFraction is the share of seams that must continue.
+	//
+	// Half. The webtoon measured 70% and the manga 6–8%, so the midpoint is
+	// nowhere near either — and it is deliberately not "nearly all", because a
+	// slice that happens to land in a gutter shows no continuation and there is
+	// no way to tell that from a page boundary.
+	MinContinuingFraction = 0.5
+
+	// SeamStructure is the least standard deviation, in 0..1 luminance, a row
+	// must have to be art rather than padding. It is what finds the content
+	// inside a letterboxed chunk.
+	SeamStructure = 6.0 / 255.0
+
+	// MinPaddingFraction is how much of an image must be flat padding before
+	// the chapter looks letterboxed.
+	//
+	// The other measured signal, and the stronger of the two: the pre-sliced
+	// webtoon's images are **58%** padding at the median, the manga's **2%**.
+	// A source that frames each slice in white is a source that is fitting a
+	// strip into a shape, which is the thing being detected. 0.15 is an order
+	// of magnitude clear of the manga and a quarter of the webtoon.
+	//
+	// It is also the defect the user actually sees: more than half of each page
+	// is white space.
+	MinPaddingFraction = 0.15
+
+	// MinInformativeSeams is how many seams a chapter must offer before any of
+	// this means anything, in absolute terms.
+	//
+	// The blank-margin exclusion shrinks the denominator, and two coincidences
+	// out of two survivors is not evidence. Eight, so the fraction above is a
+	// fraction of something.
+	MinInformativeSeams = 8
 
 	// MinContentFraction is the least a page may be made of non-background
 	// rows. Below it the page is nearly all gutter — the user's "dead space
@@ -114,12 +155,14 @@ type RestitchOptions struct {
 	GutterTolerance float64
 	MinGutterRows   int
 
-	// MinSlices, AspectSpread, SeamTolerance and MinContent override the
-	// constants above. Tests set them; nothing else should.
-	MinSlices     int
-	AspectSpread  float64
-	SeamTolerance float64
-	MinContent    float64
+	// The thresholds above, overridable. Tests set them; nothing else should.
+	MinSlices      int
+	AspectSpread   float64
+	MinContent     float64
+	MinInformative int
+	MinContinuing  float64
+	MinPadding     float64
+	Correlation    float64
 }
 
 func (o RestitchOptions) withDefaults() RestitchOptions {
@@ -141,11 +184,20 @@ func (o RestitchOptions) withDefaults() RestitchOptions {
 	if o.AspectSpread <= 0 {
 		o.AspectSpread = AspectSpread
 	}
-	if o.SeamTolerance <= 0 {
-		o.SeamTolerance = SeamTolerance
+	if o.MinPadding <= 0 {
+		o.MinPadding = MinPaddingFraction
+	}
+	if o.Correlation <= 0 {
+		o.Correlation = SeamCorrelation
 	}
 	if o.MinContent <= 0 {
 		o.MinContent = MinContentFraction
+	}
+	if o.MinInformative <= 0 {
+		o.MinInformative = MinInformativeSeams
+	}
+	if o.MinContinuing <= 0 {
+		o.MinContinuing = MinContinuingFraction
 	}
 	return o
 }
@@ -176,9 +228,13 @@ type Verdict struct {
 	Images     int
 	Seams      int
 	Continuing int
-	Clean      int
 	MinAspect  float64
 	MaxAspect  float64
+
+	// Padding is the median share of an image that is flat margin — the
+	// strongest single signal on the corpus: 58% for the pre-sliced webtoon,
+	// 2% for real manga.
+	Padding float64
 }
 
 // StripScan measures a chapter one image at a time.
@@ -194,6 +250,15 @@ type StripScan struct {
 
 	// uniform[i][y] marks a near-uniform row, in each image's own coordinates.
 	uniform [][]bool
+
+	// content[i] is the first and last row of image i that carries art, so the
+	// padding a letterboxing source adds is known per image and is dropped
+	// before anything is stitched. Measured on the corpus: the pre-sliced
+	// webtoon is 58% padding at the median, real manga 2%.
+	content [][2]int
+
+	// padFrac[i] is that padding as a fraction of the image's height.
+	padFrac []float64
 
 	// prevBottom is the previous image's last row, resampled to seamWidth.
 	prevBottom   []uint8
@@ -241,31 +306,56 @@ func (s *StripScan) Add(img image.Image) {
 	s.heights = append(s.heights, h)
 	s.uniform = append(s.uniform, uniformRows(lum, w, h, s.opts.GutterTolerance))
 
-	top := resampleRow(lum[:w], w, seamWidth)
+	// The art inside whatever frame the source put round it. A chunk of a
+	// letterboxed strip is white bars with a band of drawing between them, and
+	// every measurement below is of the drawing rather than of the frame.
+	rows := make([][]uint8, h)
+	for y := range h {
+		rows[y] = resampleRow(lum[y*w:(y+1)*w], w, seamWidth)
+	}
+	first, last := -1, -1
+	for y := range h {
+		if hasStructure(rows[y]) {
+			first = y
+			break
+		}
+	}
+	for y := h - 1; y >= 0; y-- {
+		if hasStructure(rows[y]) {
+			last = y
+			break
+		}
+	}
+	if first < 0 {
+		// A wholly blank image contributes nothing and breaks no seam: the
+		// next image is compared with the last one that had art in it.
+		s.content = append(s.content, [2]int{0, -1})
+		s.padFrac = append(s.padFrac, 1)
+		return
+	}
+	s.content = append(s.content, [2]int{first, last})
+	s.padFrac = append(s.padFrac, float64(first+(h-1-last))/float64(h))
+
 	if s.prevBottomOK {
 		s.seams++
-		bothFlat := s.uniform[len(s.uniform)-1][0] && s.prevFlat
-		switch {
-		case bothFlat:
-			// Background meeting background says nothing: it is what a page
-			// boundary looks like *and* what a strip cut politely at a gutter
-			// looks like. Counted, and kept out of the majority.
-			s.clean++
-		case rowDistance(s.prevBottom, top) <= s.opts.SeamTolerance*255:
+		if rowCorrelation(s.prevBottom, rows[first]) >= s.opts.Correlation {
+			// The drawing continues across the cut. Correlation rather than
+			// brightness: two unrelated dark pages are alike in tone and have
+			// no reason to agree about *where* their dark pixels are.
 			s.continuing++
 		}
 	}
-	s.prevBottom = resampleRow(lum[(h-1)*w:h*w], w, seamWidth)
-	s.prevFlat = s.uniform[len(s.uniform)-1][h-1]
+	s.prevBottom = rows[last]
 	s.prevBottomOK = true
 }
 
 // Err reports a scan that could not be taken — an empty image, in practice.
 func (s *StripScan) Err() error { return s.err }
 
-// Verdict decides, and says why.
+// Verdict decides, and says why — with the numbers, so a wrong call on a user's
+// device is diagnosable from the log rather than by re-deriving it.
 func (s *StripScan) Verdict() Verdict {
-	v := Verdict{Images: len(s.widths), Seams: s.seams, Continuing: s.continuing, Clean: s.clean}
+	v := Verdict{Images: len(s.widths), Seams: s.seams, Continuing: s.continuing}
 	if s.err != nil {
 		v.Reason = s.err.Error()
 		return v
@@ -282,25 +372,50 @@ func (s *StripScan) Verdict() Verdict {
 		v.MinAspect = math.Min(v.MinAspect, a)
 		v.MaxAspect = math.Max(v.MaxAspect, a)
 	}
+	v.Padding = medianOf(s.padFrac)
+
 	if v.MinAspect <= 0 || v.MaxAspect/v.MinAspect > 1+s.opts.AspectSpread {
 		v.Reason = fmt.Sprintf("the images are not one shape (%.3f to %.3f); a sliced strip is uniform",
 			v.MinAspect, v.MaxAspect)
 		return v
 	}
-	if s.continuing < MinContinuingSeams {
-		v.Reason = fmt.Sprintf("%d of %d seams continue the drawing; a sliced strip cuts through art",
-			s.continuing, s.seams)
+	if v.Seams < s.opts.MinInformative {
+		v.Reason = fmt.Sprintf("%d seams; %d are needed before a fraction of them means anything",
+			v.Seams, s.opts.MinInformative)
 		return v
 	}
-	if s.continuing*2 <= s.seams {
-		v.Reason = fmt.Sprintf("only %d of %d seams continue the drawing", s.continuing, s.seams)
+
+	// Both signals, because either alone has a way of being wrong: a chapter
+	// of letterboxed *pages* is padded without being a strip, and a chapter of
+	// near-identical pages could correlate without being one either.
+	if v.Padding < s.opts.MinPadding {
+		v.Reason = fmt.Sprintf("images are %.0f%% padding at the median, under the %.0f%% a "+
+			"letterboxed strip shows (%d of %d seams continue the drawing)",
+			v.Padding*100, s.opts.MinPadding*100, v.Continuing, v.Seams)
+		return v
+	}
+	if float64(v.Continuing) < s.opts.MinContinuing*float64(v.Seams) {
+		v.Reason = fmt.Sprintf("%d of %d seams continue the drawing, under the %.0f%% a sliced strip "+
+			"shows (images are %.0f%% padding)",
+			v.Continuing, v.Seams, s.opts.MinContinuing*100, v.Padding*100)
 		return v
 	}
 
 	v.PreSliced = true
-	v.Reason = fmt.Sprintf("%d images of one shape, %d of %d seams cut through the drawing",
-		len(s.widths), s.continuing, s.seams)
+	v.Reason = fmt.Sprintf("%d images of one shape, %.0f%% padding at the median, and %d of %d seams "+
+		"cutting through the drawing",
+		v.Images, v.Padding*100, v.Continuing, v.Seams)
 	return v
+}
+
+// medianOf is the middle value, or 0 for nothing.
+func medianOf(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), vals...)
+	sort.Float64s(sorted)
+	return sorted[len(sorted)/2]
 }
 
 // Plan works out where the re-cut pages go.
@@ -313,6 +428,21 @@ func (s *StripScan) Plan() ([]Page, Verdict) {
 		return nil, v
 	}
 	return s.plan(), v
+}
+
+// ForcePlan plans the cuts whatever the evidence says, short of a chapter too
+// small to be one.
+//
+// It is `splitStrips: "always"`, and it waives the seam and shape tests only —
+// the minimum image count stands, because "re-cut this chapter" is meaningless
+// for three images. Detection will eventually be wrong about some chapter and
+// the user should not have to wait for a release; that is what §12.3's escape
+// hatch is for, and this is the direction it cannot be argued out of.
+func (s *StripScan) ForcePlan() []Page {
+	if len(s.widths) < s.opts.MinSlices {
+		return nil
+	}
+	return s.plan()
 }
 
 // plan maps every image onto one virtual strip of a common width, chooses the
@@ -330,9 +460,15 @@ func (s *StripScan) plan() []Page {
 	}
 
 	// Virtual rows, and the map back. offsets[i] is where image i starts.
+	//
+	// **Only the art.** The frame a letterboxing source puts round each chunk
+	// is dropped here: stitching it back in would rebuild the very white bars
+	// that make the pages half empty, and the measured chapter is 58% padding.
+	// contentOf gives each image's own first and last drawn row.
 	offsets := make([]int, len(s.heights)+1)
-	for i, h := range s.heights {
-		offsets[i+1] = offsets[i] + int(float64(h)*float64(w)/float64(s.widths[i])+0.5)
+	for i := range s.heights {
+		from, to := s.contentOf(i)
+		offsets[i+1] = offsets[i] + int(float64(to-from+1)*float64(w)/float64(s.widths[i])+0.5)
 	}
 	total := offsets[len(s.heights)]
 	if total <= 0 {
@@ -341,9 +477,14 @@ func (s *StripScan) plan() []Page {
 
 	uniform := make([]bool, total)
 	for i, rows := range s.uniform {
-		scale := float64(s.heights[i]) / float64(offsets[i+1]-offsets[i])
+		from, to := s.contentOf(i)
+		span := to - from + 1
+		if offsets[i+1] == offsets[i] || span <= 0 {
+			continue
+		}
+		scale := float64(span) / float64(offsets[i+1]-offsets[i])
 		for y := offsets[i]; y < offsets[i+1]; y++ {
-			src := int(float64(y-offsets[i]) * scale)
+			src := from + int(float64(y-offsets[i])*scale)
 			uniform[y] = rows[min(src, len(rows)-1)]
 		}
 	}
@@ -408,7 +549,7 @@ func (s *StripScan) plan() []Page {
 	pages := make([]Page, 0, len(bounds)-1)
 	for i := 0; i+1 < len(bounds); i++ {
 		p := Page{Gutter: gutterAt[bounds[i+1]]}
-		p.Spans = spansFor(bounds[i], bounds[i+1], offsets, s.heights)
+		p.Spans = s.spansFor(bounds[i], bounds[i+1], offsets)
 		if len(p.Spans) > 0 {
 			pages = append(pages, p)
 		}
@@ -493,19 +634,22 @@ func mergeThinPages(bounds []int, uniform []bool, minContent float64) []int {
 	return bounds
 }
 
-// spansFor turns a virtual row range into per-image spans.
-func spansFor(from, to int, offsets []int, heights []int) []Span {
+// spansFor turns a virtual row range into per-image spans, in each image's own
+// coordinates and inside its own content extent.
+func (s *StripScan) spansFor(from, to int, offsets []int) []Span {
 	var out []Span
-	for i := range heights {
+	for i := range s.heights {
 		lo, hi := offsets[i], offsets[i+1]
-		if hi <= from || lo >= to {
+		if hi <= from || lo >= to || hi == lo {
 			continue
 		}
-		scale := float64(heights[i]) / float64(hi-lo)
-		a := int(float64(max(from, lo)-lo)*scale + 0.5)
-		b := int(float64(min(to, hi)-lo)*scale + 0.5)
-		if b > heights[i] {
-			b = heights[i]
+		cFrom, cTo := s.contentOf(i)
+		span := cTo - cFrom + 1
+		scale := float64(span) / float64(hi-lo)
+		a := cFrom + int(float64(max(from, lo)-lo)*scale+0.5)
+		b := cFrom + int(float64(min(to, hi)-lo)*scale+0.5)
+		if b > cTo+1 {
+			b = cTo + 1
 		}
 		if b <= a {
 			continue
@@ -513,6 +657,20 @@ func spansFor(from, to int, offsets []int, heights []int) []Span {
 		out = append(out, Span{Index: i, From: a, To: b})
 	}
 	return out
+}
+
+// contentOf is image i's first and last drawn row, or its whole height when it
+// carries no art at all.
+func (s *StripScan) contentOf(i int) (from, to int) {
+	if i >= len(s.content) {
+		return 0, s.heights[i] - 1
+	}
+	c := s.content[i]
+	if c[1] < c[0] {
+		// Wholly blank: it contributes nothing to the strip.
+		return 0, -1
+	}
+	return c[0], c[1]
 }
 
 // resampleRow samples a row of luminance down (or up) to n points, nearest
@@ -668,4 +826,51 @@ func (s *StripScan) PlanWidth() int {
 		w = max(w, iw)
 	}
 	return w
+}
+
+// hasStructure reports whether a row varies enough to say anything.
+func hasStructure(row []uint8) bool {
+	if len(row) == 0 {
+		return false
+	}
+	var sum float64
+	for _, v := range row {
+		sum += float64(v)
+	}
+	mean := sum / float64(len(row))
+	var varsum float64
+	for _, v := range row {
+		d := float64(v) - mean
+		varsum += d * d
+	}
+	return math.Sqrt(varsum/float64(len(row))) >= SeamStructure*255
+}
+
+// rowCorrelation is Pearson's r between two rows, after removing their means.
+//
+// It answers "is this the same signal?" rather than "is this the same
+// brightness?", which is the difference between a cut through a drawing and two
+// unrelated pages that happen to be equally dark.
+func rowCorrelation(a, b []uint8) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var sa, sb float64
+	for i := range a {
+		sa += float64(a[i])
+		sb += float64(b[i])
+	}
+	ma, mb := sa/float64(len(a)), sb/float64(len(b))
+
+	var num, da, db float64
+	for i := range a {
+		x, y := float64(a[i])-ma, float64(b[i])-mb
+		num += x * y
+		da += x * x
+		db += y * y
+	}
+	if da == 0 || db == 0 {
+		return 0
+	}
+	return num / math.Sqrt(da*db)
 }

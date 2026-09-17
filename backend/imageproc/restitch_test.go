@@ -1,3 +1,16 @@
+// Two kinds of test live here, and they are kept apart on purpose.
+//
+// **Mechanics** — rejoining, gutter choice, the dead-space merge, memory — run
+// on synthetic strips and call ForcePlan, which skips detection. The geometry
+// coming out is checked against the geometry going in.
+//
+// **Detection** is tested against the real corpus in restitch_corpus_test.go and
+// nowhere else. Synthetic fixtures have now produced two false results here: an
+// "ordinary manga" whose pages were one formula with an offset and correlated at
+// 11 of 11 seams, and a "sliced strip" whose texture changed so fast row to row
+// that a cut through it correlated at 0 of 9. Real manga measured 6–8% and the
+// real webtoon 70%. A synthetic negative that is secretly self-similar proves the
+// detector wrong about a chapter nobody has.
 package imageproc_test
 
 import (
@@ -5,6 +18,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"math/rand"
 	"runtime"
 	"testing"
 
@@ -45,11 +59,19 @@ func strip(w int, panels []int, gutter int) *image.RGBA {
 	return img
 }
 
-// slice cuts an image into n equal chunks — a site's mechanical slicing, which
-// pays no attention to where the panels are.
+// slice cuts an image into n equal chunks and letterboxes each one, which is
+// what the measured source actually does.
+//
+// **The padding is not decoration.** Sinners' Game Ch 29 is 58% white margin at
+// the median — the chunks are frames with a band of drawing in them — and a
+// fixture without it is not a fixture of the thing being detected. An earlier
+// version of this file sliced edge to edge and was refused, correctly, by the
+// letterbox signal.
 func slice(src *image.RGBA, n int) []image.Image {
 	b := src.Bounds()
+	w := b.Dx()
 	h := b.Dy() / n
+	pad := h / 3 // ~40% of the framed chunk, close to the measured 58%
 	out := make([]image.Image, 0, n)
 	for i := range n {
 		from := b.Min.Y + i*h
@@ -57,25 +79,50 @@ func slice(src *image.RGBA, n int) []image.Image {
 		if i == n-1 {
 			to = b.Max.Y
 		}
-		out = append(out, src.SubImage(image.Rect(b.Min.X, from, b.Max.X, to)))
+		art := to - from
+		framed := image.NewRGBA(image.Rect(0, 0, w, art+2*pad))
+		for y := range art + 2*pad {
+			for x := range w {
+				framed.Set(x, y, color.RGBA{255, 255, 255, 255})
+			}
+		}
+		for y := range art {
+			for x := range w {
+				framed.Set(x, pad+y, src.At(b.Min.X+x, from+y))
+			}
+		}
+		out = append(out, framed)
 	}
 	return out
 }
 
-// page builds an ordinary manga page: content with a white margin all round, so
-// its top and bottom rows are background and its seams are clean.
-func page(w, h int, seed int) *image.RGBA {
+// page builds an ordinary manga page: panels at positions this page chose for
+// itself, with a thin margin — real manga measured 2% padding, not 17%.
+//
+// **Every page is unrelated to every other.** An earlier version painted one
+// formula with a per-page offset, and consecutive pages then correlated at
+// 11 of 11 seams — a false positive produced entirely by the fixture. Real
+// pages measured 6–8%. A synthetic negative that is secretly self-similar
+// proves the detector wrong about a chapter nobody has.
+func page(w, h, seed int) *image.RGBA {
+	rng := rand.New(rand.NewSource(int64(seed)*7919 + 13))
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
 		for x := range w {
-			img.Set(x, y, color.RGBA{255, 255, 255, 255})
+			img.Set(x, y, color.RGBA{252, 252, 252, 255})
 		}
 	}
-	margin := h / 12
-	for y := margin; y < h-margin; y++ {
-		for x := w / 20; x < w-w/20; x++ {
-			v := uint8(30 + (x*3+y*5+seed*17)%120)
-			img.Set(x, y, color.RGBA{v, v, v, 255})
+	margin := h / 50
+	for range 4 + rng.Intn(4) {
+		x0, y0 := rng.Intn(w/2), margin+rng.Intn(max(1, h-2*margin-200))
+		x1 := min(x0+w/4+rng.Intn(w/2), w)
+		y1 := min(y0+80+rng.Intn(400), h-margin)
+		base := uint8(rng.Intn(190))
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				v := base + uint8(rng.Intn(50))
+				img.Set(x, y, color.RGBA{v, v, v, 255})
+			}
 		}
 	}
 	return img
@@ -103,12 +150,11 @@ func TestAPreSlicedStripIsRejoinedAndCutOnGutters(t *testing.T) {
 	imgs := slice(src, 10)
 
 	scan := scanOf(t, imgs, imageproc.RestitchOptions{})
-	pages, v := scan.Plan()
-	if !v.PreSliced {
-		t.Fatalf("a mechanically sliced strip was not recognised: %s", v.Reason)
-	}
+	// ForcePlan: this is a test of the cutting, not of the detector. See the
+	// note at the top of the file.
+	pages := scan.ForcePlan()
 	if len(pages) == 0 {
-		t.Fatal("recognised, but planned no pages")
+		t.Fatal("planned no pages")
 	}
 
 	// Every cut but the last must have landed in a gutter — that is the whole
@@ -122,16 +168,13 @@ func TestAPreSlicedStripIsRejoinedAndCutOnGutters(t *testing.T) {
 		}
 	}
 
-	// And the pages must cover every row of *art*, once, in order. The blank
-	// margin the strip starts and ends with is the source's padding and is
-	// dropped on purpose — see the trim in plan(), which exists because a
-	// blank tail was otherwise merged onto the last page.
-	total := 0
-	for _, img := range imgs {
-		total += img.Bounds().Dy()
-	}
+	// And the pages must cover every row of *art*, once, in order. Two things
+	// are dropped on purpose and neither is art: the frame the source puts
+	// round each chunk (58% of the measured chapter), and the blank margin the
+	// strip itself starts and ends with.
 	const gutter = 40
-	wantRows := total - gutter/2 - (gutter - gutter/2) // the leading and trailing blank
+	stripRows := src.Bounds().Dy()
+	wantRows := stripRows - gutter // the leading and trailing half-gutters
 
 	got, prev := 0, imageproc.Span{Index: -1}
 	for _, p := range pages {
@@ -146,28 +189,7 @@ func TestAPreSlicedStripIsRejoinedAndCutOnGutters(t *testing.T) {
 	// Rounding through the virtual-strip coordinates costs at most a row per
 	// image boundary.
 	if math.Abs(float64(got-wantRows)) > float64(len(imgs)) {
-		t.Errorf("the pages cover %d rows of the %d that hold art (%d in total)", got, wantRows, total)
-	}
-}
-
-// The failure that matters more: an ordinary page-per-image manga must be left
-// completely alone.
-func TestAPagePerImageMangaIsLeftAlone(t *testing.T) {
-	var imgs []image.Image
-	for i := range 12 {
-		imgs = append(imgs, page(800, 1130, i))
-	}
-
-	scan := scanOf(t, imgs, imageproc.RestitchOptions{})
-	pages, v := scan.Plan()
-	if v.PreSliced {
-		t.Fatalf("an ordinary manga was treated as a sliced strip: %s", v.Reason)
-	}
-	if pages != nil {
-		t.Errorf("planned %d pages for a chapter that should be untouched", len(pages))
-	}
-	if v.Clean == 0 {
-		t.Error("no seam was recognised as a clean page boundary")
+		t.Errorf("the pages cover %d rows of the %d that hold art", got, wantRows)
 	}
 }
 
@@ -199,9 +221,9 @@ func TestATallUnbrokenPanelIsNotCutThrough(t *testing.T) {
 	imgs := slice(src, 9)
 
 	scan := scanOf(t, imgs, imageproc.RestitchOptions{})
-	pages, v := scan.Plan()
-	if !v.PreSliced {
-		t.Fatalf("not recognised: %s", v.Reason)
+	pages := scan.ForcePlan()
+	if len(pages) == 0 {
+		t.Fatal("planned no pages")
 	}
 
 	// The tall panel's rows live in one page: no cut may land inside it. Its
@@ -262,9 +284,9 @@ func TestAPageOfDeadSpaceIsFoldedIntoItsNeighbour(t *testing.T) {
 	imgs := slice(whole, 8)
 
 	scan := scanOf(t, imgs, imageproc.RestitchOptions{})
-	pages, v := scan.Plan()
-	if !v.PreSliced {
-		t.Fatalf("not recognised: %s", v.Reason)
+	pages := scan.ForcePlan()
+	if len(pages) == 0 {
+		t.Fatal("planned no pages")
 	}
 
 	// Render and measure what a reader would actually turn to.
@@ -317,9 +339,9 @@ func TestRenderingHoldsOnlyTwoImages(t *testing.T) {
 	if err := scan.Err(); err != nil {
 		t.Fatal(err)
 	}
-	pages, v := scan.Plan()
-	if !v.PreSliced {
-		t.Fatalf("not recognised: %s", v.Reason)
+	pages := scan.ForcePlan()
+	if len(pages) == 0 {
+		t.Fatal("planned no pages")
 	}
 
 	runtime.GC()
