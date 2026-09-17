@@ -283,3 +283,78 @@ func TestAttachDoesNotInventAFolderNameFromADocument(t *testing.T) {
 
 	noSortSent(t, rec)
 }
+
+// The bug this field prevents: a fresh download and a later re-sort naming the
+// same series differently, and so making two folders for it.
+//
+// The download path passes the source's series title; the attach path reads it
+// off the record. They must agree, and the only way to be sure is to run both
+// against the same series and compare what they asked for.
+func TestBothPathsNameTheSeriesFolderTheSameWay(t *testing.T) {
+	// The fresh download's name, taken from a real download.
+	svc, store, libStore, fake, rec := newDownloadService(t)
+	fake.mu.Lock()
+	fake.entries = []library.Entry{comicsFolder()}
+	fake.mu.Unlock()
+	addSource(t, store)
+
+	seriesID, chapterID := firstChapter(t, svc, rec)
+	handle(t, svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	waitForPhase(t, rec, "done")
+	fresh := waitForSort(t, rec)
+
+	// The record that download wrote, carried into a second service which has
+	// never seen the series and can only go on what was recorded.
+	var stored library.Record
+	for _, r := range libStore.List() {
+		if r.DocumentUUID == fresh.DocumentUUIDs[0] {
+			stored = r
+		}
+	}
+	if stored.DocumentUUID == "" {
+		t.Fatal("the download recorded nothing")
+	}
+	if stored.SeriesTitle == "" {
+		t.Fatal("the download did not record the series title, so the paths can still diverge")
+	}
+
+	_, second := attachWith(t,
+		comicsWith(doc(stored.DocumentUUID, stored.VisibleName, "comics")),
+		stored)
+	resort := waitForSort(t, second)
+
+	if resort.FolderName != fresh.FolderName {
+		t.Errorf("the re-sort would make %q while a download makes %q — two folders for one series",
+			resort.FolderName, fresh.FolderName)
+	}
+}
+
+// A title with an em dash of its own is exactly what the filename split gets
+// wrong, and exactly what the recorded title gets right.
+func TestATitleWithAnEmDashSurvivesTheRecordedTitle(t *testing.T) {
+	withTitle := unsortedRecord("d1", "1", "Wandance \u2014 Vol 1 \u2014 Ch 0001.pdf")
+	withTitle.SeriesTitle = "Wandance \u2014 After the Dance"
+
+	_, rec := attachWith(t,
+		comicsWith(doc("d1", withTitle.VisibleName, "comics")),
+		withTitle)
+
+	ask := waitForSort(t, rec)
+	if ask.FolderName != "Wandance \u2014 After the Dance" {
+		t.Errorf("folderName %q, want the recorded title in full", ask.FolderName)
+	}
+}
+
+// A record written before the field exists still gets filed, by the old split.
+func TestARecordWithoutATitleStillUsesTheFilename(t *testing.T) {
+	old := unsortedRecord("d1", "1", "The Lantern Keeper \u2014 Ch 0001.pdf")
+	old.SeriesTitle = ""
+
+	_, rec := attachWith(t, comicsWith(doc("d1", old.VisibleName, "comics")), old)
+
+	if ask := waitForSort(t, rec); ask.FolderName != "The Lantern Keeper" {
+		t.Errorf("folderName %q, want the name split off the filename", ask.FolderName)
+	}
+}

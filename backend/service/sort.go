@@ -451,19 +451,27 @@ func sorted(rec library.Record) bool {
 	return rec.FolderUUID != "" && len(rec.FolderPath) == 2
 }
 
-// seriesTitleOf recovers the series name for a record, or "" when it cannot.
+// seriesTitleOf is the series name for a record, or "" when it cannot be known.
 //
-// The record carries the source's series *id*, not its title, so the title has
-// to come from the document's own name — "<Series> — Ch 0001.pdf", or
-// "<Series> — Volume 1 (part 2 of 3).pdf" — which assemble composes with an em
-// dash. That is the one thing on hand without asking a source that may not
-// answer.
+// **The recorded title first.** The backend had it in hand at download time and
+// now keeps it (library.Record.SeriesTitle), so the folder a re-sort asks for is
+// named from the same string the fresh download would have used — which is what
+// stops the two paths creating two folders for one series.
 //
-// **No dash, no folder.** Naming a folder after the whole document would put
-// "Wandance — Ch 0001.pdf" on screen as a folder name, which is worse than
-// leaving the volume in Comics: askToSort refuses an empty name, so returning
-// one here is how this pass declines to guess.
+// **The filename, for records written before that field existed.** assemble
+// composes "<Series> — Ch 0001", so the part before the em dash is the title.
+// It is a parse of a filename and it is wrong for a series whose title contains
+// an em dash of its own; that is exactly why the field exists, and why this is
+// only the fallback.
+//
+// **No dash and no title, no folder.** Naming a folder after the whole document
+// would put "Wandance — Ch 0001.pdf" on screen as a folder name, which is worse
+// than leaving the volume in Comics: askToSort refuses an empty name, so
+// returning one here is how this pass declines to guess.
 func seriesTitleOf(rec library.Record) string {
+	if title := folderName(rec.SeriesTitle); title != "" {
+		return title
+	}
 	i := strings.Index(rec.VisibleName, " \u2014 ")
 	if i <= 0 {
 		return ""

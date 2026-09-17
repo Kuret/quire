@@ -677,13 +677,17 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 			FolderUUID:   res.FolderUUID,
 			FolderPath:   place.Path,
 			VisibleName:  res.VisibleName,
-			PDF:          assemble.PDFPath(dir, part.Slug()),
-			Pages:        manifest.PageCount,
-			Bytes:        manifest.Bytes,
-			Chapters:     chapterIDs(part.Volume),
-			Part:         part.Part,
-			Parts:        part.Parts,
-			StoredAt:     time.Now(),
+			// The same title the sort is asked for, from the same variable, so
+			// a re-sort later cannot name the folder differently from the
+			// fresh download that made it.
+			SeriesTitle: series.Title,
+			PDF:         assemble.PDFPath(dir, part.Slug()),
+			Pages:       manifest.PageCount,
+			Bytes:       manifest.Bytes,
+			Chapters:    chapterIDs(part.Volume),
+			Part:        part.Part,
+			Parts:       part.Parts,
+			StoredAt:    time.Now(),
 		}
 		if err := s.libStore.Put(rec); err != nil {
 			// The document is on the tablet either way. Losing the UUID only
