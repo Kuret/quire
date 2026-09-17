@@ -13,6 +13,7 @@
         <file>ui/Paging.js</file>
         <file>ui/Watch.js</file>
         <file>ui/Sorting.js</file>
+        <file>ui/Reconcile.js</file>
         <file>ui/SourceList.qml</file>
         <file>ui/AddSource.qml</file>
         <file>ui/SeriesGrid.qml</file>

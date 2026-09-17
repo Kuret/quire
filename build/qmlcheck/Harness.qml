@@ -11,6 +11,7 @@ import QtQuick.Window 2.2
 import "../../ui"
 import "../../ui/Watch.js" as WatchJs
 import "../../ui/Sorting.js" as Sorting
+import "../../ui/Reconcile.js" as Reconcile
 import "../../ui/Style.js" as Style
 
 
@@ -1066,6 +1067,58 @@ Window {
         win.want("a very long title is capped",
                  Sorting.folderName(new Array(200).join("x")).length, 60)
         win.want("an empty title stays empty", Sorting.folderName(null), "")
+
+        // ---- reconciling with the tablet (PLAN §12.4) ----------------------
+        //
+        // The guard worth the most here is the one that says "I could not
+        // check": an empty list of missing documents from a frontend that never
+        // looked must never read as "none of them exist", because what follows
+        // from that is every record dropped and the whole page cache deleted.
+
+        var present = {"a": true, "b": true, "c": true}
+        var device = {resolves: function (id) { return present[id] === true }}
+
+        var all = Reconcile.check(device, ["a", "b", "c"])
+        win.want("a complete check says so", all.checked, true)
+        win.want("and finds nothing missing", all.missing.length, 0)
+
+        // A document the user deleted on the tablet.
+        present = {"a": true, "c": true}
+        var some = Reconcile.check(device, ["a", "b", "c"])
+        win.want("a deleted document is reported missing", some.missing.length, 1)
+        win.want("and it is the one that went", some.missing[0], "b")
+        win.want("the check still counts as done", some.checked, true)
+
+        // A document that moved is not a document that went: entryForId still
+        // resolves it wherever the user filed it, and folder membership is
+        // never the question.
+        present = {"a": true, "b": true, "c": true}
+        var moved = Reconcile.check({resolves: function (id) {
+            // Pretend "b" now lives in a folder of the user's own; it still
+            // resolves.
+            return present[id] === true
+        }}, ["a", "b", "c"])
+        win.want("a document that merely moved is not missing", moved.missing.length, 0)
+
+        // No bridge at all.
+        var blind = Reconcile.check(null, ["a", "b", "c"])
+        win.want("no bridge means the check was not done", blind.checked, false)
+        win.want("and reports nothing missing", blind.missing.length, 0)
+
+        // A lookup that throws abandons the whole answer rather than returning
+        // the part of it that ran.
+        var thrower = Reconcile.check({resolves: function (id) {
+            if (id === "b")
+                throw new Error("no")
+            return false
+        }}, ["a", "b", "c"])
+        win.want("a lookup that throws fails the whole check", thrower.checked, false)
+        win.want("and reports nothing missing, not the part it saw",
+                 thrower.missing.length, 0)
+
+        // Nothing to ask about is a complete answer.
+        var none = Reconcile.check(device, [])
+        win.want("an empty question is answered completely", none.checked, true)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
