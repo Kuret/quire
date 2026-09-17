@@ -849,6 +849,37 @@ when a folder is missing still governs every fallback.)*
   wrong parent, a move that changes nothing: the volume stays in `Comics`, which
   is where every download went before this, and the download is reported as the
   success it is. Only a move whose parent reads back correctly is recorded.
+- **Downloads that finished while the frontend was away are filed on attach**
+  (added 2026-09-17). Sorting is something only the frontend can do, so a
+  download that completed with nobody listening was never sorted and no later
+  event went looking for it. Attach is when the capability comes back.
+
+  **No timer and no polling**, for the same reason the cache control has no
+  schedule: this is tidying, and a task that rearranges the user's library on a
+  clock is a task that moves their documents while they are reading.
+
+  Two conditions, both required, and the second is the one that makes it safe:
+
+  1. **Never sorted** — no series folder recorded against the record. A record
+     Quire has already filed is off limits for good: a document of ours sitting
+     in `Comics` *now* is one the **user** moved back, and filing it again on
+     every attach would be Quire overruling them, quietly and repeatedly.
+  2. **Still in `Comics` right now**, from one listing of `Comics` per attach
+     rather than from `FolderUUID`. The record says where the volume landed at
+     upload time, not where it is.
+
+  Grouped by (source, series), one group at a time, stopping early if the
+  frontend goes away. Silent: INFO in the log, nothing on screen.
+
+  > **The subtle way this could eat itself.** A frontend whose bridge failed to
+  > load answers `moved: []`. If that were recorded as a folder, condition 1
+  > would disqualify the record **for good on the strength of a failure**, and
+  > the volume would sit in `Comics` forever with Quire believing it was filed.
+  > The not-moved case therefore records nothing, and a test holds it there.
+
+  A download already in flight sorts itself when it finishes, so the two paths
+  are kept apart by a registry of sorts in flight keyed by document uuid: the
+  attach pass skips anything already asked about.
 - If `Comics` is missing, upload into the deepest folder that does exist (root
   at worst) and tell the user where to create it. **Placing the volume slightly
   wrong beats refusing the download** — the bytes are fetched, and a file in the
