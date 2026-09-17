@@ -93,11 +93,12 @@ Rectangle {
     // deleteDownload moves a document to xochitl's Trash and tells the backend
     // what happened (PLAN §12.4).
     //
-    // The three answers are three different situations and none of them may be
+    // The four answers are four different situations and none of them may be
     // guessed at. "ok" is the delete; "gone" means the document was already off
     // the tablet, which is exactly the missing-document case §6 M6 already
     // answers, wording and all; "failed" means nothing moved, and saying so is
-    // what stops the backend forgetting a record whose document is still there.
+    // what stops the backend forgetting a record whose document is still there;
+    // "kept" is below.
     function deleteDownload(documentUuid) {
         if (!documentUuid)
             return
@@ -109,15 +110,16 @@ Rectangle {
             root.forgetDocument(documentUuid)
             return
         }
-        // "kept" is a delete that happened with a Trash that did not empty, so
-        // it is reported as trashed — the download really is gone — with the
-        // emptying reported separately. Calling it a failure would tell the
+        // "kept" is a delete that happened, with the document left sitting in
+        // the Trash because the second step did not take. It is reported as
+        // trashed — the download really is out of the library — with the
+        // removal reported separately. Calling it a failure would tell the
         // user their download survived when it did not.
         root.send(Msg.DeleteDownload, {
             "documentUuid": documentUuid,
             "confirmed": true,
             "trashed": result === "ok" || result === "kept",
-            "emptied": result === "ok"})
+            "removed": result === "ok"})
     }
 
     // sortDownload puts a finished download in its series folder and tells the

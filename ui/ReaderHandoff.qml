@@ -28,6 +28,7 @@ import device.global
 import com.remarkable
 import "Sorting.js" as Sorting
 import "Reconcile.js" as Reconcile
+import "Deleting.js" as Deleting
 
 QtObject {
     id: handoff
@@ -118,21 +119,19 @@ QtObject {
         }, uuids)
     }
 
-    // trash deletes a document: into xochitl's Trash, and then the Trash is
-    // emptied. PLAN §12.4 proved both calls on hardware.
+    // trash deletes a document: into xochitl's Trash, and then out of the Trash
+    // for good. PLAN §12.4 proved every call here on hardware.
     //
-    // **Emptying destroys.** removeAllTrashed() does not hide the document, it
-    // removes it: the probe watched a document's .metadata and content replaced
-    // by a tombstone stamped with the second of the call, and nothing else in
-    // the xochitl directory touched. It is what the user asked for — "just
-    // empty the trash after a deletion, i don't really mind if my whole trash
-    // is emptied" — and it is why the confirmation says so before it happens.
+    // **It no longer empties the Trash.** `removeAllTrashed()` destroyed
+    // whatever else the user had in there, and the confirmation had to warn
+    // about it. `LibraryController.deleteEntries` — which is in xochitl itself,
+    // on 3.25 and 3.27 — removes one entry instead, and a control folder left
+    // in the Trash beside two deletions survived both (2026-09-17). That
+    // measurement is what let the warning go.
     //
-    // It answers with a word rather than a flag, because the outcomes want
-    // different things from the caller: "ok" is deleted and the Trash emptied,
-    // "kept" is deleted but the Trash still holding it, "gone" means the
-    // document was already not there and the M6 missing-document path already
-    // has the right answer for that, and "failed" means change nothing at all.
+    // The order, the reading-back and the four answers live in Deleting.js so
+    // the offscreen harness can drive them. This function is the device: seven
+    // callbacks and no judgement.
     //
     // **There are two selections and only one of them is safe to write.**
     // `explorer.selection` is what selectionMoveToTrash() acts on.
@@ -141,71 +140,38 @@ QtObject {
     // to need a xochitl restart. It is never touched here. `add` also takes an
     // id string, not a Document (Navigator.qml:733).
     function trash(uuid) {
-        if (!uuid)
-            return "failed"
-
-        try {
-            if (!Library.entryForId(uuid))
-                return "gone"
-
-            var ex = NavigationManager.treeExplorerForNavigation
-            if (!ex || !ex.selection)
-                return "failed"
-
-            // One document, chosen explicitly. Clearing first means an earlier
-            // selection left behind by the navigator cannot be swept into this
-            // delete — the user asked for one row.
-            ex.selection.clear()
-            ex.selection.add(uuid)
-            if (ex.selection.size !== 1) {
-                // The id did not take. Leaving a half-made selection behind is
-                // how the navigator ends up disagreeing with itself.
-                ex.selection.clear()
-                return "failed"
+        return Deleting.deleteDocument({
+            exists: function (id) {
+                return Library.entryForId(id) ? true : false
+            },
+            parentOf: function (id) {
+                return String(Library.parentIdForId(id))
+            },
+            // The id deleteEntries is given. Identical to the uuid on 3.25 and
+            // deliberately not written as the uuid; see Deleting.js idFor.
+            idFor: function (id) {
+                var entry = Library.entryForId(id)
+                return entry ? String(entry.id) : ""
+            },
+            select: function (id) {
+                var ex = NavigationManager.treeExplorerForNavigation
+                ex.selection.add(id)
+                return ex.selection.size
+            },
+            selectionSize: function () {
+                var ex = NavigationManager.treeExplorerForNavigation
+                return ex && ex.selection ? ex.selection.size : 0
+            },
+            moveToTrash: function () {
+                NavigationManager.treeExplorerForNavigation.selectionMoveToTrash()
+            },
+            clearSelection: function () {
+                // Never Library.documentSelection: see above.
+                NavigationManager.treeExplorerForNavigation.selection.clear()
+            },
+            deleteEntries: function (ids) {
+                LibraryController.deleteEntries(ids)
             }
-
-            ex.selectionMoveToTrash()
-            var left = ex.selection.size
-
-            // Always, whatever happened: nothing should stay selected under the
-            // user (PLAN §12.4's implementation notes).
-            ex.selection.clear()
-
-            if (left !== 0) {
-                // The move did not take. The probe hit exactly this by trashing
-                // a UUID that no longer existed, so it is a real state and not
-                // a defensive flourish.
-                return "failed"
-            }
-
-            // The Trash is emptied second, and only ever after a move that
-            // worked. It lives on the explorer and nowhere else: the probe
-            // found emptyTrash undefined and no removeAllTrashed on Library or
-            // LibraryController (OS 3.25.1.1, 2026-09-16).
-            if (typeof ex.removeAllTrashed !== "function")
-                return "kept"
-            try {
-                ex.removeAllTrashed()
-            } catch (emptyFailed) {
-                // The document is in the Trash, which is still a delete. Only
-                // the emptying did not happen, and saying otherwise would tell
-                // the user their download survived when it did not.
-                console.log("[quire] the Trash could not be emptied: " + emptyFailed)
-                return "kept"
-            }
-            return "ok"
-        } catch (e) {
-            // Every early return above clears the selection before it leaves,
-            // and a throw must not be the one path that does not: a half-made
-            // selection left behind is exactly what made the navigator
-            // disagree with itself the first time (PLAN §12.4).
-            try {
-                var ex2 = NavigationManager.treeExplorerForNavigation
-                if (ex2 && ex2.selection)
-                    ex2.selection.clear()
-            } catch (ignored) {}
-            console.log("[quire] trash failed: " + e)
-            return "failed"
-        }
+        }, uuid)
     }
 }

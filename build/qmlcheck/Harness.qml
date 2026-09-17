@@ -12,6 +12,7 @@ import "../../ui"
 import "../../ui/Watch.js" as WatchJs
 import "../../ui/Sorting.js" as Sorting
 import "../../ui/Reconcile.js" as Reconcile
+import "../../ui/Deleting.js" as Deleting
 import "../../ui/Style.js" as Style
 
 
@@ -1226,6 +1227,139 @@ Window {
         win.want("turning the page moves the window", downloadedList.page, 2)
         downloadedRows([])
         win.want("a list that empties resets to the first page", downloadedList.page, 1)
+
+        // ---- deleting one document (PLAN §12.4) ----------------------------
+        //
+        // Measured on hardware 2026-09-17: a live entry cannot be deleted --
+        // `deleteEntries` on one is accepted and ignored -- and an entry that
+        // is in the Trash is removed without disturbing anything else in
+        // there. Both halves are what the confirmation sentence now promises,
+        // so both are driven here, and every case builds its own device.
+
+        function tablet(opts) {
+            var o = opts || {}
+            var parent = o.parent === undefined ? "comics" : o.parent
+            var here = o.absent ? false : true
+            return {
+                calls: [],
+                selected: [],
+                deleted: null,
+                exists: function () { return here },
+                parentOf: function () { return parent },
+                idFor: function (uuid) {
+                    if (o.noEntry)
+                        return ""
+                    return o.wrapperIds ? "entry:" + uuid : uuid
+                },
+                select: function (id) {
+                    this.calls.push("select")
+                    if (o.selectFails)
+                        return 0
+                    this.selected.push(id)
+                    return this.selected.length
+                },
+                selectionSize: function () { return this.selected.length },
+                moveToTrash: function () {
+                    this.calls.push("moveToTrash")
+                    if (o.trashFails)
+                        return
+                    this.selected = []
+                    parent = "trash"
+                },
+                clearSelection: function () {
+                    this.calls.push("clear")
+                    this.selected = []
+                },
+                deleteEntries: function (ids) {
+                    this.calls.push("deleteEntries")
+                    this.deleted = ids
+                    if (o.deleteThrows)
+                        throw new Error("no")
+                    // The measured precondition: only an entry already in the
+                    // Trash goes, and an entry object in the list is accepted
+                    // and ignored.
+                    if (parent === "trash" && !o.deleteIgnored)
+                        here = false
+                }
+            }
+        }
+
+        // The ordinary delete: trashed, then removed, and nothing left selected.
+        var dev = tablet({})
+        win.want("a document is deleted", Deleting.deleteDocument(dev, "doc-1"), "ok")
+        win.want("by trashing it first",
+                 dev.calls.indexOf("moveToTrash") < dev.calls.indexOf("deleteEntries"), true)
+        win.want("and then removing that one entry",
+                 dev.calls[dev.calls.length - 1], "deleteEntries")
+        win.want("with nothing left selected", dev.selected.length, 0)
+
+        // The id goes through the entry, not straight from the uuid. On 3.25
+        // they are the same string, so only a device that distinguishes them
+        // can show that this is what the code does -- and 3.28 is such a
+        // device, which is the whole reason for the indirection.
+        dev = tablet({wrapperIds: true})
+        Deleting.deleteDocument(dev, "doc-1")
+        win.want("the entry id is what is deleted", dev.deleted[0], "entry:doc-1")
+
+        // The measured silent failure: the call is accepted and the document is
+        // still there. Reporting that as a delete would tell the user their
+        // download is gone while it sits in their Trash.
+        dev = tablet({deleteIgnored: true})
+        win.want("a delete that did nothing is not a delete",
+                 Deleting.deleteDocument(dev, "doc-1"), "kept")
+
+        // The same honesty when the call throws.
+        dev = tablet({deleteThrows: true})
+        win.want("a throw on the second step is kept, not failed",
+                 Deleting.deleteDocument(dev, "doc-1"), "kept")
+
+        // No entry to name means no id to delete with. Falling back to the raw
+        // uuid would work on 3.25 and be the silent no-op on 3.28.
+        dev = tablet({noEntry: true})
+        win.want("an unnameable entry is kept, not guessed at",
+                 Deleting.deleteDocument(dev, "doc-1"), "kept")
+        win.want("and nothing was passed to deleteEntries", dev.deleted, null)
+
+        // The trash step did not take: the selection did not empty. Nothing may
+        // be deleted on top of that.
+        dev = tablet({trashFails: true})
+        win.want("a document that would not move is a failure",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("and nothing was deleted", dev.deleted, null)
+        win.want("and nothing is left selected", dev.selected.length, 0)
+
+        // The two readings disagree: the parent says Trash, but the selection
+        // did not empty, so the move cannot be trusted for this id. Nothing may
+        // be claimed and nothing may be deleted on the strength of half of it.
+        dev = tablet({})
+        dev.moveToTrash = function () { this.calls.push("moveToTrash"); dev.parentOf = function () { return "trash" } }
+        win.want("a move that left the selection behind is a failure",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("even with the parent reading Trash", dev.deleted, null)
+
+        // The id would not select. The same rule, one step earlier.
+        dev = tablet({selectFails: true})
+        win.want("an id that will not select is a failure",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("and it never reached the Trash", dev.calls.indexOf("moveToTrash"), -1)
+
+        // The selection emptied, but the document is not in the Trash. The
+        // delete below would be the measured no-op, so it is not attempted.
+        dev = tablet({trashFails: false, parent: "comics"})
+        dev.moveToTrash = function () { this.calls.push("moveToTrash"); this.selected = [] }
+        win.want("a document that is not in the Trash is not deleted",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("and deleteEntries was never called", dev.deleted, null)
+
+        // Already off the tablet. §6 M6 owns that wording, so it is named, not
+        // reported as a delete.
+        dev = tablet({absent: true})
+        win.want("a document already gone says so",
+                 Deleting.deleteDocument(dev, "doc-1"), "gone")
+
+        // No device at all: the bridge failed to load, and nothing may be
+        // claimed.
+        win.want("no tablet deletes nothing", Deleting.deleteDocument(null, "doc-1"), "failed")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
