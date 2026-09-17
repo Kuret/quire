@@ -12,6 +12,7 @@ import "../../ui"
 import "../../ui/Watch.js" as WatchJs
 import "../../ui/Sorting.js" as Sorting
 import "../../ui/Reconcile.js" as Reconcile
+import "../../ui/LibraryOps.js" as LibraryOps
 import "../../ui/Style.js" as Style
 
 
@@ -1226,6 +1227,74 @@ Window {
         win.want("turning the page moves the window", downloadedList.page, 2)
         downloadedRows([])
         win.want("a list that empties resets to the first page", downloadedList.page, 1)
+
+        // ---- which library implementation is live -------------------------
+        //
+        // The capability is reported to the backend because the two paths do
+        // **not** promise the same thing: librarian deletes one document, the
+        // legacy path empties the reMarkable's Trash. The confirmation sentence
+        // is composed in the backend, so the backend has to know which one it
+        // is about to do.
+        //
+        // Each case builds its own broker stub; a capability that comes out
+        // right because the case before it left one behind is not a capability
+        // anyone has tested.
+
+        // librarian answering with a UUID.
+        var live = LibraryOps.describe({send: function () {
+            return "a93dfa8f-8e58-4792-82d3-81a00ca982f4"
+        }})
+        win.want("a broker that answers is librarian", live.path, LibraryOps.LIBRARIAN)
+        win.want("and it deletes one document", live.deletesOneDocument, true)
+
+        // A well-formed refusal is as good a proof of life as a UUID: the probe
+        // asks for an entry that does not exist precisely so the answer is
+        // cheap, and "ERROR: not found" means the extension is there.
+        var refused = LibraryOps.describe({send: function () {
+            return "ERROR: not found: quire-probe-no-such-entry"
+        }})
+        win.want("a well-formed refusal still proves librarian", refused.path, LibraryOps.LIBRARIAN)
+
+        // The broker exists but nothing answered: sendSimpleSignal returns ""
+        // when hitCount != 1, which is librarian not being loaded.
+        var silent = LibraryOps.describe({send: function () { return "" }})
+        win.want("an empty reply is not an answer", silent.path, LibraryOps.LEGACY)
+        win.want("and the legacy path does not promise one document",
+                 silent.deletesOneDocument, false)
+        win.want("and says why", silent.detail, "no extension answered")
+
+        // No broker at all — the build has no binding.
+        var none = LibraryOps.describe(null)
+        win.want("no broker is the legacy path", none.path, LibraryOps.LEGACY)
+        win.want("and says so", none.detail, "no broker on this build")
+
+        // A broker that throws is not a licence to guess.
+        var thrower = LibraryOps.describe({send: function () { throw new Error("boom") }})
+        win.want("a broker that throws is the legacy path", thrower.path, LibraryOps.LEGACY)
+        win.want("and reports the throw", thrower.detail.indexOf("threw") >= 0, true)
+
+        // Reading one reply: three outcomes, deliberately not two.
+        var good = LibraryOps.reply("a93dfa8f-8e58-4792-82d3-81a00ca982f4")
+        win.want("a uuid is success", good.ok, true)
+        win.want("and was answered", good.answered, true)
+
+        var err = LibraryOps.reply("ERROR: ambiguous: matches two things")
+        win.want("an ERROR is a refusal", err.ok, false)
+        win.want("but it was answered", err.answered, true)
+
+        var quiet = LibraryOps.reply("")
+        win.want("an empty reply is not a refusal", quiet.ok, false)
+        win.want("it is nobody answering", quiet.answered, false)
+
+        // The parameter rule. librarian's parser splits at offset 36 when the
+        // first argument is a uuid, and otherwise at the *last* comma — so a
+        // uuid first makes the split exact whatever follows.
+        win.want("arguments join with commas",
+                 LibraryOps.argsFor(["a93dfa8f-8e58-4792-82d3-81a00ca982f4", "Some Folder"]),
+                 "a93dfa8f-8e58-4792-82d3-81a00ca982f4,Some Folder")
+        win.want("a title with a comma survives in the second position",
+                 LibraryOps.argsFor(["a93dfa8f-8e58-4792-82d3-81a00ca982f4", "I, Claudius"]),
+                 "a93dfa8f-8e58-4792-82d3-81a00ca982f4,I, Claudius")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
