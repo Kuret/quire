@@ -827,6 +827,28 @@ tablet**, or by a direct write plus a restart — which this milestone rules out
 > the 2026-09-15 correction and about to conclude that folders are impossible:
 > they are not. Downloads land in `Comics/<Series>` today.**
 
+> ### ⚠️ FOOTNOTE 2026-09-17 — "xochitl does not watch that directory" is true, and not the end of it.
+>
+> The 2026-09-15 correction says a `CollectionType` written straight to disk never
+> appears, because xochitl does not watch its document directory. The *watching*
+> part is correct. What it misses is that **the running library can be told**:
+>
+> ```qml
+> Library.requestLoadEntry(uuid);
+> Library.entryAdded(uuid);
+> ```
+>
+> Found by reading rm-librarian's source (`createFolderOnDisk` → `notifyLibrary`),
+> not by probing — it writes the `.metadata` itself and then notifies, and so
+> creates folders without a restart. We have no measurement of our own yet; the
+> librarian probe is what will provide one.
+>
+> It changes nothing Quire does today — `createCollectionWrapper` works and is
+> measured — but it removes "a restart is unavoidable" from the list of things
+> anyone should believe when planning around this API. §6 M5's original fallback
+> ("write it and `systemctl restart xochitl`, batched once per session") was more
+> expensive than it needed to be.
+
 **Resolved design — flat, not nested:** *(superseded 2026-09-17; kept because
 the upload path below is unchanged, and because the reasoning about what to do
 when a folder is missing still governs every fallback.)*
