@@ -120,6 +120,34 @@ Rectangle {
             "emptied": result === "ok"})
     }
 
+    // sortDownload puts a finished download in its series folder and tells the
+    // backend what happened (PLAN §6 M5, corrected 2026-09-17).
+    //
+    // Every way this can fail ends the same way: the documents stay in Comics,
+    // which is where every download went before this existed. The backend is
+    // told so it can stop recording a folder that is not there — never so it
+    // can call the download a failure.
+    function sortDownload(msg) {
+        if (!msg || !msg.documentUuids || !msg.documentUuids.length)
+            return
+        var answer
+        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
+            answer = readerHandoff.item.sort(msg)
+        } else {
+            // The bridge is the one file that imports xochitl's QML, so a
+            // future OS closing that door takes sorting with it and nothing
+            // else (PLAN §6 M6).
+            answer = {"documentUuids": msg.documentUuids, "moved": [],
+                      "folderId": msg.folderId ? msg.folderId : "",
+                      "folderName": msg.folderName ? msg.folderName : "",
+                      "created": false,
+                      "detail": "this build cannot reach the library's folders"}
+        }
+        answer.sourceId = msg.sourceId
+        answer.seriesId = msg.seriesId
+        root.send(Msg.DocumentsSorted, answer)
+    }
+
     // forgetDocument clears a dead UUID off every row that carried it, so the
     // button goes back to offering a download straight away.
     //
@@ -242,6 +270,10 @@ Rectangle {
 
         case Msg.CacheConfirm:
             settingsScreen.cacheQuestion = msg && msg.message ? msg.message : ""
+            return
+
+        case Msg.SortDocuments:
+            root.sortDownload(msg)
             return
 
         case Msg.QueueResult:
