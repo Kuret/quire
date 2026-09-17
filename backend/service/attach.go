@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/rickl/quire/backend/appload"
@@ -54,6 +55,17 @@ func (s *Service) FrontendAttached(out Sender) error {
 	// (PLAN §6 M7). It is started rather than waited for: the results stream in
 	// one series at a time so the shell can draw immediately.
 	s.startWatchCheck(out, false, nil)
+
+	// Downloads that finished while the frontend was away were never sorted
+	// into their series folders, because sorting is something only the frontend
+	// can do (PLAN §6 M5). Attach is when that capability comes back, so it is
+	// when Quire goes looking — no timer, and nothing while nobody is here.
+	//
+	// Started rather than waited for: it is tidying, it makes HTTP calls to the
+	// library, and the first screen must not wait for either.
+	s.goBackground(context.Background(), func(ctx context.Context) {
+		s.resortOnAttach(ctx, out)
+	})
 	return nil
 }
 
