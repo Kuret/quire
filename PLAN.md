@@ -2636,9 +2636,23 @@ worth knowing on its own.
   em-dash rule the attach-time filing pass uses, so one rule governs both. Where
   even that yields nothing the series id is shown: ugly, but true, and **nothing
   is skipped** — every row is a download the user made.
-- **Fetched when the screen opens.** No push and no live updates: a download or
-  a delete shows up the next time it is opened, which is sufficient and is a
-  great deal less machinery.
+- **Fetched every time the screen is shown.** *(corrected 2026-09-18.)* No push
+  and no live updates: a download or a delete shows up the next time the screen
+  is opened, which is sufficient and is a great deal less machinery. It was
+  first written as "fetched when the screen opens" and implemented on one route
+  in only — from the source list — so opening a series from a row, deleting that
+  series' last download and coming back left a row pointing at nothing until the
+  screen was left entirely. **A list is not "fetched when it is opened" if one
+  of the ways it is opened does not fetch it.** Every route now goes through
+  `showScreen`, and `ui/Screens.js` says which screens need re-asking for and
+  why the others do not: the watched list is *pushed* on attach and after every
+  change, browse is the source's own catalogue served from the paging cache, and
+  the series screen already refetches on every route in.
+- **A refetch, not arithmetic in the view.** One delete can change a row's
+  count, remove the row, or touch several rows at once, and the backend already
+  works all of that out from the records (PLAN §2). A view that patched its own
+  model would be a second implementation of that sum, and the two would disagree
+  eventually — on the screen, in front of the user.
 - **No covers.** Records carry no cover URL and inventing a lookup to decorate a
   list is work nobody asked for. Text rows, like the watched list.
 - Paged like every other list (§12.1).
@@ -2648,3 +2662,50 @@ removed-source row does nothing" by emitting `clicked()` on its MouseArea — wh
 invokes the handler directly and bypasses `enabled`, so it fails for reasons
 that have nothing to do with the device. What makes the row inert for real input
 is the property, and the property is what is asserted.
+
+#### Deleting a series' downloads from its row
+
+**Requested 2026-09-17: "we should add a delete button to the entries in the
+download overview, which directly deletes everything from that manga. clicking
+on the rest of the row still should link to that manga to delete individual
+chapters".** One action from this screen for the whole series, with the row body
+still navigating — the same split the chapter rows use, kept deliberately rather
+than reinvented.
+
+- **"Directly" means one action, not "without asking".** It asks first. The
+  contrast is the multi-select queue, where the confirmation was *removed*:
+  queueing is reversible and costs only time, while this destroys every download
+  of a series at once and the only way back is to fetch them all again. The
+  sentence names the series and the count — a title alone does not distinguish
+  "this deletes the chapter you just read" from "this deletes forty" — and it
+  makes the same promise the single delete now makes: nothing else is touched,
+  and the rest of the Trash is left alone.
+- **The tap target stops where the button starts.** The row's MouseArea is
+  anchored to the button's left edge rather than filling the row, which is what
+  keeps the requested split true for real input; the harness asserts the
+  geometry, because `clicked()` on a covered area would pass either way.
+- **Every document is reported separately, and the run does not stop at the
+  first failure.** They fail independently, so one flag for the batch would have
+  to lie about one end of a partial run or the other. Five of seven reads as
+  five of seven: a clean "done" hides two documents the user thinks are gone,
+  and a flat failure hides five that really went and whose records are already
+  dropped. Abandoning four deletable downloads because the first would not move
+  leaves the user worse off than carrying on and saying so.
+- **A document already off the tablet counts as deleted.** It is not on the
+  reMarkable, which is the state the user asked for, and reporting it as a
+  failure would keep a record for a document that does not exist.
+- **Records go and pages are reclaimed one document at a time**, through
+  `reclaimPages` and its remaining-records check, read *after* each record is
+  removed. A series' records commonly share a chapter, so asking the question
+  per document is what lets a chapter another record still needs survive.
+- **A row whose source has been removed still offers Delete.** Its downloads are
+  on the tablet and this screen is the only way left to reach them. Only
+  *opening* is disabled.
+- **The empty series folder is left behind, knowingly.** After the last download
+  goes, the series folder sits in `Comics` empty. Removing it would be the
+  natural completion, but only if it is *actually* empty — the folder is the
+  user's once it exists and may hold something of theirs. **Quire has no
+  measured way to enumerate a folder's children**, so emptiness cannot be
+  established, and it is not guessed at: a stray empty folder is a far smaller
+  sin than deleting a folder with something in it. Closing this needs a hardware
+  probe of the child-enumeration API, not a change of mind.
