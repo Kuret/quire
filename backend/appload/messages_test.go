@@ -52,6 +52,8 @@ func TestMessageTypeValues(t *testing.T) {
 		"CheckWatched":          62,
 		"WatchList":             63,
 		"WatchUpdate":           64,
+		"ListDownloaded":        65,
+		"DownloadedList":        66,
 		"SetConsultRobots":      70,
 		"GetCacheSize":          71,
 		"CacheStatus":           72,

@@ -270,6 +270,22 @@ const (
 	// drawing is a shell that looks broken.
 	MessageWatchUpdate MessageType = 64
 
+	// The downloaded overview (PLAN §12.5): every series with at least one
+	// volume on the tablet, so a download that was never watched is still
+	// findable.
+	//
+	// MessageListDownloaded is UI→BE, JSON {}. MessageDownloadedList is the
+	// reply, JSON {series: [...], empty}: one row per **(source, series)**, and
+	// every row naming its source. Always the pair, never "series, with the
+	// source shown when two collide" — a row has to know which source to open,
+	// and a label that appears conditionally is one the user cannot rely on.
+	//
+	// Fetched when the screen opens. There is no push and no live update: a
+	// download or a delete shows up the next time it is opened, which is enough
+	// and is a great deal less machinery.
+	MessageListDownloaded MessageType = 65
+	MessageDownloadedList MessageType = 66
+
 	// The 70s are device-wide settings — things that are about Quire rather
 	// than about any one source.
 	//
@@ -352,6 +368,8 @@ var messageNames = map[MessageType]string{
 	MessageCheckWatched:          "CheckWatched",
 	MessageWatchList:             "WatchList",
 	MessageWatchUpdate:           "WatchUpdate",
+	MessageListDownloaded:        "ListDownloaded",
+	MessageDownloadedList:        "DownloadedList",
 	MessageSetConsultRobots:      "SetConsultRobots",
 	MessageGetCacheSize:          "GetCacheSize",
 	MessageCacheStatus:           "CacheStatus",

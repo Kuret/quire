@@ -74,6 +74,11 @@ var CheckWatched = 62
 var WatchList = 63
 var WatchUpdate = 64
 
+// The downloaded overview (PLAN §12.5): one row per (source, series) with at
+// least one volume on the tablet. Fetched when the screen opens.
+var ListDownloaded = 65
+var DownloadedList = 66
+
 // The one global robots.txt switch (PLAN §7.4, off by default). The current
 // value comes back on the Pong status rather than in a reply of its own.
 var SetConsultRobots = 70
