@@ -187,6 +187,27 @@ Rectangle {
         }
     }
 
+    // The backend's line for an empty library, shown as it arrived.
+    property string downloadedEmpty: ""
+
+    function fillDownloaded(msg) {
+        downloadedModel.clear()
+        var rows = msg && msg.series ? msg.series : []
+        for (var i = 0; i < rows.length; ++i) {
+            var r = rows[i]
+            downloadedModel.append({
+                "sourceId": r.sourceId ? r.sourceId : "",
+                "sourceName": r.sourceName ? r.sourceName : "",
+                "seriesId": r.seriesId ? r.seriesId : "",
+                "title": r.title ? r.title : "",
+                "detail": r.detail ? r.detail : "",
+                "openable": r.openable ? true : false,
+                "note": r.note ? r.note : ""})
+        }
+        root.downloadedEmpty = msg && msg.empty ? msg.empty : ""
+        downloadedListScreen.page = 1
+    }
+
     ListModel { id: sourcesModel }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
@@ -197,6 +218,11 @@ Rectangle {
     ListModel { id: volumesModel }
 
     ListModel { id: watchedModel }
+
+    // The downloaded overview's rows (PLAN §12.5). Filled from the backend when
+    // the screen opens; there is no push, so a download or a delete shows up
+    // the next time it is opened.
+    ListModel { id: downloadedModel }
 
     // ---- transport ---------------------------------------------------------
 
@@ -268,6 +294,10 @@ Rectangle {
 
         case Msg.WatchList:
             root.reconcileWatched(msg)
+            return
+
+        case Msg.DownloadedList:
+            root.fillDownloaded(msg)
             return
 
         case Msg.WatchUpdate:
@@ -561,7 +591,8 @@ Rectangle {
 
     function openSeries(seriesId, title) {
         root.currentSeriesId = seriesId
-        root.seriesCameFrom = root.screen === "watching" ? "watching" : "browse"
+        root.seriesCameFrom = root.screen === "watching" || root.screen === "downloaded"
+                              ? root.screen : "browse"
         root.screen = "series"
         chaptersModel.clear()
         // Emptied before the new series' detail arrives, so the previous
@@ -584,6 +615,7 @@ Rectangle {
             root.screen = root.seriesCameFrom
             break
         case "watching":
+        case "downloaded":
             root.screen = "sources"
             break
         case "browse":
@@ -601,6 +633,7 @@ Rectangle {
         case "add": return "Add a source"
         case "browse": return root.currentSourceName
         case "watching": return "Watching"
+        case "downloaded": return "Downloaded"
         case "series": return chapterListScreen.seriesTitle
         case "settings": return "Settings"
         }
@@ -695,6 +728,12 @@ Rectangle {
             model: sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.screen = "add" }
             onWatchingRequested: root.screen = "watching"
+            // Fetched on the way in rather than pushed: a list that is right
+            // when it is opened is enough, and much less machinery.
+            onDownloadedRequested: {
+                root.screen = "downloaded"
+                root.send(Msg.ListDownloaded, {})
+            }
             watchingLabel: root.watchShort
             onOpenRequested: root.openSource(sourceId, name)
             notice: root.notice
@@ -730,6 +769,22 @@ Rectangle {
             onCheckRequested: root.send(Msg.CheckWatched, {})
             onUnwatchRequested: root.send(Msg.UnwatchSeries,
                 {"sourceId": sourceId, "seriesId": seriesId})
+            onOpenRequested: {
+                root.currentSourceId = sourceId
+                root.currentSourceName = sourceName
+                root.openSeries(seriesId, title)
+            }
+        }
+
+        DownloadedList {
+            id: downloadedListScreen
+            objectName: "downloadedList"
+            anchors.fill: parent
+            visible: root.screen === "downloaded"
+            model: downloadedModel
+            emptyNote: root.downloadedEmpty
+            // The same route into a series the grid and the watched list use:
+            // one series screen, one Back behaviour, one message.
             onOpenRequested: {
                 root.currentSourceId = sourceId
                 root.currentSourceName = sourceName

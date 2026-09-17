@@ -35,6 +35,7 @@ Item {
 
     signal addRequested()
     signal watchingRequested()
+    signal downloadedRequested()
 
     // PLAN §12.2's "short" summary, composed in the backend. Empty means there
     // is nothing to report, and the button says only "Watching" — a badge that
@@ -487,9 +488,37 @@ Item {
             anchors.centerIn: parent
             spacing: Style.gap
 
+            // Three buttons now: Watching, Downloaded and Add. Downloaded sits
+            // beside Watching because they answer the same question from
+            // opposite ends — what is new, and what is already here — and
+            // downloads happen without watching (PLAN §12.5).
+            Rectangle {
+                objectName: "downloadedButton"
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
+                height: Style.buttonHeight
+                color: downloadedArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Downloaded"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: downloadedArea
+                    objectName: "downloadedArea"
+                    anchors.fill: parent
+                    onClicked: screen.downloadedRequested()
+                }
+            }
+
             Rectangle {
                 objectName: "watchingButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap) / 2, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
                 height: Style.buttonHeight
                 color: watchingArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -516,7 +545,7 @@ Item {
 
             Rectangle {
                 objectName: "addSourceButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap) / 2, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
                 height: Style.buttonHeight
                 color: addArea.pressed ? Style.pressed : Style.paper
                 border.width: 2

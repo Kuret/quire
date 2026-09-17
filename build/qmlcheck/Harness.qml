@@ -35,6 +35,7 @@ Window {
     ListModel { id: volumesModel }
     ListModel { id: emptyVolumesModel }
     ListModel { id: watchedModel }
+    ListModel { id: downloadedModel }
 
     // Stands in for Main.qml's root, which the harness cannot load (it imports
     // the AppLoad plugin). The counters make "did this repaint?" observable:
@@ -84,6 +85,11 @@ Window {
     property int cacheSizeAsks: 0
     property int cacheClearAsks: 0
     property int cacheClears: 0
+
+    // What a downloaded row asked to open.
+    property int downloadedOpens: 0
+    property string downloadedOpenedSource: ""
+    property string downloadedOpenedSeries: ""
 
     property int failures: 0
     function want(label, got, expected) {
@@ -202,6 +208,20 @@ Window {
         onClearCacheConfirmed: win.cacheClears++
     }
     WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
+
+    // The downloaded overview (PLAN §12.5). Its own model, filled per case, so
+    // no case inherits the rows of the one before it.
+    DownloadedList {
+        id: downloadedList
+        objectName: "downloadedList"
+        anchors.fill: parent
+        model: downloadedModel
+        onOpenRequested: {
+            win.downloadedOpens++
+            win.downloadedOpenedSource = sourceId
+            win.downloadedOpenedSeries = seriesId
+        }
+    }
     PagerBar    { id: lonePager;   width: 1620 }
 
     // Both keyboard layouts, so the URL one can be inspected without driving a
@@ -1119,6 +1139,93 @@ Window {
         // Nothing to ask about is a complete answer.
         var none = Reconcile.check(device, [])
         win.want("an empty question is answered completely", none.checked, true)
+
+        // ---- the downloaded overview (PLAN §12.5) --------------------------
+        //
+        // Each case refills the model from empty, because a row surviving from
+        // the case before it is a row nobody chose.
+        function downloadedRows(rows) {
+            downloadedModel.clear()
+            for (var i = 0; i < rows.length; ++i)
+                downloadedModel.append(rows[i])
+            win.findChild(downloadedList, "downloadedRows").forceLayout()
+        }
+
+        function visibleRowAreas() {
+            var found = win.findChildren(downloadedList, "downloadedRowArea", [])
+            var n = 0
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].enabled)
+                    n++
+            return n
+        }
+
+        // The empty state is the backend's sentence, and it is the only thing
+        // on screen when there is nothing.
+        downloadedRows([])
+        downloadedList.emptyNote = "Nothing downloaded yet."
+        var emptyLine = win.findChild(downloadedList, "downloadedEmpty")
+        win.want("an empty library shows the backend's line", emptyLine.visible, true)
+        win.want("in the backend's words", emptyLine.text, "Nothing downloaded yet.")
+
+        // One row per downloaded series, and the empty line goes away.
+        downloadedRows([{
+            "sourceId": "src-a", "sourceName": "Example Reader",
+            "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+            "detail": "3 downloads", "openable": true, "note": ""}])
+        win.want("a downloaded series is listed", downloadedList.rowCount, 1)
+        win.want("and the empty line is gone", emptyLine.visible, false)
+
+        // Tapping a row opens *that* series on *that* source.
+        var opensBefore = win.downloadedOpens
+        win.findChild(downloadedList, "downloadedRowArea").clicked(null)
+        win.want("a row opens once", win.downloadedOpens, opensBefore + 1)
+        win.want("it opens the row's source", win.downloadedOpenedSource, "src-a")
+        win.want("and the row's series", win.downloadedOpenedSeries, "/manga/lantern/")
+
+        // Two sources holding the same series are two rows, each carrying its
+        // own source — the navigational reason the row is a pair.
+        downloadedRows([
+            {"sourceId": "src-a", "sourceName": "Example Reader", "seriesId": "/manga/lantern/",
+             "title": "The Lantern Keeper", "detail": "1 download", "openable": true, "note": ""},
+            {"sourceId": "src-b", "sourceName": "Other Reader", "seriesId": "/series/lantern/",
+             "title": "The Lantern Keeper", "detail": "2 downloads", "openable": true, "note": ""}])
+        win.want("the same series from two sources is two rows", downloadedList.rowCount, 2)
+        var areas = win.findChildren(downloadedList, "downloadedRowArea", [])
+        win.downloadedOpens = 0
+        areas[1].clicked(null)
+        win.want("the second row opens its own source", win.downloadedOpenedSource, "src-b")
+        win.want("and its own series id", win.downloadedOpenedSeries, "/series/lantern/")
+
+        // A row whose source has been removed is listed and inert.
+        downloadedRows([{
+            "sourceId": "gone", "sourceName": "gone", "seriesId": "/manga/orphan/",
+            "title": "An Orphan", "detail": "2 downloads", "openable": false,
+            "note": "The source this came from has been removed."}])
+        win.want("a removed source still lists its downloads", downloadedList.rowCount, 1)
+        // `enabled` is the assertion, not a synthesised tap: emitting clicked()
+        // from here invokes the handler directly and bypasses `enabled`
+        // entirely, so a "tapping it does nothing" check written that way
+        // passes or fails for reasons that have nothing to do with the device.
+        // What makes the row inert for real input is the property.
+        win.want("but the row cannot be tapped", visibleRowAreas(), 0)
+        win.want("the row's tap target is disabled",
+                 win.findChild(downloadedList, "downloadedRowArea").enabled, false)
+
+        // It pages, like every other list here.
+        var many = []
+        for (var d = 0; d < 40; ++d)
+            many.push({"sourceId": "src-a", "sourceName": "Example Reader",
+                       "seriesId": "/manga/" + d + "/", "title": "Series " + d,
+                       "detail": "1 download", "openable": true, "note": ""})
+        downloadedRows(many)
+        win.want("a long list pages", downloadedList.totalPages > 1, true)
+        var pagerNext = win.findChild(downloadedList, "downloadedPager")
+        win.want("and the pager is on screen", pagerNext.visible, true)
+        downloadedList.page = 2
+        win.want("turning the page moves the window", downloadedList.page, 2)
+        downloadedRows([])
+        win.want("a list that empties resets to the first page", downloadedList.page, 1)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
