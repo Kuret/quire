@@ -135,7 +135,13 @@ Item {
         id: noticeStrip
         objectName: "noticeStrip"
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: screen.notice.length > 0 ? noticeText.height + Style.gap * 2 : 0
+        // Tall enough for whichever of the two is taller. The notice is one
+        // short line and the button is a full tap target, so measuring the
+        // text alone left the button hanging out of the bottom of the strip
+        // and over the first source row.
+        height: screen.notice.length > 0
+                ? Math.max(noticeText.height, dismissButton.height) + Style.gap * 2
+                : 0
         visible: screen.notice.length > 0
 
         Text {
@@ -143,7 +149,10 @@ Item {
             anchors {
                 left: parent.left; leftMargin: Style.margin
                 right: dismissButton.left; rightMargin: Style.gap
-                top: parent.top; topMargin: Style.gap
+                // Centred against the button rather than both hanging from the
+                // top, so a one-line notice reads level with the thing that
+                // dismisses it.
+                verticalCenter: dismissButton.verticalCenter
             }
             wrapMode: Text.WordWrap
             text: screen.notice
@@ -154,7 +163,8 @@ Item {
         Rectangle {
             id: dismissButton
             objectName: "dismissNoticeButton"
-            anchors { right: parent.right; rightMargin: Style.margin; top: parent.top; topMargin: Style.gap }
+            anchors { right: parent.right; rightMargin: Style.margin
+                      top: parent.top; topMargin: Style.gap }
             width: 120
             height: Style.buttonHeight - Style.gap
             color: dismissArea.pressed ? Style.pressed : Style.paper

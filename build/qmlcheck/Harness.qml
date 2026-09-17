@@ -514,6 +514,25 @@ Window {
         win.want("label while fetching", win.findChild(lonePager, "pagerLabel").text, "Fetching page 4…")
         win.want("both controls dead while fetching", lonePager.canGoBack || lonePager.canGoOn, false)
 
+        // ---- the notice strip ------------------------------------------
+        //
+        // It is one short line beside a full-size tap target, and the strip
+        // sized itself from the *text*, so the button hung out of the bottom
+        // and over the first source row. Geometry, so it is checked as
+        // geometry: the button has to fit inside the strip that claims to
+        // contain it.
+        sourceList.notice = "Quire closed unexpectedly last time."
+        var noticeStrip = win.findChild(sourceList, "noticeStrip")
+        var dismiss = win.findChild(sourceList, "dismissNoticeButton")
+        win.want("a notice shows its strip", noticeStrip.visible, true)
+        win.want("and the OK button fits inside it",
+                 dismiss.y + dismiss.height <= noticeStrip.height, true)
+        win.want("and the strip is at least as tall as the button",
+                 noticeStrip.height >= dismiss.height, true)
+        sourceList.notice = ""
+        win.want("no notice, no strip", noticeStrip.visible, false)
+        win.want("and no height taken from the list", noticeStrip.height, 0)
+
         // ---- PLAN §12.3: the per-source strip-splitting override --------
         //
         // The worry this feature answers is an ordinary manga being mistaken
