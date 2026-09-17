@@ -849,48 +849,61 @@ tablet**, or by a direct write plus a restart — which this milestone rules out
 > ("write it and `systemctl restart xochitl`, batched once per session") was more
 > expensive than it needed to be.
 
-> ### ⚠️ FOOTNOTE 2026-09-17 — on this surface, a return value is never evidence.
+> ### ⚠️ FOOTNOTE 2026-09-17 — why Quire does not depend on rm-librarian.
 >
-> rm-librarian is reachable from inside an AppLoad app: `net.asivery.XoviMessageBroker`
-> resolves under AppLoad v0.4.2 and `sendSimpleSignal` answers in-process, while
-> xochitl's own private QML keeps working alongside it. `lookupEntry(Comics)`
-> returned the same UUID we had already measured over SSH, and an absent name
-> returned a well-formed `ERROR: not found:` — so both success and refusal are
-> distinguishable, which is what the capability detection in `ui/LibraryOps.js`
-> relies on.
+> The rm-librarian xovi extension was researched, probed on hardware, and then
+> **rejected**. This is the evidence, kept because it cost real device time and
+> because the next person to find the extension will otherwise repeat every one
+> of these experiments to arrive back here.
 >
-> Then four of these calls were measured against the state on disk rather than
-> against what they returned, and **three of them had been lying in the same
-> direction — they looked successful**:
+> It does work. `net.asivery.XoviMessageBroker` resolves inside an AppLoad app
+> under AppLoad v0.4.2 on OS 3.25.1.1, `sendSimpleSignal` answers in-process,
+> and xochitl's own private QML keeps working alongside it. `lookupEntry(Comics)`
+> returned the same UUID measured independently over SSH, and an absent name
+> returned a well-formed `ERROR: not found:`, so success and refusal are
+> distinguishable.
 >
-> - `deleteEntry` on a live entry returns `ok` and deletes nothing. It only
->   removes an entry already in the Trash, and then only that one: a second
->   document sitting in the Trash beside it survived. That last fact is what
->   makes Quire's new confirmation sentence true, and it is why a delete is
->   `trashEntry`, read the parent back, `deleteEntry`, read existence back.
-> - `createFolder` places the folder correctly but returns `ok`, not the new id.
-> - `ensureFolder` *does* return a UUID and is idempotent by bare name — but it
->   takes no parent argument (`Name,<uuid>` produced a folder literally named
->   `Name,<uuid>` at root), and the only way to express a parent is a path, which
->   **creates its ancestors by name without matching the ones that already
->   exist**. `ensureFolder:Comics/<Series>` built a *second* `Comics` at root and
->   would have filed every download into it, beside the user's real one.
+> **What it could not do is the half Quire needed most.**
 >
-> **Decision: folder creation stays on `Library.createCollectionWrapper(parentId,
-> name)`.** One call, an explicit parent, the new UUID returned — all measured on
-> this device. Every librarian route to the same result is worse: `createFolder`
-> leaves us hunting for the id, `ensureFolder` cannot be told where to put it
-> except by the duplicating path. Librarian is used where it is genuinely better:
-> `moveEntry`, and `trashEntry` + `deleteEntry` — the one that removes a single
-> document instead of emptying the user's Trash. So this is a *partial*
-> migration, deliberately, and the abstraction is no cleaner than the
-> measurements allow.
+> - **`createFolder` returns `ok`, not the id of the folder it made.** Sorting a
+>   download needs that id.
+> - **`ensureFolder` returns a UUID and is idempotent by bare name, but takes no
+>   parent argument.** `ensureFolder:Name,<uuid>` produced a folder literally
+>   named `Name,<uuid>` at the root — the comma is part of the name.
+> - **The only way to express a parent is a path, and the path form creates its
+>   ancestors by name instead of matching the folders already there.**
+>   `ensureFolder:Comics/<Series>` built a *second* `CollectionType` called
+>   "Comics" at the root and filed the series under it. The device briefly had
+>   two identically-named Comics folders side by side. Shipping that form would
+>   have built the user a silent duplicate library.
+> - **The broker's reply FIFO carries no request id and desynchronises under
+>   consecutive requests** — reproduced. Every answer has to be matched to its
+>   question by position, which is a correctness problem, not a latency one.
 >
-> The lesson, and it now has four independent instances: **on this surface a
+> So folder creation had to stay on `Library.createCollectionWrapper(parentId,
+> name)` regardless: one call, an explicit parent, the new UUID returned, all
+> measured. That left move and delete as the only gains, for an extension that
+> is version-pinned to the OS exactly as AppLoad is. **A second pinned
+> dependency for one improvement is not a trade worth making** — and the
+> improvement turned out not to need it: `LibraryController.deleteEntries` is in
+> xochitl's own binary (present on 3.25 and 3.27), which is what librarian was
+> calling on our behalf, and Quire already imports `LibraryController`.
+>
+> **The precondition, measured, is what makes the delete two steps:** a live
+> entry cannot be deleted. `deleteEntry` on one returned `ok` and did nothing,
+> with all three files still on disk. Only an entry already in the Trash is
+> removed — and then only that one: a second document sitting in the Trash
+> beside it survived. That is what lets the confirmation stop promising to empty
+> the user's whole Trash.
+>
+> **The lesson, and it now has four independent instances: on this surface a
 > return value is never evidence.** `ok` means the call was accepted. A UUID
-> means an id exists, not that it is the id of the thing you wanted. The only
-> check that has ever caught one of these is reading the state back afterwards —
-> the parent, the existence, the `.metadata` on disk.
+> means an id exists, not that it is the id of the thing you asked for —
+> `ensureFolder` returned a perfectly good one for a folder in the wrong place
+> that it had just invented. The only check that has ever caught one of these is
+> reading the state back afterwards: the parent, the existence, the `.metadata`
+> on disk.
+
 
 **Resolved design — flat, not nested:** *(superseded 2026-09-17; kept because
 the upload path below is unchanged, and because the reasoning about what to do
