@@ -2157,12 +2157,109 @@ all of it merged onto the last page, measured at 15,841 rows against a
 **Memory, on a 2 GB device.** Nothing decodes a chapter into one buffer. The
 scan holds one image at a time and keeps one byte per row (~40 KB for 28
 images); the renderer holds one source and one page. Measured for the 28×1080×1440
-case: **15.1 MiB peak live heap**, against 166 MiB for the chapter in one buffer
+case: **19.0 MiB peak live heap**, against 166 MiB for the chapter in one buffer
 and the 1.63 GB OOM that made this rule. The measurement itself took two
 corrections — `HeapAlloc` counts uncollected garbage, and Go's precise stack
 liveness collects the page *while it is nominally in hand* — so the test asserts
 the figure is not merely small but **explicable**: one source plus the tallest
 page, ±0.2 MiB.
+
+##### What the source actually does, measured
+
+The images are **letterboxed**: white bars above and below a band of drawing,
+and the drawing cut mid-panel. That is the defect the user sees — more than half
+of each page is white space — and it has two consequences for the code. The seam
+test must compare the *trimmed* art edges, because the outermost rows are
+padding: a first measurement of the true positive reported "0 informative seams",
+which was true of the rows and useless about the chapter. And the stitcher must
+drop the padding, or re-stitching rebuilds the very bars that are the complaint.
+
+##### Detection, and the numbers it came from
+
+Corpus: three real chapters off the user's device. `sinners-ch29` (28 images,
+the comick webtoon, the true positive), `jjk-ch1` (52 images, Jujutsu Kaisen
+ch.1, real manga as delivered) and `jjk-ch1-uniform` (the same chapter with its
+three odd-sized pages removed, 49 images all 797×1062 — real manga art at
+perfectly uniform dimensions, which is the norm for scanlations and therefore
+the dangerous case).
+
+| chapter | images | aspect spread | padding (median) | seams continuing | verdict |
+|---|---|---|---|---|---|
+| `sinners-ch29` | 28 | 1.333–1.333 | **58%** | **19/27 = 70%** | pre-sliced |
+| `jjk-ch1-uniform` | 49 | 1.332–1.332 | 2% | 3/48 = 6% | left alone |
+| `jjk-ch1` | 52 | 1.332–1.333 | 2% | 4/51 = 8% | left alone |
+
+**Neither manga chapter is refused on shape.** 1455×1940 and 797×1062 are both
+4:3, so the aspect rule passes `jjk-ch1` straight through and the evidence does
+the work — which makes it a second real test of the seam signal rather than the
+easy case it was assumed to be. A corpus test asserts that a future change must
+not start refusing these on shape, because that would hide the thing being
+tested.
+
+The correlation threshold was swept rather than chosen. Fraction of seams
+clearing each value:
+
+| T | sliced webtoon | manga (uniform) | manga (delivered) |
+|---|---|---|---|
+| 0.30 | 78% | 19% | 16% |
+| 0.50 | **70%** | **6%** | **8%** |
+| 0.70 | 37% | 6% | 6% |
+
+0.5 with a 50% majority sits where the gap is widest and is clear of both sides.
+
+**The padding threshold is a median, and deliberately.** Independent measurement
+with a different row-uniformity measure agreed on the separation — 58% (max 74%)
+against 5–6% — but showed **a single real manga page reaching 16%**, above the
+15% threshold. Individual pages cross it routinely; the median is what protects
+us, and it does so by a factor of ten.
+
+**The AND is what makes this safe, more than either number.** A letterboxed
+manga release attacks the padding signal directly and is the negative most worth
+having — but it would still need half its seams correlating at 0.5, and real
+manga measured 6–8%. Neither signal is trusted alone: a chapter of letterboxed
+*pages* is padded without being a strip, and near-identical pages could
+correlate without being one.
+
+**Correlation replaced brightness similarity after brightness accepted 13 of 13
+seams on a chapter of unrelated full-bleed pages.** Two dark pages are alike in
+tone and have no reason to agree about *where* their dark pixels are. It is the
+clearest case in this feature of a plausible signal that had to be measured
+against the adversarial one before it could be believed.
+
+**The limitation: a webtoon sliced edge-to-edge with no padding is refused.**
+The letterbox signal carries this rule and there is exactly one positive chapter,
+from one source, to calibrate it on. That is a false negative — a page the user
+can see and complain about, rather than a volume silently mangled — and
+`splitStrips: always` is the way in until another positive chapter says
+otherwise.
+
+**Detection is tested against the corpus and nowhere else**, because synthetic
+fixtures produced two false results while it was being written: a hand-made
+"ordinary manga" whose pages were one formula with a per-page offset correlated
+at 11 of 11 seams and was accepted, and a hand-made "sliced strip" whose texture
+changed too fast row to row correlated at 0 of 9 and was refused. The synthetic
+tests now cover mechanics only and call `ForcePlan`, which skips detection.
+**Those corpus tests skip when the images are absent** — which is every machine
+but the one holding them — so a green `make check` elsewhere does not verify
+detection, only that nothing else broke.
+
+##### On disk
+
+Re-cut pages live in `<chapter>/restitched/`, beside the sources, with a marker
+naming the sources they were made from:
+
+- **The sources are kept**, because resume is what they are for: a chapter that
+  cannot resume restarts from zero on a dropped connection, which on a tablet on
+  wifi is the common case. A re-stitched chapter therefore costs roughly double
+  its own cache footprint — a known cost, reclaimed whole by deleting the
+  download and by the cache control, both of which remove the chapter directory.
+- **The marker is written last, and atomically.** A re-cut that dies halfway
+  leaves pages with no marker, which the next run treats as absent and redoes;
+  the same rule the `-of-%03d` naming exists for.
+- **A mismatched marker is not an error**, it is the old path: the chapter is
+  re-cut, or left alone, as if nothing had been there.
+- Every directory scanner skips directories explicitly rather than relying on a
+  filename pattern not matching.
 
 ### 12.4 Deleting a downloaded volume — proven reachable
 
