@@ -849,6 +849,49 @@ tablet**, or by a direct write plus a restart — which this milestone rules out
 > ("write it and `systemctl restart xochitl`, batched once per session") was more
 > expensive than it needed to be.
 
+> ### ⚠️ FOOTNOTE 2026-09-17 — on this surface, a return value is never evidence.
+>
+> rm-librarian is reachable from inside an AppLoad app: `net.asivery.XoviMessageBroker`
+> resolves under AppLoad v0.4.2 and `sendSimpleSignal` answers in-process, while
+> xochitl's own private QML keeps working alongside it. `lookupEntry(Comics)`
+> returned the same UUID we had already measured over SSH, and an absent name
+> returned a well-formed `ERROR: not found:` — so both success and refusal are
+> distinguishable, which is what the capability detection in `ui/LibraryOps.js`
+> relies on.
+>
+> Then four of these calls were measured against the state on disk rather than
+> against what they returned, and **three of them had been lying in the same
+> direction — they looked successful**:
+>
+> - `deleteEntry` on a live entry returns `ok` and deletes nothing. It only
+>   removes an entry already in the Trash, and then only that one: a second
+>   document sitting in the Trash beside it survived. That last fact is what
+>   makes Quire's new confirmation sentence true, and it is why a delete is
+>   `trashEntry`, read the parent back, `deleteEntry`, read existence back.
+> - `createFolder` places the folder correctly but returns `ok`, not the new id.
+> - `ensureFolder` *does* return a UUID and is idempotent by bare name — but it
+>   takes no parent argument (`Name,<uuid>` produced a folder literally named
+>   `Name,<uuid>` at root), and the only way to express a parent is a path, which
+>   **creates its ancestors by name without matching the ones that already
+>   exist**. `ensureFolder:Comics/<Series>` built a *second* `Comics` at root and
+>   would have filed every download into it, beside the user's real one.
+>
+> **Decision: folder creation stays on `Library.createCollectionWrapper(parentId,
+> name)`.** One call, an explicit parent, the new UUID returned — all measured on
+> this device. Every librarian route to the same result is worse: `createFolder`
+> leaves us hunting for the id, `ensureFolder` cannot be told where to put it
+> except by the duplicating path. Librarian is used where it is genuinely better:
+> `moveEntry`, and `trashEntry` + `deleteEntry` — the one that removes a single
+> document instead of emptying the user's Trash. So this is a *partial*
+> migration, deliberately, and the abstraction is no cleaner than the
+> measurements allow.
+>
+> The lesson, and it now has four independent instances: **on this surface a
+> return value is never evidence.** `ok` means the call was accepted. A UUID
+> means an id exists, not that it is the id of the thing you wanted. The only
+> check that has ever caught one of these is reading the state back afterwards —
+> the parent, the existence, the `.metadata` on disk.
+
 **Resolved design — flat, not nested:** *(superseded 2026-09-17; kept because
 the upload path below is unchanged, and because the reasoning about what to do
 when a folder is missing still governs every fallback.)*
