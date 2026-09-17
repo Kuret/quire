@@ -115,6 +115,11 @@ func (s *Service) runCover(ctx context.Context, out Sender, sourceID, seriesID, 
 		s.log.Debug("cover unavailable", "source", sourceID, "series", seriesID, "err", err)
 		return
 	}
+	// Logged because a cover that is on disk and not on screen is otherwise
+	// indistinguishable from one that was never fetched: the failure is silent
+	// by design (a blank tile, not a dialogue), so the only way to tell the two
+	// apart afterwards is to say which series a delivered cover was for.
+	s.log.Debug("cover ready", "source", sourceID, "series", seriesID, "path", path)
 	_ = send(out, appload.MessageCoverReady, map[string]any{
 		"sourceId": sourceID,
 		"seriesId": seriesID,

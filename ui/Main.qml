@@ -386,6 +386,11 @@ Rectangle {
                 return
             }
         }
+        // Fell through: a cover arrived for a series this grid is not showing.
+        // Silent otherwise, and indistinguishable from a cover that was never
+        // fetched — so it says so, with the id, because the id is the thing
+        // that would have to differ for a fetched cover to go nowhere.
+        console.log("[quire] cover for a series not in the grid: " + msg.seriesId)
     }
 
     function fillChapters(msg) {
