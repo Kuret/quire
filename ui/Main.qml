@@ -23,6 +23,7 @@ import net.asivery.AppLoad 1.0
 import "Messages.js" as Msg
 import "Style.js" as Style
 import "Watch.js" as WatchJs
+import "Screens.js" as Screens
 
 Rectangle {
     id: root
@@ -584,7 +585,7 @@ Rectangle {
     function openSource(sourceId, name) {
         root.currentSourceId = sourceId
         root.currentSourceName = name
-        root.screen = "browse"
+        root.showScreen("browse")
         seriesGridScreen.reset()
         seriesGridScreen.busy = true
         seriesGridScreen.pendingPage = 1
@@ -595,7 +596,7 @@ Rectangle {
         root.currentSeriesId = seriesId
         root.seriesCameFrom = root.screen === "watching" || root.screen === "downloaded"
                               ? root.screen : "browse"
-        root.screen = "series"
+        root.showScreen("series")
         chaptersModel.clear()
         // Emptied before the new series' detail arrives, so the previous
         // series' volume view is never on screen over this one's chapters.
@@ -611,19 +612,32 @@ Rectangle {
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
     }
 
+    // showScreen is the one way a screen becomes the active one.
+    //
+    // Every route goes through it, including Back, because the bug it fixes was
+    // a screen that fetched its list on one route in and not on the other: the
+    // Downloaded overview kept showing a series whose last download had just
+    // been deleted from the screen underneath it. Screens.js decides what needs
+    // re-asking for and says why the other screens do not.
+    function showScreen(name) {
+        root.screen = name
+        if (Screens.refreshOnShow(name) === "listDownloaded")
+            root.send(Msg.ListDownloaded, {})
+    }
+
     function goBack() {
         switch (root.screen) {
         case "series":
-            root.screen = root.seriesCameFrom
+            root.showScreen(root.seriesCameFrom)
             break
         case "watching":
         case "downloaded":
-            root.screen = "sources"
+            root.showScreen("sources")
             break
         case "browse":
         case "add":
         case "settings":
-            root.screen = "sources"
+            root.showScreen("sources")
             break
         default:
             root.close()
@@ -708,7 +722,7 @@ Rectangle {
             id: settingsArea
             anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
             width: settingsLabel.visible ? Style.margin * 2 + settingsLabel.width : 0
-            onClicked: { root.screen = "settings"; root.send(Msg.Ping) }
+            onClicked: { root.showScreen("settings"); root.send(Msg.Ping) }
         }
 
         Rectangle {
@@ -728,14 +742,12 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "sources"
             model: sourcesModel
-            onAddRequested: { addSourceScreen.reset(); root.screen = "add" }
-            onWatchingRequested: root.screen = "watching"
+            onAddRequested: { addSourceScreen.reset(); root.showScreen("add") }
+            onWatchingRequested: root.showScreen("watching")
             // Fetched on the way in rather than pushed: a list that is right
-            // when it is opened is enough, and much less machinery.
-            onDownloadedRequested: {
-                root.screen = "downloaded"
-                root.send(Msg.ListDownloaded, {})
-            }
+            // when it is opened is enough, and much less machinery. "Opened"
+            // includes being returned to — see showScreen.
+            onDownloadedRequested: root.showScreen("downloaded")
             watchingLabel: root.watchShort
             onOpenRequested: root.openSource(sourceId, name)
             notice: root.notice
@@ -756,9 +768,9 @@ Rectangle {
             onAnswerRequested: root.send(Msg.ProbeAnswer, {"id": answerId})
             onConfirmRequested: {
                 root.send(Msg.ConfirmAddSource, {"url": url, "theme": theme, "name": name, "lang": lang})
-                root.screen = "sources"
+                root.showScreen("sources")
             }
-            onDoneRequested: root.screen = "sources"
+            onDoneRequested: root.showScreen("sources")
         }
 
         WatchList {

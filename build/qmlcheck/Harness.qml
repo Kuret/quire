@@ -13,6 +13,7 @@ import "../../ui/Watch.js" as WatchJs
 import "../../ui/Sorting.js" as Sorting
 import "../../ui/Reconcile.js" as Reconcile
 import "../../ui/Deleting.js" as Deleting
+import "../../ui/Screens.js" as Screens
 import "../../ui/Style.js" as Style
 
 
@@ -1360,6 +1361,24 @@ Window {
         // No device at all: the bridge failed to load, and nothing may be
         // claimed.
         win.want("no tablet deletes nothing", Deleting.deleteDocument(null, "doc-1"), "failed")
+
+        // ---- what a screen re-asks for when it is shown --------------------
+        //
+        // The Downloaded overview was fetched on the way in from the source
+        // list and not when it was returned to from a series, so deleting a
+        // series' last download left a row on screen pointing at nothing.
+
+        win.want("the downloaded overview is fetched every time it is shown",
+                 Screens.refreshOnShow("downloaded"), "listDownloaded")
+
+        // The screens that need nothing, and each for its own reason: the
+        // watched list is pushed by the backend, browse is the source's own
+        // catalogue, and the series screen already refetches on every route in.
+        win.want("the watched list is not refetched", Screens.refreshOnShow("watching"), "")
+        win.want("browse is not refetched", Screens.refreshOnShow("browse"), "")
+        win.want("the series screen is not refetched here", Screens.refreshOnShow("series"), "")
+        win.want("the source list is not refetched", Screens.refreshOnShow("sources"), "")
+        win.want("an unknown screen asks for nothing", Screens.refreshOnShow("no-such-screen"), "")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
