@@ -1,5 +1,6 @@
-// The two handoffs to xochitl's own QML: opening a document (PLAN §6 M6) and
-// moving one to the Trash (PLAN §12.4).
+// The handoffs to xochitl's own QML: opening a document (PLAN §6 M6), moving
+// one to the Trash (PLAN §12.4), and sorting a finished download into its
+// series folder (PLAN §6 M5, the conclusion corrected 2026-09-17).
 //
 // This is the only file in Quire that touches xochitl's own QML, and both live
 // here rather than in a file each so that it stays the only one. It is a
@@ -25,6 +26,7 @@
 import QtQuick 2.5
 import device.global
 import com.remarkable
+import "Sorting.js" as Sorting
 
 QtObject {
     id: handoff
@@ -52,6 +54,50 @@ QtObject {
 
         loader.item.openDocument(entry)
         return true
+    }
+
+    // sort puts a finished download in its series folder, and answers with what
+    // actually happened.
+    //
+    // The two calls are xochitl's, and both were proven on hardware after five
+    // probe rounds (PLAN §6 M5):
+    //
+    //   Library.createCollectionWrapper(parentIdString, name)
+    //   explorer.selectionMove(folderIdString)
+    //
+    // **Both want id strings and the parent comes first.** An Entry object in
+    // the parent slot is accepted and then ignored — the folder lands at the
+    // root with no error at all — which is why Sorting.js reads every new
+    // folder's parent back before it moves anything into it.
+    //
+    // The decisions live in Sorting.js so the offscreen harness can drive every
+    // path, including the ones that only happen when the device says no. This
+    // function is just the device: five callbacks and no judgement.
+    function sort(req) {
+        return Sorting.sortDocuments({
+            parentOf: function (id) {
+                return Library.parentIdForId(id)
+            },
+            createFolder: function (parent, name) {
+                return String(Library.createCollectionWrapper(parent, name))
+            },
+            select: function (ids) {
+                var ex = NavigationManager.treeExplorerForNavigation
+                ex.selection.clear()
+                for (var i = 0; i < ids.length; ++i)
+                    ex.selection.add(ids[i])
+                return ex.selection.size
+            },
+            move: function (folderId) {
+                NavigationManager.treeExplorerForNavigation.selectionMove(folderId)
+            },
+            clearSelection: function () {
+                // Never Library.documentSelection: it drives the navigator's own
+                // enabled-state bindings and writing it from outside wedges the
+                // side menu (PLAN §12.4).
+                NavigationManager.treeExplorerForNavigation.selection.clear()
+            }
+        }, req)
     }
 
     // trash deletes a document: into xochitl's Trash, and then the Trash is
