@@ -27,6 +27,34 @@ update)
     say "wrote   ${PREBUILT_RCC#"$REPO_ROOT"/} ($(wc -c < "$PREBUILT_RCC" | tr -d ' ') bytes)"
     ;;
 check)
+    # Every file in ui/ must be listed in application.qrc.
+    #
+    # This is first because everything below it is blind to the failure it
+    # catches. The fingerprint hashes the inputs *listed in the qrc*, so a file
+    # that exists on disk and is missing from the list is not stale — it is
+    # invisible, and the rcc is byte-perfect without it. The offscreen harness
+    # loads ui/ from the filesystem, where the file is present, so it passes
+    # too. Both checks agree, both are right about what they measure, and the
+    # device gets a bundle with a hole in it.
+    #
+    # That is not hypothetical: ui/Sorting.js shipped unlisted on 2026-09-17,
+    # so ReaderHandoff.qml could not load, and with it went opening a document
+    # in the reader, deleting one, and filing downloads into series folders —
+    # three features, from one absent line, with a green `make check`.
+    missing=()
+    for f in "$REPO_ROOT"/ui/*; do
+        [[ -f "$f" ]] || continue
+        rel="ui/$(basename "$f")"
+        grep -qF "<file>$rel</file>" "$REPO_ROOT/application.qrc" || missing+=("$rel")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        printf 'error: these files are in ui/ but not in application.qrc:\n' >&2
+        printf '       %s\n' "${missing[@]}" >&2
+        printf '       They would be absent from resources.rcc on the device, and whatever\n' >&2
+        printf '       imports them would fail to load there and only there.\n' >&2
+        exit 1
+    fi
+
     if ! [[ -f "$PREBUILT_RCC" && -f "$PREBUILT_FINGERPRINT" ]]; then
         die "prebuilt/resources.rcc is missing; run build/prebuilt.sh update"
     fi
