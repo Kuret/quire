@@ -2499,3 +2499,55 @@ The same four rules as reclaiming apply, plus:
 **No automatic clearing, and no timer.** The user asked for a control, not a
 policy. A cache that empties itself is a download that vanished the night before
 a flight.
+
+### 12.5 The downloaded overview
+
+**Requested 2026-09-17: "since we can download stuff without watching them, the
+watch list on its own is not enough, also add a 'Downloaded' overview, with a
+list of mangas where at least 1 chapter/volume is downloaded, and links to the
+entry."**
+
+Downloads and the watched list are different sets, and until this existed a
+download nobody was watching could only be found by remembering where it came
+from. The screen lists every series with at least one volume on the tablet,
+newest first, and each row opens that series' chapter list through the same
+route the grid and the watched list use — one series screen, one message, one
+Back behaviour.
+
+**A row is one (source, series) pair, always, and always names its source.** The
+user's reason is navigational — *"make sure to separate by source if multiple
+entries from multiple sources exist for the same series, otherwise we dont know
+which one to link to"* — and it is applied unconditionally rather than only when
+two rows would collide. A grouping rule that changes shape depending on what else
+is in the library is one nobody can predict, and a source label that appears only
+sometimes is one nobody can rely on. "Which of my sources did this come from" is
+worth knowing on its own.
+
+**The decisions that were not defaults:**
+
+- **A source that has been removed still lists its downloads.** They are
+  documents on the user's tablet and do not stop existing because a source did.
+  The row says why it cannot be opened, in the backend's words, and its tap
+  target is *disabled* rather than failing quietly on a tap.
+- **The count is of "downloads", not of chapters.** A record is one document — a
+  volume, or one part of a volume split for the upload cap — so counting records
+  is counting files, which is true for every record. "Chapters" would be wrong
+  for a volume record and unanswerable for one written before chapter ids were
+  kept, and a number that is right for some rows and wrong for others is worse
+  than a vaguer one that is always right.
+- **A record with no `SeriesTitle` is named by `seriesTitleOf`**, the same
+  em-dash rule the attach-time filing pass uses, so one rule governs both. Where
+  even that yields nothing the series id is shown: ugly, but true, and **nothing
+  is skipped** — every row is a download the user made.
+- **Fetched when the screen opens.** No push and no live updates: a download or
+  a delete shows up the next time it is opened, which is sufficient and is a
+  great deal less machinery.
+- **No covers.** Records carry no cover URL and inventing a lookup to decorate a
+  list is work nobody asked for. Text rows, like the watched list.
+- Paged like every other list (§12.1).
+
+**A note on testing an inert row.** The harness first asserted "tapping the
+removed-source row does nothing" by emitting `clicked()` on its MouseArea — which
+invokes the handler directly and bypasses `enabled`, so it fails for reasons
+that have nothing to do with the device. What makes the row inert for real input
+is the property, and the property is what is asserted.
