@@ -880,6 +880,14 @@ when a folder is missing still governs every fallback.)*
   A download already in flight sorts itself when it finishes, so the two paths
   are kept apart by a registry of sorts in flight keyed by document uuid: the
   attach pass skips anything already asked about.
+
+  **The folder name comes from `library.Record.SeriesTitle`** (added the same
+  day), which the download writes from the same variable it passes to the sort.
+  Both paths naming the series from one string is what stops a re-sort and a
+  fresh download making *two* folders for it. The old behaviour — splitting the
+  document's filename at assemble's em dash — remains as the fallback for
+  records written before the field, and is wrong for exactly the series whose
+  title contains an em dash of its own.
 - If `Comics` is missing, upload into the deepest folder that does exist (root
   at worst) and tell the user where to create it. **Placing the volume slightly
   wrong beats refusing the download** — the bytes are fetched, and a file in the
