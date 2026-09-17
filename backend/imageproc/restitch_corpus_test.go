@@ -40,14 +40,43 @@ import (
 // one that has it. That is a real limitation and is recorded in PLAN §12.3 along
 // with the numbers, so a reader is not left believing `make check` has verified
 // detection.
-const corpusDir = "/private/tmp/claude-501/-Users-rick/11c5d229-70a0-40fc-9a4f-af81bf7d2679/scratchpad/corpus"
+// corpusRoot locates the images. It is not a constant and it is not a path
+// under any temporary directory, both on purpose.
+//
+// The corpus cannot live in the repository: it is copyrighted work from the
+// sources a user configured, and PLAN §1.3 keeps that out of git. So it lives
+// beside the checkout and is found by convention, with QUIRE_CORPUS_DIR as the
+// override.
+//
+// The failure this shape prevents is specific. A path under a session's scratch
+// directory works perfectly on the machine that wrote it and then disappears —
+// after which these tests skip, for ever, and `make check` stays green while
+// the one guarantee they provide has quietly stopped being checked. A test that
+// silently stops testing is worse than one that was never written, because the
+// green tick still reads as evidence.
+func corpusRoot() string {
+	if dir := os.Getenv("QUIRE_CORPUS_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "quire-detection-corpus")
+}
 
 func corpusScan(t *testing.T, name string) (*imageproc.StripScan, int) {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(corpusDir, name))
-	if err != nil {
-		t.Skipf("corpus %q is not on this machine: %v", name, err)
+	root := corpusRoot()
+	if root == "" {
+		t.Skip("no home directory, so no corpus; set QUIRE_CORPUS_DIR")
 	}
+	entries, err := os.ReadDir(filepath.Join(root, name))
+	if err != nil {
+		t.Skipf("corpus %q is not on this machine (%v); "+
+			"put it in %s or set QUIRE_CORPUS_DIR", name, err, root)
+	}
+	corpusDir := root
 	var paths []string
 	for _, e := range entries {
 		if !e.IsDir() {
