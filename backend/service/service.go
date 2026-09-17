@@ -376,6 +376,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.documentsSorted(req)
 
+	case appload.MessageDeleteSeries:
+		var req deleteSeriesRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.deleteSeries(out, req)
+
 	case appload.MessageDeleteDownload:
 		var req deleteRequest
 		if err := decode(payload, &req); err != nil {
