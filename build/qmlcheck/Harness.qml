@@ -10,6 +10,7 @@ import QtQuick.Window 2.2
 // type resolution only covers the directory the file itself lives in.
 import "../../ui"
 import "../../ui/Watch.js" as WatchJs
+import "../../ui/Sorting.js" as Sorting
 import "../../ui/Style.js" as Style
 
 
@@ -922,6 +923,130 @@ Window {
         settings.cacheSummary = "Cleared 592.0 MB. 44.0 MB was left, because a download is still using it."
         win.want("the outcome replaces the size", cacheLine.text,
                  "Cleared 592.0 MB. 44.0 MB was left, because a download is still using it.")
+
+        // ---- sorting a download into its series folder (PLAN §6 M5) --------
+        //
+        // The device is five callbacks, and every case below builds its own —
+        // a fallback that passes because the case before it left the world in
+        // the right state is not a test of anything.
+        //
+        // fakeDevice(opts) answers the way the hardware does: creating returns
+        // an id and puts the folder under the parent it was given, moving
+        // reparents the selection, and both can be told to misbehave.
+        function fakeDevice(opts) {
+            var o = opts || {}
+            var parents = o.parents || {}
+            var selection = []
+            var made = 0
+            return {
+                log: [],
+                parents: parents,
+                parentOf: function (id) { return parents[id] === undefined ? "" : parents[id] },
+                createFolder: function (parent, name) {
+                    this.log.push("create(" + parent + "," + name + ")")
+                    if (o.createThrows) throw new Error("no")
+                    if (o.createReturnsNothing) return ""
+                    var id = "made-" + (++made)
+                    // The silent failure the device really has: an unusable
+                    // parent is ignored and the folder lands at the root.
+                    parents[id] = o.createIgnoresParent ? "" : parent
+                    return id
+                },
+                select: function (ids) {
+                    selection = o.selectionDrops ? ids.slice(0, ids.length - 1) : ids.slice()
+                    return selection.length
+                },
+                move: function (folderId) {
+                    this.log.push("move(" + folderId + ")")
+                    if (o.moveThrows) throw new Error("refused")
+                    if (o.moveDoesNothing) return
+                    var n = o.moveOnlyFirst ? 1 : selection.length
+                    for (var i = 0; i < n; ++i) parents[selection[i]] = folderId
+                },
+                clearSelection: function () { selection = [] }
+            }
+        }
+
+        // The ordinary case: no folder yet, so one is made under Comics and the
+        // documents go into it.
+        var dev = fakeDevice({ parents: { "doc-1": "comics" } })
+        var res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a folder is created when there is none", res.created, true)
+        win.want("the document is moved into it", res.moved.length, 1)
+        win.want("and the folder id comes back", res.folderId, "made-1")
+        win.want("the folder is made under Comics", dev.log[0], "create(comics,Wandance)")
+
+        // A folder the backend already found is used as it is.
+        dev = fakeDevice({ parents: { "doc-1": "comics", "known": "comics" } })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "known", createUnder: "comics", folderName: "Wandance"})
+        win.want("a known folder is not created again", res.created, false)
+        win.want("and is what the document is moved into", dev.parents["doc-1"], "known")
+
+        // Every part of a split volume moves, in one selection.
+        dev = fakeDevice({ parents: { "p1": "comics", "p2": "comics", "p3": "comics" } })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["p1", "p2", "p3"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("every part of a split volume moves", res.moved.length, 3)
+        win.want("in one move call", dev.log.length, 2)
+
+        // The silent failure that cost five probe rounds: a parent the device
+        // does not accept is ignored and the folder lands at the root. Nothing
+        // may be moved into it.
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, createIgnoresParent: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a folder at the wrong parent is not used", res.moved.length, 0)
+        win.want("the document stays in Comics", dev.parents["doc-1"], "comics")
+        win.want("and the reason says where it landed",
+                 res.detail.indexOf("rather than") >= 0, true)
+
+        // Creation refused outright.
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, createThrows: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a create that throws moves nothing", res.moved.length, 0)
+        win.want("and leaves the document where it was", dev.parents["doc-1"], "comics")
+
+        // The move that returns quietly and changes nothing — the failure this
+        // whole file is written around.
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, moveDoesNothing: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a move that changes nothing is not a move", res.moved.length, 0)
+        win.want("and says so", res.detail, "the move changed nothing")
+
+        // A partial move is reported as a partial move.
+        dev = fakeDevice({ parents: { "p1": "comics", "p2": "comics" }, moveOnlyFirst: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["p1", "p2"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a partial move counts what moved", res.moved.length, 1)
+        win.want("and says how many of how many", res.detail, "moved 1 of 2")
+
+        // Comics itself missing: it is created first, and the series folder
+        // goes inside it.
+        dev = fakeDevice({ parents: { "doc-1": "" } })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "", folderName: "Wandance",
+            createComics: true, comicsName: "Comics"})
+        win.want("Comics is created when it is missing", dev.log[0], "create(,Comics)")
+        win.want("and the series folder goes inside it", dev.log[1], "create(made-1,Wandance)")
+        win.want("and the document lands in the series folder", dev.parents["doc-1"], "made-2")
+
+        // Nothing to sort is not an error.
+        dev = fakeDevice({})
+        res = Sorting.sortDocuments(dev, { documentUuids: [], folderName: "Wandance" })
+        win.want("an empty list creates nothing", dev.log.length, 0)
+        win.want("and says why", res.detail, "nothing to sort")
+
+        // The folder name is the series' own name, tidied rather than schemed.
+        win.want("a title is trimmed", Sorting.folderName("  Wandance  "), "Wandance")
+        win.want("inner whitespace is collapsed", Sorting.folderName("A\n\tB"), "A B")
+        win.want("path characters are dropped", Sorting.folderName("Fate/Zero"), "Fate Zero")
+        win.want("a very long title is capped",
+                 Sorting.folderName(new Array(200).join("x")).length, 60)
+        win.want("an empty title stays empty", Sorting.folderName(null), "")
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
