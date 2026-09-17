@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
@@ -33,6 +34,56 @@ type sortedRequest struct {
 // the side that creates the folder; this one is here so the *lookup* asks about
 // the same name the create would have made.
 const maxFolderName = 60
+
+// markSorting registers a sort as in flight and hands back the release.
+//
+// It is what keeps the two paths that can sort a document from sorting it at
+// once: a download finishing sends its own request, and an attach arriving a
+// moment later must not send a second one for the same documents. The re-sort
+// pass skips anything registered here.
+//
+// The release also wakes whoever is waiting for the answer, which is how the
+// re-sort does one group at a time.
+func (s *Service) markSorting(uuids []string) chan struct{} {
+	done := make(chan struct{})
+	s.sortMu.Lock()
+	if s.sorting == nil {
+		s.sorting = map[string]chan struct{}{}
+	}
+	for _, id := range uuids {
+		s.sorting[id] = done
+	}
+	s.sortMu.Unlock()
+	return done
+}
+
+// finishSorting clears the in-flight marks for these documents and wakes the
+// waiter. Calling it twice is harmless: a closed channel stays closed, and a
+// document that is not marked is simply not there.
+func (s *Service) finishSorting(uuids []string) {
+	s.sortMu.Lock()
+	defer s.sortMu.Unlock()
+	for _, id := range uuids {
+		done, ok := s.sorting[id]
+		if !ok {
+			continue
+		}
+		delete(s.sorting, id)
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	}
+}
+
+// sortInFlight reports whether a sort has already been asked for this document.
+func (s *Service) sortInFlight(uuid string) bool {
+	s.sortMu.Lock()
+	defer s.sortMu.Unlock()
+	_, ok := s.sorting[uuid]
+	return ok
+}
 
 // askToSort asks the frontend to put a finished volume in its series folder.
 //
@@ -102,6 +153,7 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 		req["comicsName"] = library.ComicsFolder
 		req["createUnder"] = ""
 		s.log.Info("asking the frontend to make the Comics folder", "series", seriesID)
+		s.markSorting(uuids)
 		_ = send(out, appload.MessageSortDocuments, req)
 		return
 	}
@@ -113,6 +165,7 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 			s.log.Warn("could not check the recorded folder", "folder", id, "err", err)
 		} else if ok {
 			req["folderId"] = id
+			s.markSorting(uuids)
 			_ = send(out, appload.MessageSortDocuments, req)
 			return
 		} else {
@@ -129,6 +182,7 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 		req["folderId"] = child.ID
 	}
 
+	s.markSorting(uuids)
 	_ = send(out, appload.MessageSortDocuments, req)
 }
 
@@ -140,6 +194,9 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 // says the wrong folder is worse than one that says Comics, because the next
 // download believes it.
 func (s *Service) documentsSorted(req sortedRequest) error {
+	// Whatever the answer says, these documents are no longer being sorted.
+	defer s.finishSorting(req.DocumentUUIDs)
+
 	switch {
 	case len(req.Moved) == 0:
 		s.log.Info("a download was left in the Comics folder",
@@ -234,4 +291,182 @@ func folderName(title string) string {
 		s = strings.TrimSpace(s[:maxFolderName])
 	}
 	return s
+}
+
+// resortDelay is how long one group's answer is waited for before the pass
+// moves on.
+//
+// Long enough for a create and a move on a busy device, short enough that a
+// frontend which has gone away without saying so does not hold the pass open.
+// Nothing is lost by giving up early: the record stays unsorted and the next
+// attach tries again, which is the whole design.
+const resortDelay = 30 * time.Second
+
+// resortOnAttach files the downloads that finished while nobody was listening.
+//
+// # Why this exists at all
+//
+// Sorting is done by the frontend, so a download that finishes while the
+// frontend is away is never sorted: the volume stays in Comics and no later
+// event goes looking for it. Attach is the moment the capability comes back,
+// and it is the only moment that reliably coincides with that having happened.
+//
+// **No timer, and no polling.** The same reasoning as the cache control having
+// no schedule: this is tidying, and a background task that rearranges the
+// user's library on a clock is a thing that moves their documents while they
+// are reading. The app being opened is the event.
+//
+// # What qualifies, and why both conditions are needed
+//
+//  1. **Never sorted.** A record with a series folder recorded against it is
+//     off limits for good. A document we once filed that is sitting in Comics
+//     now is a document the *user* moved back, and filing it again on every
+//     attach would be Quire overruling them — quietly, repeatedly, and in a way
+//     they cannot switch off.
+//  2. **Still in Comics right now**, read from the library rather than from the
+//     record. The record says where the volume landed at upload time, not where
+//     it is; the user may have put it anywhere since.
+//
+// # The subtle way this could eat itself
+//
+// A frontend whose bridge failed to load answers with `moved: []`, and
+// documentsSorted records nothing for that — deliberately. If it *did* record a
+// folder, condition 1 would disqualify the record for good on the strength of a
+// failure, and the volume would sit in Comics forever with Quire believing it
+// had been filed. That is why the not-moved case writes nothing, and why there
+// is a test holding it there.
+//
+// It runs on the background tracker, so it is cancellable and Close waits for
+// it (PLAN §12.4's shutdown path), and one group at a time so a library that
+// has been offline for a week does not open with forty folder creations at
+// once.
+func (s *Service) resortOnAttach(ctx context.Context, out Sender) {
+	if s.library == nil || s.libStore == nil {
+		return
+	}
+
+	comics, err := s.library.Resolve(ctx, library.ComicsFolder)
+	if err != nil || !comics.Complete() {
+		// No Comics folder, or no way to ask. Nothing here is urgent enough to
+		// be worth saying to anyone: the next download creates the folder, and
+		// the next attach tries this again.
+		return
+	}
+
+	// One listing for the whole pass, not one per record.
+	entries, err := s.library.List(ctx, comics.FolderID)
+	if err != nil {
+		s.log.Info("could not list the Comics folder on attach", "err", err)
+		return
+	}
+	inComics := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.Type == library.Document {
+			inComics[e.ID] = true
+		}
+	}
+
+	// Grouped by (source, series): one folder serves all of a series'
+	// documents, and one selection moves them, exactly as a fresh download
+	// does.
+	type group struct {
+		source, series, title string
+		uuids                 []string
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, rec := range s.libStore.List() {
+		if sorted(rec) || !inComics[rec.DocumentUUID] {
+			continue
+		}
+		if s.sortInFlight(rec.DocumentUUID) {
+			// A download that has just finished is already having this done.
+			// Both paths moving the same documents is the one way this pass
+			// could make things worse rather than tidier.
+			continue
+		}
+		key := rec.Source + "\x00" + rec.Series
+		g, ok := groups[key]
+		if !ok {
+			g = &group{source: rec.Source, series: rec.Series}
+			groups[key], order = g, append(order, key)
+		}
+		g.uuids = append(g.uuids, rec.DocumentUUID)
+		if g.title == "" {
+			g.title = seriesTitleOf(rec)
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+
+	s.log.Info("filing downloads that were never sorted", "series", len(order))
+
+	for _, key := range order {
+		if ctx.Err() != nil {
+			// The frontend went away. A request nobody is there to answer is
+			// the exact failure this pass exists to fix, so it stops rather
+			// than shouting into a closed socket.
+			s.log.Info("stopped filing early; the frontend went away")
+			return
+		}
+		g := groups[key]
+		s.askToSort(ctx, out, g.source, g.series, g.title, g.uuids, library.Placement{})
+
+		// Read *after* the ask: the mark is made by the ask, and asking is also
+		// where a group can be declined — no folder name, no library — in which
+		// case there is no answer to wait for. Reading it first waits for
+		// nothing and sends the whole library's worth of groups at once.
+		done := s.pendingFor(g.uuids)
+		if done == nil {
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return
+		case <-time.After(resortDelay):
+			s.log.Info("no answer about a filing", "series", g.series)
+		}
+	}
+}
+
+// pendingFor is the channel that closes when the answer to a sort arrives, or
+// nil when there is nothing outstanding — because the group was declined, or
+// because the answer got back before this was asked.
+func (s *Service) pendingFor(uuids []string) chan struct{} {
+	if len(uuids) == 0 {
+		return nil
+	}
+	s.sortMu.Lock()
+	defer s.sortMu.Unlock()
+	return s.sorting[uuids[0]]
+}
+
+// sorted reports whether a record has a series folder recorded against it.
+//
+// A record from before sorting existed points at Comics itself, with a path of
+// one name, and is not sorted. Two names mean Comics/<series>.
+func sorted(rec library.Record) bool {
+	return rec.FolderUUID != "" && len(rec.FolderPath) == 2
+}
+
+// seriesTitleOf recovers the series name for a record, or "" when it cannot.
+//
+// The record carries the source's series *id*, not its title, so the title has
+// to come from the document's own name — "<Series> — Ch 0001.pdf", or
+// "<Series> — Volume 1 (part 2 of 3).pdf" — which assemble composes with an em
+// dash. That is the one thing on hand without asking a source that may not
+// answer.
+//
+// **No dash, no folder.** Naming a folder after the whole document would put
+// "Wandance — Ch 0001.pdf" on screen as a folder name, which is worse than
+// leaving the volume in Comics: askToSort refuses an empty name, so returning
+// one here is how this pass declines to guess.
+func seriesTitleOf(rec library.Record) string {
+	i := strings.Index(rec.VisibleName, " \u2014 ")
+	if i <= 0 {
+		return ""
+	}
+	return folderName(rec.VisibleName[:i])
 }

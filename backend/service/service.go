@@ -97,6 +97,13 @@ type Service struct {
 	// them. See background.go for why nothing here uses a bare `go`.
 	bg *background
 
+	// sortMu guards the sorts in flight, keyed by document uuid. Two paths can
+	// ask for the same document to be filed — a download finishing, and an
+	// attach noticing it never was — and they must not both ask at once. See
+	// markSorting.
+	sortMu  sync.Mutex
+	sorting map[string]chan struct{}
+
 	// reprobes rate-limits the automatic re-probe; see maybeReprobe.
 	reprobes reprobeState
 
