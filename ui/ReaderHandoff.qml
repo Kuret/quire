@@ -61,20 +61,24 @@ QtObject {
     // sort puts a finished download in its series folder, and answers with what
     // actually happened.
     //
-    // The two calls are xochitl's, and both were proven on hardware after five
-    // probe rounds (PLAN §6 M5):
+    // The two calls are xochitl's, proven on hardware on 3.25 and again on 3.27:
     //
     //   Library.createCollectionWrapper(parentIdString, name)
-    //   explorer.selectionMove(folderIdString)
+    //   LibraryController.moveEntries([idString], destinationIdString)
     //
-    // **Both want id strings and the parent comes first.** An Entry object in
-    // the parent slot is accepted and then ignored — the folder lands at the
-    // root with no error at all — which is why Sorting.js reads every new
-    // folder's parent back before it moves anything into it.
+    // **Everything is an id string, and an object where one belongs is accepted
+    // and ignored.** An Entry in the parent slot puts the folder at the root
+    // with no error at all; `moveEntries([entry], entry)` moves nothing and
+    // says nothing. That is why Sorting.js reads every new folder's parent back
+    // before moving anything into it, and every document's parent back after.
+    //
+    // **The move no longer goes through the tree explorer.** On 3.27 inside an
+    // AppLoad app `explorer.selection` is undefined — the explorer is there,
+    // its selection is not — and the old path's first act was to clear it.
     //
     // The decisions live in Sorting.js so the offscreen harness can drive every
     // path, including the ones that only happen when the device says no. This
-    // function is just the device: five callbacks and no judgement.
+    // function is just the device: three callbacks and no judgement.
     function sort(req) {
         return Sorting.sortDocuments({
             parentOf: function (id) {
@@ -83,23 +87,29 @@ QtObject {
             createFolder: function (parent, name) {
                 return String(Library.createCollectionWrapper(parent, name))
             },
-            select: function (ids) {
-                var ex = NavigationManager.treeExplorerForNavigation
-                ex.selection.clear()
-                for (var i = 0; i < ids.length; ++i)
-                    ex.selection.add(ids[i])
-                return ex.selection.size
-            },
-            move: function (folderId) {
-                NavigationManager.treeExplorerForNavigation.selectionMove(folderId)
-            },
-            clearSelection: function () {
-                // Never Library.documentSelection: it drives the navigator's own
-                // enabled-state bindings and writing it from outside wedges the
-                // side menu (PLAN §12.4).
-                NavigationManager.treeExplorerForNavigation.selection.clear()
+            move: function (uuids, folderId) {
+                LibraryController.moveEntries(handoff.entryIds(uuids), folderId)
             }
         }, req)
+    }
+
+    // entryIds maps document uuids to the ids the controller acts on.
+    //
+    // On 3.25 and 3.27 these are the same string, so the mapping looks like
+    // superstition. It is the form rm-librarian had to adopt on 3.28, when the
+    // controller stopped accepting raw uuids, and it costs one call that is
+    // already being made. A uuid that no longer resolves is dropped rather than
+    // passed through: an id the controller does not recognise is ignored
+    // silently, and a silently ignored id in a list of five is four moves and a
+    // mystery.
+    function entryIds(uuids) {
+        var out = []
+        for (var i = 0; i < uuids.length; ++i) {
+            var entry = Library.entryForId(uuids[i])
+            if (entry)
+                out.push(String(entry.id))
+        }
+        return out
     }
 
     // check reports which of these documents are still on the tablet.
@@ -129,21 +139,22 @@ QtObject {
     // in the Trash beside two deletions survived both (2026-09-17). That
     // measurement is what let the warning go.
     //
-    // The order, the reading-back and the four answers live in Deleting.js so
-    // the offscreen harness can drive them. This function is the device: seven
-    // callbacks and no judgement.
+    // **It no longer touches a selection either.** The trash step was the tree
+    // explorer's `selectionMoveToTrash()`, which needs `explorer.selection` —
+    // undefined on 3.27 inside an AppLoad app. `moveEntriesToTrash([id])` is
+    // the library-level call and needs no file list at all. That also retires
+    // the trap that came with the old path: `Library.documentSelection` drives
+    // the navigator's own enabled-state bindings and wedged the side menu when
+    // written from outside. Nothing here has a selection to confuse it with.
     //
-    // **There are two selections and only one of them is safe to write.**
-    // `explorer.selection` is what selectionMoveToTrash() acts on.
-    // `Library.documentSelection` drives the navigator's own enabled-state
-    // bindings, and writing it from outside wedged the side menu badly enough
-    // to need a xochitl restart. It is never touched here. `add` also takes an
-    // id string, not a Document (Navigator.qml:733).
+    // The order, the reading-back and the four answers live in Deleting.js so
+    // the offscreen harness can drive them. This function is the device: five
+    // callbacks and no judgement.
     function trash(uuid) {
         return Deleting.deleteDocument(handoff.library(), uuid)
     }
 
-    // library is the seven calls Deleting.js works against, in one place so
+    // library is the five calls Deleting.js works against, in one place so
     // that the single delete and the row delete cannot drift apart. The
     // judgement is all in Deleting.js; this is the device.
     function library() {
@@ -160,21 +171,8 @@ QtObject {
                 var entry = Library.entryForId(id)
                 return entry ? String(entry.id) : ""
             },
-            select: function (id) {
-                var ex = NavigationManager.treeExplorerForNavigation
-                ex.selection.add(id)
-                return ex.selection.size
-            },
-            selectionSize: function () {
-                var ex = NavigationManager.treeExplorerForNavigation
-                return ex && ex.selection ? ex.selection.size : 0
-            },
-            moveToTrash: function () {
-                NavigationManager.treeExplorerForNavigation.selectionMoveToTrash()
-            },
-            clearSelection: function () {
-                // Never Library.documentSelection: see the file comment above.
-                NavigationManager.treeExplorerForNavigation.selection.clear()
+            moveToTrash: function (ids) {
+                LibraryController.moveEntriesToTrash(ids)
             },
             deleteEntries: function (ids) {
                 LibraryController.deleteEntries(ids)

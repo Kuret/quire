@@ -7,7 +7,7 @@
 //
 // # Two steps, because one is silently not enough
 //
-//   explorer.selection.add(uuid); explorer.selectionMoveToTrash()
+//   LibraryController.moveEntriesToTrash([entry.id])
 //   LibraryController.deleteEntries([entry.id])
 //
 // A live entry cannot be deleted. Measured on hardware 2026-09-17: the delete
@@ -21,6 +21,15 @@
 // were deleted beside it and was untouched. That measurement is what the
 // confirmation sentence now asserts — the rest of the user's Trash is theirs —
 // so it is the reason this no longer calls removeAllTrashed().
+//
+// # No selection, and no explorer
+//
+// The first step used to be xochitl's tree explorer: select the document, then
+// `selectionMoveToTrash()`. On OS 3.27 `explorer.selection` is undefined inside
+// an AppLoad app — the explorer itself is still there — so that path depended
+// on a file-list component being present for an operation that has nothing to
+// do with the file list. `moveEntriesToTrash` is the library-level call, needs
+// none of it, and is measured on 3.25 and 3.27.
 //
 // # Why the id goes through the entry
 //
@@ -39,9 +48,9 @@
 
 // deleteDocument performs the delete and reports what it observed.
 //
-// `api` is the device: exists, select, moveToTrash, clearSelection, parentOf,
-// idFor and deleteEntries. Every one of them may throw, and a throw is the
-// caller's "failed" rather than an exception that escapes into the UI.
+// `api` is the device: exists, parentOf, idFor, moveToTrash and deleteEntries.
+// Every one of them may throw, and a throw is the caller's "failed" rather than
+// an exception that escapes into the UI.
 function deleteDocument(api, uuid) {
     if (!api || !uuid)
         return "failed"
@@ -50,30 +59,14 @@ function deleteDocument(api, uuid) {
         if (!api.exists(uuid))
             return "gone"
 
-        // One document, chosen explicitly. Clearing first means an earlier
-        // selection left behind by the navigator cannot be swept into this
-        // delete — the user asked for one row.
-        api.clearSelection()
-        if (api.select(uuid) !== 1) {
-            // The id did not take. Leaving a half-made selection behind is how
-            // the navigator ends up disagreeing with itself.
-            api.clearSelection()
+        // One document, named explicitly. Nothing here depends on what any
+        // file list happens to have highlighted, which is both why it works on
+        // 3.27 and why it cannot sweep up a document the user did not ask
+        // about.
+        var id = idFor(api, uuid)
+        if (!id)
             return "failed"
-        }
-
-        api.moveToTrash()
-        var left = api.selectionSize()
-
-        // Always, whatever happened: nothing should stay selected under the
-        // user (PLAN §12.4's implementation notes).
-        api.clearSelection()
-
-        if (left !== 0) {
-            // The move did not take. The probe hit exactly this by trashing a
-            // UUID that no longer existed, so it is a real state and not a
-            // defensive flourish.
-            return "failed"
-        }
+        api.moveToTrash([id])
 
         // The precondition, read off the library rather than inferred from a
         // call that returned nothing. If the document is not in the Trash, the
@@ -85,13 +78,6 @@ function deleteDocument(api, uuid) {
 
         return remove(api, uuid)
     } catch (e) {
-        // Every early return above clears the selection before it leaves, and a
-        // throw must not be the one path that does not: a half-made selection
-        // left behind is exactly what made the navigator disagree with itself
-        // the first time (PLAN §12.4).
-        try {
-            api.clearSelection()
-        } catch (ignored) {}
         console.log("[quire] deleting failed: " + e)
         return "failed"
     }
@@ -105,6 +91,9 @@ function deleteDocument(api, uuid) {
 // download survived when it did not. What is lost is only the permanence, and
 // the backend has a sentence for exactly that.
 function remove(api, uuid) {
+    // Re-read rather than carried from the trash step: the entry has moved
+    // since, and an id read before a move is an assumption about what a move
+    // does to it.
     var id = idFor(api, uuid)
     if (!id)
         return "kept"

@@ -1,16 +1,25 @@
 // Putting a finished download into its series folder — PLAN §6 M5, the
 // conclusion corrected 2026-09-17.
 //
-// The two calls this drives are xochitl's own, proven on hardware:
+// The two calls this drives are xochitl's own, proven on hardware on both
+// 3.25 and 3.27:
 //
 //   Library.createCollectionWrapper(parentIdString, name)   -> new folder id
-//   explorer.selectionMove(folderIdString)                  -> moves the selection
+//   LibraryController.moveEntries([idString], destIdString)
 //
-// **Both take id strings, and the parent slot is first.** An Entry object in
-// the parent slot is *silently ignored* and the folder lands at root — no
-// throw, no complaint, just the wrong answer — which is why every folder made
-// here has its parent read back before anything is moved into it. Five probe
-// rounds went into learning that; see PLAN §6 M5.
+// **Everything here is an id string, and an object where one belongs is
+// silently ignored.** An Entry in `createCollectionWrapper`'s parent slot puts
+// the folder at the root — no throw, no complaint, just the wrong answer —
+// and `moveEntries([entry], entry)` moves nothing at all while returning
+// normally. That is why every folder made here has its parent read back before
+// anything is moved into it, and why the move is verified per document.
+//
+// **The move used to go through xochitl's tree explorer**, selecting the
+// documents and moving the selection. On OS 3.27 that stopped working inside an
+// AppLoad app: the explorer is still there, but `explorer.selection` is
+// undefined, and the first thing the old code did with it was `clear()`.
+// `moveEntries` is a library-level call — no navigator, no selection, no UI
+// component in the middle of an operation that has nothing to do with the UI.
 //
 // The logic lives in a .js rather than in ReaderHandoff.qml because that file
 // imports com.remarkable and so cannot be loaded anywhere but the device. Here
@@ -26,13 +35,12 @@ var ROOT = ""
 // sortDocuments creates the folder if it has to, moves the documents into it,
 // and reports what actually happened.
 //
-// `api` is the device, as five functions:
+// `api` is the device, as three functions:
 //
 //   parentOf(id)            -> parent id string, "" for the root
 //   createFolder(parent, n) -> new folder id string, or "" if it did not work
-//   select(ids)             -> number of ids the selection actually took
-//   move(folderId)          -> nothing; throwing is allowed
-//   clearSelection()
+//   move(ids, destId)       -> nothing; throwing is allowed, and returning
+//                              quietly having done nothing is expected
 //
 // `req` is MessageSortDocuments. The return value is what goes back on
 // MessageDocumentsSorted.
@@ -85,26 +93,19 @@ function sortDocuments(api, req) {
     // The move, and then the only thing that counts as evidence of it: each
     // document's parent, read back. A call that returns without throwing and
     // changes nothing is the failure this is written around.
-    var took = 0
-    try {
-        took = api.select(out.documentUuids)
-    } catch (e) {
-        took = 0
-    }
-    if (took !== out.documentUuids.length) {
-        api.clearSelection()
-        out.detail = "the selection took " + took + " of " + out.documentUuids.length +
-                     " documents; left where they are"
-        return out
-    }
-
+    //
+    // One call, and no selection anywhere near it. This used to select the
+    // documents in xochitl's tree explorer and move the selection, which broke
+    // on OS 3.27: the explorer is still there, but `explorer.selection` is
+    // *undefined* inside an AppLoad app, and `selection.clear()` threw. A move
+    // between two folders has nothing to do with what a file list happens to
+    // have highlighted, and now does not depend on one.
     var threw = ""
     try {
-        api.move(out.folderId)
+        api.move(out.documentUuids, out.folderId)
     } catch (e) {
         threw = String(e)
     }
-    api.clearSelection()
 
     for (var i = 0; i < out.documentUuids.length; ++i) {
         if (parentOf(api, out.documentUuids[i]) === out.folderId)

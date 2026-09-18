@@ -993,7 +993,6 @@ Window {
         function fakeDevice(opts) {
             var o = opts || {}
             var parents = o.parents || {}
-            var selection = []
             var made = 0
             return {
                 log: [],
@@ -1009,18 +1008,15 @@ Window {
                     parents[id] = o.createIgnoresParent ? "" : parent
                     return id
                 },
-                select: function (ids) {
-                    selection = o.selectionDrops ? ids.slice(0, ids.length - 1) : ids.slice()
-                    return selection.length
-                },
-                move: function (folderId) {
-                    this.log.push("move(" + folderId + ")")
+                // One call, named documents, no selection: the library-level
+                // move that replaced the tree explorer's on 2026-09-18.
+                move: function (ids, folderId) {
+                    this.log.push("move(" + ids.join(",") + "->" + folderId + ")")
                     if (o.moveThrows) throw new Error("refused")
                     if (o.moveDoesNothing) return
-                    var n = o.moveOnlyFirst ? 1 : selection.length
-                    for (var i = 0; i < n; ++i) parents[selection[i]] = folderId
-                },
-                clearSelection: function () { selection = [] }
+                    var n = o.moveOnlyFirst ? 1 : ids.length
+                    for (var i = 0; i < n; ++i) parents[ids[i]] = folderId
+                }
             }
         }
 
@@ -1047,6 +1043,7 @@ Window {
             documentUuids: ["p1", "p2", "p3"], folderId: "", createUnder: "comics", folderName: "Wandance"})
         win.want("every part of a split volume moves", res.moved.length, 3)
         win.want("in one move call", dev.log.length, 2)
+        win.want("naming every one of them", dev.log[1], "move(p1,p2,p3->made-1)")
 
         // The silent failure that cost five probe rounds: a parent the device
         // does not accept is ignored and the folder lands at the root. Nothing
@@ -1080,6 +1077,15 @@ Window {
             documentUuids: ["p1", "p2"], folderId: "", createUnder: "comics", folderName: "Wandance"})
         win.want("a partial move counts what moved", res.moved.length, 1)
         win.want("and says how many of how many", res.detail, "moved 1 of 2")
+
+        // A move that throws still has its work checked: the parents are read
+        // back either way, because a call that complains and moves things is
+        // not the same as one that complains and does not.
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, moveThrows: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a move that throws moves nothing", res.moved.length, 0)
+        win.want("and the reason carries the throw", res.detail.indexOf("refused") >= 0, true)
 
         // Comics itself missing: it is created first, and the series folder
         // goes inside it.
@@ -1265,26 +1271,24 @@ Window {
                 idFor: function (uuid) {
                     if (o.noEntry)
                         return ""
+                    // The id is read again between the two steps, so a device
+                    // that can name the entry before the move and not after is
+                    // a state worth having: it is what an entry that changed
+                    // identity on its way to the Trash would look like.
+                    if (o.loseEntryAfterTrash && parent === "trash")
+                        return ""
                     return o.wrapperIds ? "entry:" + uuid : uuid
                 },
-                select: function (id) {
-                    this.calls.push("select")
-                    if (o.selectFails)
-                        return 0
-                    this.selected.push(id)
-                    return this.selected.length
-                },
-                selectionSize: function () { return this.selected.length },
-                moveToTrash: function () {
+                // moveEntriesToTrash, named: no selection to build up, drop,
+                // or leave behind. The trash step stopped going through the
+                // tree explorer on 2026-09-18, because 3.27 has no
+                // `explorer.selection` inside an AppLoad app.
+                moveToTrash: function (ids) {
                     this.calls.push("moveToTrash")
+                    this.trashed = ids
                     if (o.trashFails)
                         return
-                    this.selected = []
                     parent = "trash"
-                },
-                clearSelection: function () {
-                    this.calls.push("clear")
-                    this.selected = []
                 },
                 deleteEntries: function (ids) {
                     this.calls.push("deleteEntries")
@@ -1329,11 +1333,25 @@ Window {
         win.want("a throw on the second step is kept, not failed",
                  Deleting.deleteDocument(dev, "doc-1"), "kept")
 
-        // No entry to name means no id to delete with. Falling back to the raw
-        // uuid would work on 3.25 and be the silent no-op on 3.28.
+        // No entry to name means no id to act on at all, and now that the first
+        // step is `moveEntriesToTrash([id])` rather than a selection, that is
+        // caught before anything is touched: nothing moved, so the answer is
+        // "failed" -- the document is still in the user's library and the
+        // backend must keep its record. Falling back to the raw uuid would work
+        // on 3.25 and be the silent no-op on 3.28.
         dev = tablet({noEntry: true})
-        win.want("an unnameable entry is kept, not guessed at",
+        win.want("an unnameable entry is a failure, not a guess",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("and nothing was trashed", dev.calls.indexOf("moveToTrash"), -1)
+        win.want("and nothing was passed to deleteEntries", dev.deleted, null)
+
+        // Unnameable only *after* the trash step: the document is out of the
+        // library, so this is "kept" and not a failure -- the record goes and
+        // the note says where it ended up.
+        dev = tablet({loseEntryAfterTrash: true})
+        win.want("an entry that cannot be named for the second step is kept",
                  Deleting.deleteDocument(dev, "doc-1"), "kept")
+        win.want("having been trashed", dev.calls.indexOf("moveToTrash") >= 0, true)
         win.want("and nothing was passed to deleteEntries", dev.deleted, null)
 
         // The trash step did not take: the selection did not empty. Nothing may
@@ -1342,30 +1360,25 @@ Window {
         win.want("a document that would not move is a failure",
                  Deleting.deleteDocument(dev, "doc-1"), "failed")
         win.want("and nothing was deleted", dev.deleted, null)
-        win.want("and nothing is left selected", dev.selected.length, 0)
+        win.want("though it was asked for by name", dev.trashed[0], "doc-1")
 
-        // The two readings disagree: the parent says Trash, but the selection
-        // did not empty, so the move cannot be trusted for this id. Nothing may
-        // be claimed and nothing may be deleted on the strength of half of it.
+        // The measured shape of a wrong argument on this surface: the call is
+        // accepted, returns normally, and nothing moves. The parent read back
+        // is the only thing that catches it, and the delete that would follow
+        // is the measured no-op on a live entry, so it is never attempted.
         dev = tablet({})
-        dev.moveToTrash = function () { this.calls.push("moveToTrash"); dev.parentOf = function () { return "trash" } }
-        win.want("a move that left the selection behind is a failure",
-                 Deleting.deleteDocument(dev, "doc-1"), "failed")
-        win.want("even with the parent reading Trash", dev.deleted, null)
-
-        // The id would not select. The same rule, one step earlier.
-        dev = tablet({selectFails: true})
-        win.want("an id that will not select is a failure",
-                 Deleting.deleteDocument(dev, "doc-1"), "failed")
-        win.want("and it never reached the Trash", dev.calls.indexOf("moveToTrash"), -1)
-
-        // The selection emptied, but the document is not in the Trash. The
-        // delete below would be the measured no-op, so it is not attempted.
-        dev = tablet({trashFails: false, parent: "comics"})
-        dev.moveToTrash = function () { this.calls.push("moveToTrash"); this.selected = [] }
-        win.want("a document that is not in the Trash is not deleted",
+        dev.moveToTrash = function (ids) { this.calls.push("moveToTrash"); this.trashed = ids }
+        win.want("a trash call that changed nothing is a failure",
                  Deleting.deleteDocument(dev, "doc-1"), "failed")
         win.want("and deleteEntries was never called", dev.deleted, null)
+
+        // A trash call that throws. Same answer, for the same reason: the
+        // document is still in the user's library.
+        dev = tablet({})
+        dev.moveToTrash = function () { this.calls.push("moveToTrash"); throw new Error("refused") }
+        win.want("a trash call that threw is a failure",
+                 Deleting.deleteDocument(dev, "doc-1"), "failed")
+        win.want("and nothing was deleted", dev.deleted, null)
 
         // Already off the tablet. §6 M6 owns that wording, so it is named, not
         // reported as a delete.
@@ -1409,14 +1422,11 @@ Window {
             exists: function (id) { return !this.gone[id] },
             parentOf: function (id) { return this.gone[id] ? "" : this.trashed === id ? "trash" : "comics" },
             idFor: function (id) { return id },
-            select: function (id) { this.picked = id; return 1 },
-            selectionSize: function () { return 0 },
-            moveToTrash: function () {
-                if (this.refuse[this.picked])
+            moveToTrash: function (ids) {
+                if (this.refuse[ids[0]])
                     return
-                this.trashed = this.picked
+                this.trashed = ids[0]
             },
-            clearSelection: function () {},
             deleteEntries: function (ids) {
                 if (this.trashed === ids[0])
                     this.gone[ids[0]] = true
@@ -1439,10 +1449,7 @@ Window {
             exists: function () { return false },
             parentOf: function () { return "" },
             idFor: function (id) { return id },
-            select: function () { return 1 },
-            selectionSize: function () { return 0 },
             moveToTrash: function () {},
-            clearSelection: function () {},
             deleteEntries: function () {}
         }
         var already = Deleting.deleteMany(absent, ["doc-a"])
