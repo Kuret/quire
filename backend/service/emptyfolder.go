@@ -75,6 +75,51 @@ func SeriesFolderRemovedNote(name string) string {
 	return "The “" + name + "” folder was empty afterwards, so Quire removed it from Comics too."
 }
 
+// considerEmptyFolder is the one way a series folder is ever tidied up, and it
+// is reached from both deletes.
+//
+// It was wired into the series delete only, which meant deleting a series from
+// the Downloaded row tidied up and deleting its last chapter from the chapter
+// row did not — the same end state with two outcomes, found on 3.26 with a
+// Kingdom folder left behind. Two implementations of one rule is the shape that
+// has bitten this project repeatedly; there is now one.
+//
+// **The order matters and is the mirror of the reclaimPages bug.** "Are there
+// records left for this series?" has to be asked *after* the record being
+// deleted is dropped. Asked before, it finds the record on its way out, decides
+// the series still has downloads, and the cleanup never fires — which is
+// exactly how reclaimPages once concluded that every chapter was still in use.
+//
+// `folderID` and `name` must be read from the record *before* it is dropped,
+// for the same reason: they live on the record, and it is about to go.
+func (s *Service) considerEmptyFolder(ctx context.Context, out Sender, sourceID, seriesID, folderID, name string) {
+	if folderID == "" {
+		return
+	}
+	if left := s.recordsFor(sourceID, seriesID); len(left) > 0 {
+		// Still downloads in it, so it is not empty and nothing is asked. The
+		// listing would say the same, but a delete that cannot leave the
+		// folder empty should not be making HTTP calls to find that out.
+		s.log.Info("a series still has downloads, so its folder stays",
+			"series", seriesID, "left", len(left))
+		return
+	}
+	s.tidySeriesFolder(ctx, out, folderID, name)
+}
+
+// seriesFolderOf is the series folder a record was filed into, or "".
+//
+// Only a folder *inside* Comics counts, by the same rule recordedFolder uses: a
+// record from before series folders existed points straight at Comics, and
+// Comics is never a series folder. folderVerdict guards that again by id; this
+// is the cheaper check that gets there first.
+func seriesFolderOf(rec library.Record) string {
+	if rec.FolderUUID != "" && len(rec.FolderPath) == 2 {
+		return rec.FolderUUID
+	}
+	return ""
+}
+
 // tidySeriesFolder asks the frontend to delete the folder, if it may.
 //
 // It runs in the background because `library.List` is an HTTP call to the

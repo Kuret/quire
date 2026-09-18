@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
 )
@@ -124,7 +126,7 @@ func deleteQuestion(name string) string {
 // a record dropped for a document still sitting on the tablet is an orphan the
 // user cannot get rid of through Quire and Quire can no longer account for,
 // which is a worse failure than the delete not happening at all.
-func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
+func (s *Service) deleteDownload(ctx context.Context, out Sender, req deleteRequest) error {
 	if req.DocumentUUID == "" {
 		return s.sendError(out, "bad_request", "Quire was asked to delete nothing.")
 	}
@@ -177,6 +179,18 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 			"document", req.DocumentUUID, "name", rec.VisibleName, "removedFromTrash", req.Removed,
 			"chapters", len(rec.Chapters), "pagesFreedBytes", freed,
 			"pagesFreedMiB", freed>>20)
+
+		// And the series folder, if that was the last download in it (PLAN
+		// §12.5). The same call the series delete makes: deleting a series from
+		// the Downloaded row and deleting its last chapter from the chapter row
+		// leave the same state, and used to leave two different ones.
+		//
+		// After the removal, for the same reason the reclaim above is: the
+		// question is "are there records left for this series", and the record
+		// on its way out would answer it wrongly. The folder and its name are
+		// read off `rec`, which is the copy taken before it was dropped.
+		s.considerEmptyFolder(ctx, out, rec.Source, rec.Series,
+			seriesFolderOf(rec), folderName(seriesTitleOf(rec)))
 		break
 	}
 

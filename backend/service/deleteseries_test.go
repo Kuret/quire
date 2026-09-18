@@ -491,3 +491,125 @@ func TestAFolderThatStayedIsNotMentioned(t *testing.T) {
 		t.Error("a folder that stayed was reported as removed")
 	}
 }
+
+// The gap this closes: deleting the *last chapter* from a chapter row leaves
+// the same empty folder as deleting the series from its row, and used to leave
+// it behind. One path now, reached from both deletes.
+func TestDeletingTheLastDownloadOffersItsFolderToo(t *testing.T) {
+	svc, _, fake, uuids := filedSeriesFixture(t, 1)
+	rec := &recorder{}
+	emptyFolder(fake, "lantern")
+
+	handle(t, svc, rec, appload.MessageDeleteDownload,
+		`{"documentUuid":"`+uuids[0]+`","confirmed":true,"trashed":true,"removed":true}`)
+
+	var ask struct {
+		FolderID   string `json:"folderId"`
+		FolderName string `json:"folderName"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageDeleteFolder), &ask); err != nil {
+		t.Fatal(err)
+	}
+	if ask.FolderID != "lantern" {
+		t.Errorf("asked to delete %q, want the series folder", ask.FolderID)
+	}
+	if ask.FolderName != "The Lantern Keeper" {
+		t.Errorf("the folder is named %q", ask.FolderName)
+	}
+}
+
+// One chapter of several: the series still has downloads, so its folder is not
+// even asked about -- a delete that cannot leave the folder empty should not be
+// making HTTP calls to discover that.
+func TestDeletingOneOfSeveralLeavesTheFolderAlone(t *testing.T) {
+	svc, _, fake, uuids := filedSeriesFixture(t, 3)
+	rec := &recorder{}
+	// Even with the listing empty, which it would not be in reality: a series
+	// with records left must not reach the question at all.
+	emptyFolder(fake, "lantern")
+
+	handle(t, svc, rec, appload.MessageDeleteDownload,
+		`{"documentUuid":"`+uuids[0]+`","confirmed":true,"trashed":true,"removed":true}`)
+
+	rec.wait(t, appload.MessageDownloadDeleted)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a series that still has downloads was asked about its folder")
+	}
+}
+
+// A record from before series folders existed points straight at Comics. It is
+// not a series folder, and the cheap check catches it before the listing does.
+func TestADownloadWithNoSeriesFolderAsksNothing(t *testing.T) {
+	svc, store, libStore, root := serviceWithDownloadRoot(t)
+	addSource(t, store)
+
+	chapter := "/manga/the-lantern-keeper/chapter-1/"
+	pageCache(t, root, "example-reader", "the-lantern-keeper", chapter)
+	if err := libStore.Put(library.Record{
+		Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "1"},
+		DocumentUUID: "doc-a",
+		FolderUUID:   "comics",
+		FolderPath:   []string{"Comics"},
+		Chapters:     []string{chapter},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recorder{}
+	handle(t, svc, rec, appload.MessageDeleteDownload,
+		`{"documentUuid":"doc-a","confirmed":true,"trashed":true,"removed":true}`)
+
+	rec.wait(t, appload.MessageDownloadDeleted)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a document filed straight into Comics offered Comics for deletion")
+	}
+}
+
+// A delete the frontend could not perform changes nothing, including the
+// folder: the document is still in it.
+func TestAFailedSingleDeleteAsksNothingAboutTheFolder(t *testing.T) {
+	svc, _, fake, uuids := filedSeriesFixture(t, 1)
+	rec := &recorder{}
+	emptyFolder(fake, "lantern")
+
+	handle(t, svc, rec, appload.MessageDeleteDownload,
+		`{"documentUuid":"`+uuids[0]+`","confirmed":true,"trashed":false}`)
+
+	rec.wait(t, appload.MessageError)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a delete that did not happen offered the folder for deletion")
+	}
+}
+
+// A document the user filed somewhere of their own: not inside Comics, so not
+// a folder Quire made, so not a folder Quire deletes.
+//
+// The listing would probably refuse it too -- it is unlikely to be empty -- but
+// "probably" is not a guard, and this is the check that gets there first
+// without an HTTP call.
+func TestAFolderOutsideComicsIsNeverOffered(t *testing.T) {
+	svc, store, libStore, root := serviceWithDownloadRoot(t)
+	addSource(t, store)
+
+	chapter := "/manga/the-lantern-keeper/chapter-1/"
+	pageCache(t, root, "example-reader", "the-lantern-keeper", chapter)
+	if err := libStore.Put(library.Record{
+		Key:          library.Key{Source: "example-reader", Series: "the-lantern-keeper", Volume: "1"},
+		DocumentUUID: "doc-a",
+		FolderUUID:   "my-own-folder",
+		// One level: a folder of the user's at the top, not Comics/<Series>.
+		FolderPath: []string{"Reading now"},
+		Chapters:   []string{chapter},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recorder{}
+	handle(t, svc, rec, appload.MessageDeleteDownload,
+		`{"documentUuid":"doc-a","confirmed":true,"trashed":true,"removed":true}`)
+
+	rec.wait(t, appload.MessageDownloadDeleted)
+	if hasFrame(rec, appload.MessageDeleteFolder) {
+		t.Error("a folder of the user's own was offered for deletion")
+	}
+}

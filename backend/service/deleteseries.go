@@ -187,7 +187,7 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 	// surviving documents are in it — but it is asserted here rather than left
 	// to fall out, because "it would have been caught later" is not a guard.
 	if failed == 0 && deleted > 0 {
-		s.tidySeriesFolder(ctx, out, folderID, folderName)
+		s.considerEmptyFolder(ctx, out, req.SourceID, req.SeriesID, folderID, folderName)
 	}
 
 	switch {

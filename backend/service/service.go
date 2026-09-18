@@ -395,7 +395,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		return true, s.deleteDownload(out, req)
+		return true, s.deleteDownload(ctx, out, req)
 
 	case appload.MessageRenameSource:
 		var req struct {
