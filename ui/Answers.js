@@ -148,7 +148,7 @@ function manyFailure(uuids, detail) {
 
 // handoff answers the reader handoff, and says what the shell does next.
 //
-// Three outcomes in one object because they are one decision:
+// Two outcomes in one object because they are one decision:
 //
 //   reply   what the backend is told. A document that did not open is reported
 //           `missing`, and the backend's wording for that is the right answer
@@ -156,14 +156,14 @@ function manyFailure(uuids, detail) {
 //           threw.
 //   forget  clear the dead UUID off the rows, so the button goes back to
 //           offering a download.
-//   close   **unload the frontend, so the reader is not opened behind it.**
-//           AppLoad v0.5.3 draws its windows above the document view, so on OS
-//           3.27 the stock reader comes up *behind* Quire and the user has to
-//           quit the app to read what they just tapped Read on.
 //
-// `close` is true only on a successful open. A failed open leaves the app up,
-// because the sentence explaining it is on that screen and closing would take
-// it away with the app.
+// **The frontend stays up.** It closed itself here between 2026-09-18 and
+// 2026-09-19, because AppLoad v0.5.3 renders its windows above the document
+// view and the reader would otherwise open behind Quire. On v0.5.0 — which is
+// behind that change — the reader comes forward on its own, and closing would
+// only take the app away from a user who is about to come back to it. See
+// PLAN §6 M6's footnote for the version pairing, and note that this is an
+// AppLoad-version behaviour rather than an OS one.
 //
 // It is here rather than in Main.qml so the harness can drive it: Main.qml
 // imports AppLoad and cannot be instantiated off a device.
@@ -181,10 +181,9 @@ function handoff(bridge, uuid, page) {
     }
 
     if (opened)
-        return {"reply": {"documentUuid": uuid}, "forget": false, "close": true}
+        return {"reply": {"documentUuid": uuid}, "forget": false}
     return {
         "reply": {"documentUuid": uuid, "missing": true, "detail": detail},
-        "forget": true,
-        "close": false
+        "forget": true
     }
 }

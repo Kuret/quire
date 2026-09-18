@@ -143,35 +143,19 @@ Rectangle {
     function openInReader(documentUuid) {
         if (!documentUuid)
             return
-        // The reply, whether the rows must forget this document, and whether the
-        // frontend gets out of the reader's way — one decision, made in
-        // Answers.js where the harness can drive it.
+        // The reply and whether the rows must forget this document — one
+        // decision, made in Answers.js where the harness can drive it.
         var answer = Answers.handoff(root.bridge(), documentUuid, -1)
 
         // Tell the backend, which owns both the record and the wording.
         root.send(Msg.OpenInReader, answer.reply)
         if (answer.forget)
             root.forgetDocument(documentUuid)
-        if (!answer.close)
-            return
 
-        // **And then get out of the way.**
-        //
-        // AppLoad v0.5.3 renders its windows above the document view (upstream
-        // "Always render windows on top of document", April 2026), so on OS
-        // 3.27 the reader opens *behind* Quire and the user has to quit the app
-        // to see the manga they just tapped Read on. Closing the frontend is
-        // what puts the reader in front.
-        //
-        // `close()` unloads the frontend only. `appload.terminate()` is what
-        // stops the backend, and it must not be called here: a download in
-        // flight has to survive the handoff, which is something the user
-        // relies on. AppLoad's README is explicit that a backend keeps running
-        // unless the app kills it.
-        //
-        // Only on success. A failed open leaves the app up, because the
-        // sentence saying why is on this screen.
-        root.close()
+        // The frontend stays up. On AppLoad v0.5.0 the stock reader comes
+        // forward by itself and Quire is behind it, so leaving the comic puts
+        // the user back where they were — which is what closing had to be
+        // invented to imitate on v0.5.3. See PLAN §6 M6's footnote.
     }
 
     // deleteDownload moves a document to xochitl's Trash and tells the backend

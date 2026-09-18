@@ -1625,33 +1625,33 @@ Window {
         win.want("nothing deleted", batch.deleted, 0)
         win.want("and says why once", batch.detail.indexOf("selection is undefined") >= 0, true)
 
-        // ---- the handoff, and getting out of the reader's way ---------------
+        // ---- the handoff ---------------------------------------------------
+        //
+        // The frontend used to close itself here, to stop the reader opening
+        // behind it on AppLoad v0.5.3. On v0.5.0 the reader comes forward on
+        // its own, so the handoff is back to being one thing: open the
+        // document, and tell the backend what happened.
 
-        // A successful open closes the frontend: AppLoad v0.5.3 draws its
-        // windows above the document view, so staying up hides the reader
-        // behind Quire.
         var good = Answers.handoff({open: function () { return true }}, "doc-a", -1)
-        win.want("a successful open closes the frontend", good.close, true)
-        win.want("and forgets nothing", good.forget, false)
+        win.want("a successful open forgets nothing", good.forget, false)
         win.want("and reports no missing document", good.reply.missing, undefined)
+        win.want("and does not ask the shell to close", good.close, undefined)
 
-        // A failed open leaves the app up -- the sentence about why is on that
-        // screen -- and the row forgets the dead document.
+        // A failed open: the row forgets the dead document, and the backend is
+        // told so it can compose the sentence about it.
         var bad = Answers.handoff({open: function () { return false }}, "doc-a", -1)
-        win.want("a failed open leaves the app up", bad.close, false)
-        win.want("and reports the document missing", bad.reply.missing, true)
+        win.want("a failed open reports the document missing", bad.reply.missing, true)
         win.want("and the row forgets it", bad.forget, true)
 
         // A throw is a failed open, with the reason carried to the backend log.
         var threwOpen = Answers.handoff(angryBridge(), "doc-a", -1)
-        win.want("an open that threw does not close the app", threwOpen.close, false)
-        win.want("and still answers the backend", threwOpen.reply.missing, true)
+        win.want("an open that threw still answers the backend", threwOpen.reply.missing, true)
         win.want("and reports the throw",
                  threwOpen.reply.detail.indexOf("documentViewLoader") >= 0, true)
 
         // No bridge: the same, with the other reason.
         var noReader = Answers.handoff(null, "doc-a", -1)
-        win.want("no bridge does not close the app", noReader.close, false)
+        win.want("no bridge reports the document missing", noReader.reply.missing, true)
         win.want("and says why", noReader.reply.detail, Answers.NO_BRIDGE)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
