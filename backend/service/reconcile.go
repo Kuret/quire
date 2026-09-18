@@ -19,6 +19,12 @@ type checkedRequest struct {
 
 	// Missing is the subset that no longer resolves on the tablet.
 	Missing []string `json:"missing"`
+
+	// Detail is why the frontend could not check, when it could not. It exists
+	// so that a failure on the device reaches this log instead of the QML
+	// console nobody is reading on a tablet — an exception in the bridge was
+	// silence until 2026-09-18 (see ui/Answers.js).
+	Detail string `json:"detail,omitempty"`
 }
 
 // maxTotalWipe is the largest number of records Quire will drop in one
@@ -84,7 +90,7 @@ func (s *Service) documentsChecked(req checkedRequest) error {
 	if !req.Checked {
 		// The important line in this file.
 		s.log.Info("the frontend could not check the library; nothing was removed",
-			"asked", len(req.DocumentUUIDs))
+			"asked", len(req.DocumentUUIDs), "detail", req.Detail)
 		return nil
 	}
 	if s.libStore == nil || len(req.Missing) == 0 {

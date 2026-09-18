@@ -36,6 +36,10 @@ type deleteRequest struct {
 	// measured 2026-09-17, with a control folder sitting in the Trash beside
 	// two that were deleted and surviving both.
 	Removed bool `json:"removed,omitempty"`
+
+	// Detail is why, when the frontend could not do it. See ui/Answers.js: a
+	// call into xochitl's QML that throws is reported, not swallowed.
+	Detail string `json:"detail,omitempty"`
 }
 
 // DeleteFailedRemedy is what the user is told when the trash call did not take.
@@ -141,7 +145,8 @@ func (s *Service) deleteDownload(out Sender, req deleteRequest) error {
 	if !req.Trashed {
 		// The frontend tried and could not. Nothing here changes; the row keeps
 		// saying "Read", which is true.
-		s.log.Warn("the frontend could not trash a document", "document", req.DocumentUUID)
+		s.log.Warn("the frontend could not trash a document",
+			"document", req.DocumentUUID, "detail", req.Detail)
 		return s.sendError(out, "not_deleted", DeleteFailedRemedy)
 	}
 

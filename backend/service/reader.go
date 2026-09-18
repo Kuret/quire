@@ -17,6 +17,12 @@ type openRequest struct {
 
 	// Missing is set by the frontend when Library.entryForId returned null.
 	Missing bool `json:"missing,omitempty"`
+
+	// Detail is why it did not open, when the cause was not simply a UUID that
+	// no longer resolves — a bridge that is not there, or a call that threw.
+	// It changes nothing here; it is how a device-side failure reaches this
+	// log at all (see ui/Answers.js).
+	Detail string `json:"detail,omitempty"`
 }
 
 // ReaderGoneRemedy is what the user is told when the document behind a "Read"
@@ -36,6 +42,11 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 	if !req.Missing {
 		s.log.Info("opened in the stock reader", "document", req.DocumentUUID)
 		return nil
+	}
+
+	if req.Detail != "" {
+		s.log.Warn("the reader handoff did not happen",
+			"document", req.DocumentUUID, "detail", req.Detail)
 	}
 
 	// The document is gone. Drop the record so the row goes back to offering a

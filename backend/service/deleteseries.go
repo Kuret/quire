@@ -33,6 +33,9 @@ type deleteSeriesRequest struct {
 	// Results is one entry per document the frontend tried, and it is what was
 	// observed rather than what was intended.
 	Results []deleteResult `json:"results,omitempty"`
+
+	// Detail is why the frontend could not delete them, when it could not.
+	Detail string `json:"detail,omitempty"`
 }
 
 // deleteResult is one document's outcome, in the frontend's words.
@@ -189,7 +192,8 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 
 	switch {
 	case deleted == 0 && failed > 0:
-		s.log.Warn("no download of a series could be deleted", "series", req.SeriesID)
+		s.log.Warn("no download of a series could be deleted",
+			"series", req.SeriesID, "detail", req.Detail)
 		return s.sendError(out, "not_deleted", DeleteSeriesFailedRemedy)
 	case failed > 0:
 		return s.sendError(out, "not_all_deleted", deleteSeriesPartly(int(deleted), int(failed)))

@@ -124,6 +124,9 @@ type folderDeletedRequest struct {
 	// gets — folders and documents are both entries to that API.
 	Trashed bool `json:"trashed,omitempty"`
 	Removed bool `json:"removed,omitempty"`
+
+	// Detail is why it did not go, when it did not.
+	Detail string `json:"detail,omitempty"`
 }
 
 // folderDeleted reports the tidy-up, and only the one that happened.
@@ -135,7 +138,7 @@ type folderDeletedRequest struct {
 func (s *Service) folderDeleted(out Sender, req folderDeletedRequest) error {
 	if !req.Removed {
 		s.log.Info("an empty series folder was not removed",
-			"folder", req.FolderID, "trashed", req.Trashed)
+			"folder", req.FolderID, "trashed", req.Trashed, "detail", req.Detail)
 		return nil
 	}
 	s.log.Info("an empty series folder was removed", "folder", req.FolderID)
