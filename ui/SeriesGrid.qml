@@ -19,6 +19,7 @@
 import QtQuick 2.5
 import "Style.js" as Style
 import "Paging.js" as Paging
+import "Screens.js" as Screens
 
 Item {
     id: screen
@@ -56,7 +57,16 @@ Item {
     signal openRequested(string seriesId, string title)
     signal pageRequested(int page)
 
+    // dismissInput puts AppLoad's keyboard away (PLAN §11 Q5). Dropping the
+    // field's focus is half of that, and `searching` follows focus — so the
+    // placeholder comes back when the keyboard goes, which is right: it says
+    // "Search this source" to a screen nobody is typing into.
+    function dismissInput() {
+        Screens.dismissKeyboard([queryField])
+    }
+
     function reset() {
+        screen.dismissInput()
         screen.query = ""
         screen.searching = false
         screen.emptyMessage = ""
@@ -134,7 +144,10 @@ Item {
                 // typed.
                 onActiveFocusChanged: screen.searching = activeFocus
                 onAccepted: {
-                    screen.searching = false
+                    // The panel does not survive the thing it was raised for.
+                    // Dismissing clears the field's focus, which is what turns
+                    // `searching` off — see dismissInput.
+                    screen.dismissInput()
                     if (screen.query.length > 0)
                         screen.searchRequested(screen.query)
                 }

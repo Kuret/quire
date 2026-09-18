@@ -354,6 +354,66 @@ Window {
         sourceList.visible = true
         win.want("the rename field sits above the keyboard",
                  fieldBottom(sourceList, "nameField") <= safeBottom, true)
+        // ---- and what puts it away ---------------------------------------
+        //
+        // AppLoad's panel raises itself on focus and lowers itself for nothing,
+        // so Quire has to. What the harness can drive is the *focus* half —
+        // which is the half that decides whether the panel is raised again a
+        // moment later. Whether the panel obeys `Qt.inputMethod.hide()` is
+        // device-only and is **not** asserted here; there is no panel offscreen
+        // to obey anything.
+
+        // First, the fact the rule is built on, measured rather than assumed:
+        // **a tap somewhere else does not move focus.** If it did, most of this
+        // would be unnecessary.
+        var nameField = win.findChild(sourceList, "nameField")
+        nameField.forceActiveFocus()
+        win.want("a field can take focus", nameField.activeFocus, true)
+        win.findChild(sourceList, "renameSaveButton").children[1].clicked(null)
+        win.want("a tap elsewhere does not clear it by itself",
+                 nameField.activeFocus || nameField.focus, true)
+
+        // Closing the panel puts the keyboard away with it.
+        sourceList.dismissInput()
+        win.want("dismissing drops the field's focus", nameField.activeFocus, false)
+
+        // Accept: the panel does not survive the thing it was raised for.
+        sourceList.renamingId = "src-a"
+        sourceList.renameText = "A new name"
+        nameField.forceActiveFocus()
+        sourceList.commitRename()
+        win.want("committing a rename drops the focus", nameField.activeFocus, false)
+
+        // Navigating away. showScreen is Main.qml's and cannot be driven here,
+        // but what it calls is each screen's dismissInput, and that is what is
+        // asserted: the screens put their own keyboards away when asked.
+        var searchField = win.findChild(seriesGrid, "searchField")
+        searchField.forceActiveFocus()
+        win.want("the search field takes focus", searchField.activeFocus, true)
+        win.want("and searching follows it", seriesGrid.searching, true)
+        seriesGrid.dismissInput()
+        win.want("dismissing drops the search field's focus", searchField.activeFocus, false)
+        // The placeholder comes back with it, deliberately: "Search this
+        // source" is the right label for a screen nobody is typing into.
+        win.want("and searching follows that too", seriesGrid.searching, false)
+
+        // Typing does not dismiss anything. The failure mode of an over-eager
+        // rule is a field that closes its own keyboard mid-word.
+        searchField.forceActiveFocus()
+        searchField.text = "lan"
+        win.want("typing keeps the focus", searchField.activeFocus, true)
+        searchField.text = "lant"
+        win.want("and keeps it as the query grows", searchField.activeFocus, true)
+        seriesGrid.dismissInput()
+
+        // The address field, the same way round.
+        var addrField = win.findChild(addSource, "urlField")
+        addrField.forceActiveFocus()
+        addSource.start()
+        win.want("starting a check drops the address field's focus",
+                 addrField.activeFocus, false)
+        addSource.reset()
+
         sourceList.renamingId = ""
         seriesGrid.visible = false
         addSource.visible = false

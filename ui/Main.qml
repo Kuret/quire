@@ -131,6 +131,15 @@ Rectangle {
             "detail": answer.detail})
     }
 
+    // dismissInput asks every screen that owns a text field to put the keyboard
+    // away. Three calls rather than a search for inputs: a helper that went
+    // looking would eventually find one the caller did not mean.
+    function dismissInput() {
+        addSourceScreen.dismissInput()
+        seriesGridScreen.dismissInput()
+        sourceListScreen.dismissInput()
+    }
+
     // bridge is ReaderHandoff.qml, or null when its imports of xochitl's own QML
     // did not resolve. Every handler below goes through it, and through
     // Answers.js, so that "the bridge is missing" and "the bridge threw" both
@@ -692,6 +701,12 @@ Rectangle {
     // been deleted from the screen underneath it. Screens.js decides what needs
     // re-asking for and says why the other screens do not.
     function showScreen(name) {
+        // Every route into a screen comes through here, which makes it the one
+        // place that can be sure the keyboard does not follow the user to the
+        // next screen. AppLoad's panel raises itself on focus and lowers itself
+        // for nothing (PLAN §11 Q5), and it covers the bottom 544 px — the
+        // pager and the last rows of whatever is now on screen.
+        root.dismissInput()
         root.screen = name
         if (Screens.refreshOnShow(name) === "listDownloaded")
             root.send(Msg.ListDownloaded, {})

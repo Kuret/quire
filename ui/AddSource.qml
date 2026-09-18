@@ -13,6 +13,7 @@
 
 import QtQuick 2.5
 import "Style.js" as Style
+import "Screens.js" as Screens
 
 Item {
     id: screen
@@ -60,7 +61,15 @@ Item {
         optionModel.clear()
     }
 
+    // dismissInput puts AppLoad's keyboard away. Called when this screen is
+    // navigated away from, and when the thing the keyboard was raised for
+    // happens — never while the user is still in the field.
+    function dismissInput() {
+        Screens.dismissKeyboard([urlField])
+    }
+
     function start() {
+        screen.dismissInput()
         if (screen.url.length === 0) {
             return
         }

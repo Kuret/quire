@@ -10,6 +10,7 @@
 
 import QtQuick 2.5
 import "Style.js" as Style
+import "Screens.js" as Screens
 import "Paging.js" as Paging
 
 Item {
@@ -121,9 +122,17 @@ Item {
         screen.renameText = name
     }
 
+    // dismissInput puts AppLoad's keyboard away (PLAN §11 Q5). Called when the
+    // rename panel closes, either way, and when this screen is navigated away
+    // from — never while the user is still typing a name.
+    function dismissInput() {
+        Screens.dismissKeyboard([nameField])
+    }
+
     function commitRename() {
         if (screen.renameText.trim().length === 0)
             return
+        screen.dismissInput()
         screen.renameRequested(screen.renamingId, screen.renameText.trim())
         screen.renamingId = ""
         screen.renameText = ""
@@ -672,7 +681,11 @@ Item {
                     MouseArea {
                         id: cancelRenameArea
                         anchors.fill: parent
-                        onClicked: { screen.renamingId = ""; screen.renameText = "" }
+                        onClicked: {
+                            screen.dismissInput()
+                            screen.renamingId = ""
+                            screen.renameText = ""
+                        }
                     }
                 }
             }
