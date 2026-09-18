@@ -97,6 +97,13 @@ type Service struct {
 	// them. See background.go for why nothing here uses a bare `go`.
 	bg *background
 
+	// resumeMu guards the one remembered screen position (resume.go). It is
+	// deliberately in memory and not in the state file: a backend that
+	// restarted means a new session, and a position that outlived the process
+	// would be exactly the stale landing this is meant to avoid.
+	resumeMu sync.Mutex
+	resume   *resumePosition
+
 	// sortMu guards the sorts in flight, keyed by document uuid. Two paths can
 	// ask for the same document to be filed — a download finishing, and an
 	// attach noticing it never was — and they must not both ask at once. See

@@ -67,6 +67,13 @@ func (s *Service) FrontendAttached(out Sender) error {
 		s.resortOnAttach(ctx, out)
 	})
 
+	// Where the user was when the frontend closed itself on a handoff (PLAN
+	// §12.5). Before the background work below, because it decides the first
+	// screen and the user is looking at it now.
+	if err := s.sendResume(out); err != nil {
+		return err
+	}
+
 	// And the other half of keeping the library honest: documents the user
 	// deleted on the tablet. Only the frontend can tell us which those are, so
 	// attach is again the moment to ask (PLAN §12.4).
