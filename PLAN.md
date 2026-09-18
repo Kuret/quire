@@ -1217,6 +1217,44 @@ persisted.
 > cannot be lowered and cannot be minimised into reach. If Quire ever has to run
 > on one of them, closing is the only option there is.
 >
+> #### And it cannot be fixed with a `.qmd` overlay either — the tree says why
+>
+> *(2026-09-19, after two device tests and a mapping probe.)* The obvious escape
+> was a `.qmd` of our own: additive, shippable, no patched binary. Two attempts
+> failed, and the third measurement explains both and closes the line.
+>
+> **Ordering, established from source and reproduced on the host.**
+> `qt-resource-rebuilder` loads `*.qmd` from its own extension directory in its
+> `_xovi_construct`; AppLoad registers its patch in *its* `_xovi_construct` and
+> `depends-on qt-resource-rebuilder`, so the rebuilder runs first and **our file
+> is always applied before AppLoad's**. qmldiff applies a file's changes to one
+> shared tree in registration order, so a later diff *can* target what an
+> earlier one inserted — which is no help, because we are always the earlier
+> one. Naming any AppLoad-inserted node fails with *"Cannot locate element in
+> tree"*, reproduced on the host and then on the device.
+>
+> **The tree, measured by the mapping probe:**
+>
+> ```
+> MouseArea (MainView)          ← where the two branches meet
+>  ├── (0) FocusScope  z=0      ← the navigator, with DocumentView nested inside it
+>  ├── (1) Item        z=0      ← AppLoad's windowParent
+>  └── (2) Loader      z=0  hidden
+> ```
+>
+> Equal z throughout, so declaration order decides and AppLoad is second —
+> above. **The document is not a sibling of AppLoad's window**: it is nested
+> inside branch (0), sharing it with the navigator. So the only lever at the
+> level where the two meet raises the navigator along with the document, which
+> puts the app permanently behind the library — the same state
+> `windowParent.z = -1` produced from the other side, and exactly what the user
+> saw both times. **No z expresses it, and reordering is impossible because our
+> diff always runs first.**
+>
+> The remaining route is upstream: a per-app manifest flag in AppLoad itself, so
+> an app that hands a document to the reader can ask to be parented where
+> windows used to go. That work lives in a fork, not here.
+>
 > #### A probe-design rule, learned the hard way
 >
 > **A probe that can hide or disable its own UI must recover on a timer, never
