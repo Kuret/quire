@@ -597,8 +597,8 @@ site to an existing theme requires only a config entry and no code.
   browser challenge that Quire can't pass" is a complete, final answer, not a
   retry prompt.
 - Source list with per-source enable toggle and last-probe status.
-- Search box (you will need an on-screen keyboard; check whether AppLoad
-  provides one before building your own).
+- Search box (AppLoad's own keyboard serves it since v0.5.0; Quire shipped one
+  of its own until 2026-09-19 — see §11 Q5).
 - Series grid with covers. Cache on disk, downscale hard, never hold more than
   a screenful in memory.
 - Series detail: synopsis, chapter list, per-chapter download state.
@@ -2134,6 +2134,50 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    M3 therefore ships its own on-screen keyboard, as §6 M3 already allowed for.
    Keep it in QML, keep it dumb, and keep it isolated so it can be deleted
    wholesale if we ever move to an OS/AppLoad pair that provides one.
+
+   > **SETTLED 2026-09-19 — deleted, on the user's decision.** The pair did
+   > move: the keyboard merged upstream on 2026-03-28 and **v0.5.0 shipped the
+   > next day**, so the AppLoad now running has one. It was probed before
+   > anything was removed, because "AppLoad contains a keyboard" and "a keyboard
+   > appears for a focused field inside a Quire screen" are different claims and
+   > this surface has punished that difference repeatedly. Measured:
+   >
+   > ```
+   > visible=false rect=0,0 0x0      focus=none
+   > visible=true  rect=0,0 1620x544 focus=text
+   > visible=true  rect=0,0 1620x544 focus=url
+   > ```
+   >
+   > It appears on focus and follows it. **The rectangle is identical for a
+   > prose field and a URL one** — `ImhUrlCharactersOnly` changes nothing, and
+   > colons and slashes sit behind a `123` key.
+   >
+   > **That last point was my argument for keeping ours**, whose URL layout has
+   > no space bar and whole-suffix keys, and **the user overruled it, with a
+   > reason that answers it**: *"we already did stuff like our assume the https
+   > scheme, so its not as bad"*. Quire fills the scheme in, so the worst of
+   > address typing was already gone, and they would rather lose the cruft.
+   > **Recorded as their decision and their reasoning, not as a finding** — the
+   > built-in keyboard is not better at URLs, it is merely good enough once
+   > Quire stopped needing them typed in full.
+   >
+   > **The one thing that had to be checked before agreeing.** Ours was part of
+   > the layout — anchored above the pager, never over it. AppLoad's is an
+   > **overlay**, 544 px of a 2160-px screen, and it reflows nothing, so a field
+   > low on a screen would be typed into blind. Every field Quire can raise a
+   > keyboard for is anchored near the top of a top-anchored column, and the
+   > harness now asserts the geometry directly: `field bottom <= height - 544`
+   > for the search, address and rename fields. Moving any of them down fails
+   > that assertion.
+   >
+   > **Read the height, not the origin.** The reported rectangle begins at
+   > `0,0`, which cannot be right for something drawn at the bottom of the
+   > screen. If a later AppLoad reports a real origin, that constant in the
+   > harness is the thing to replace.
+   >
+   > The `qml-check.sh` glyph audit **stays**. It was written when our keyboard
+   > drew U+232B as a tofu box, but it guards every string in `ui/`, and the
+   > keyboard leaving does not make the device's four fonts any wider.
    *Cheaper alternative if M3 runs long:* §7.5 stage 5 already permits probing
    via "the popular/latest listing if search needs a query", so a v1 without a
    search box is coherent — browse-only, keyboard deferred. Prefer building the
