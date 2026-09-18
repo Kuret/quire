@@ -2209,6 +2209,28 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    > `Qt.inputMethod.hide()` is device-only and is not asserted — there is no
    > panel offscreen to obey anything. Dropping focus is the second lever
    > precisely because "should hear it" is not "does".
+   >
+   > **Clear, on the search field.** *(Requested 2026-09-19: "for the search
+   > field, add a 'Clear' option, so we dont have to backspace for a new
+   > search".)* One tap to empty the field, on the search field only — the
+   > address field and the rename field are single-shot inputs that are already
+   > emptied by the panel closing, and a control they do not need is a control
+   > in the way.
+   >
+   > **It keeps the keyboard up, and that is the whole interaction.** The stated
+   > purpose is *a new search*, so clearing is the beginning of typing rather
+   > than the end of it: it forces focus back to the field and deliberately does
+   > **not** go through `dismissInput`. The wrong version of this costs a tap to
+   > get back into the field — more than the backspacing it replaces.
+   >
+   > It appears only when there is something to clear, because a control that is
+   > always lit is one people learn to ignore, and it is a word rather than a
+   > glyph: the rest of the app labels controls in words, and the device's four
+   > fonts have already cost this project one tofu box. **The results stay on
+   > screen** until a new search actually runs — the user is mid-task, and
+   > blanking the grid on the way to typing takes away what they may be
+   > comparing against. `reset()` is what empties the screen, on a real change
+   > of source.
    *Cheaper alternative if M3 runs long:* §7.5 stage 5 already permits probing
    via "the popular/latest listing if search needs a query", so a v1 without a
    search box is coherent — browse-only, keyboard deferred. Prefer building the
