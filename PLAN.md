@@ -1255,6 +1255,39 @@ persisted.
 > an app that hands a document to the reader can ask to be parented where
 > windows used to go. That work lives in a fork, not here.
 >
+> #### The fork, and two silent failures on the way to it
+>
+> *(2026-09-19.)* `Kuret/rm-appload` carries a `rendersBelowDocument` manifest
+> flag: AppLoad keeps a second window root in the place windows were parented
+> into before the on-top change, and a window goes there only when its manifest
+> asks. **Demonstrated on hardware** — 3.27, patched AppLoad, the flag set in
+> Quire's manifest: the reader comes to the front, Quire stays behind it, other
+> apps unaffected. Default rendering is unchanged, and that is measured rather
+> than asserted: the QML the patch generates is diffed against the QML the
+> unpatched tag generates from the same tree, and the difference is two
+> additions that are inert unless an app opts in.
+>
+> Two things failed **silently** on the way, and both are traps for anyone
+> building a device binary from this project:
+>
+> - **A branch based on the wrong commit targets the wrong OS.** The first build
+>   was cut from `master`, thirty commits past the tag, including the 3.28
+>   retarget — so it would have targeted 3.28 while the device ran 3.27. Base
+>   the branch on the *tag that matches the device*, and say which tag in the
+>   brief.
+> - **A binary built from a tag today is not the binary that tag released.** The
+>   CI image `eeems/remarkable-toolchain:latest-rmpp` moved from Qt 6.8 to Qt
+>   6.10 after v0.5.3 shipped. The result compiled cleanly, installed cleanly,
+>   and then **refused to load with nothing logged anywhere** — qmldiff came up,
+>   AppLoad never registered, and no error said why. It was found by comparing
+>   the `Qt_6.x` version tags in the stock binary against ours. **Pin the
+>   toolchain to the Qt the device runs** (`5.7.119-rmpp` gives Qt 6.8 for
+>   3.27); a floating tag is a silent mismatch waiting to happen.
+>
+> That second one belongs beside this project's older lesson about return values
+> being no evidence: **a build that produces an artefact has not told you the
+> artefact runs.**
+>
 > #### A probe-design rule, learned the hard way
 >
 > **A probe that can hide or disable its own UI must recover on a timer, never
