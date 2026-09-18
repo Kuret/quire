@@ -1161,38 +1161,40 @@ persisted.
 > that `Library.documentSelection` must never be written, which cost a xochitl
 > restart to learn. There is no selection left to confuse.
 
-> ### ⚠️ FOOTNOTE 2026-09-18 — on 3.27 the reader opens *behind* the app.
+> ### ⚠️ FOOTNOTE 2026-09-19 — where the reader lands is an **AppLoad** fact.
 >
-> The handoff itself is unchanged and still works — the log says "opened in the
-> stock reader" — but on OS 3.27 with **AppLoad v0.5.3** the stock reader comes
-> up *behind* the Quire window, and the user has to quit or minimise Quire to
-> read the chapter they just tapped Read on. On 3.25 with AppLoad v0.4.2 it came
-> to the front.
+> The handoff itself has never changed and has always worked — the log says
+> "opened in the stock reader". What changed twice is *where the reader appears
+> relative to the Quire window*, and both times it looked like an OS difference
+> and was not:
 >
-> It is not a xochitl change: AppLoad v0.5.3 renders its windows above the
-> document view (upstream *"Always render windows on top of document"*, April
-> 2026). **So this is a difference between the two AppLoad versions we support,
-> not between the two OS versions**, even though that is how it was met.
+> | AppLoad | on-screen keyboard | after a handoff |
+> | --- | --- | --- |
+> | v0.4.2 | no | **reader in front**, Quire behind it |
+> | v0.5.0 | yes | **reader in front**, Quire behind it |
+> | v0.5.1 and later | yes | **Quire on top**, reader hidden behind it |
 >
-> **The fix is to close the frontend after a successful handoff.** `close()`
-> unloads the frontend only; AppLoad's README is explicit that a backend keeps
-> running unless the app kills it, and `appload.terminate()` is what would kill
-> it. **Terminate must never be called here** — a download in flight has to
-> survive being handed off to the reader, which is something the user relies on.
-> Only on success: a failed open leaves the app up, because the sentence saying
-> why is on that screen.
+> The dividing line is upstream's *"Always render windows on top of document"*
+> (April 2026), which lands after v0.5.0. **This is the second time the AppLoad
+> version rather than the OS version turned out to be the thing that mattered**
+> — the first was the private-QML capability check — so when a behaviour changes
+> after an upgrade, the extension version is the first thing to establish, not
+> the last.
 >
-> **It is done on both OS versions, deliberately.** Closing is an improvement on
-> 3.25 too — the user tapped Read, so the reader is what they want in front —
-> and the alternative is two behaviours keyed off a version Quire cannot detect
-> cleanly. One behaviour that is right on both beats a fork on a fact we would
-> have to guess.
+> Quire therefore runs on **3.26 with AppLoad v0.5.0**: past the keyboard merge,
+> behind the stacking change. The library calls §6 M5 and §12.4 depend on were
+> verified present in that image — `moveEntries`, `moveEntriesToTrash`,
+> `deleteEntries`, `entryForId`, `parentIdForId`, `createCollectionWrapper`,
+> `setLastOpenedPage`, `openDocument`, and `com.remarkable` intact.
 >
-> **And hiding instead is not available. Measured, not assumed.** Closing is its
-> own annoyance — *"it does show the comic now but it causes Quire to exit,
-> previously it was still there when exiting the comic"* — so the obvious fix
-> was to hide the frontend and restore it when the reader closed. Both halves
-> were probed and both failed:
+> **What was built for v0.5.3 and then removed.** On v0.5.3 the frontend closed
+> itself after a successful handoff, because closing was the only way the reader
+> became visible. That is gone, and so is §12.5's resume position, which existed
+> only to soften it. Both were reverted as separate commits so either can be put
+> back if a later AppLoad brings the stacking behaviour with it.
+>
+> **Hiding instead of closing is not available, and that measurement stands
+> whatever we run.** It was probed on v0.5.3 and failed twice:
 >
 > - **There is no restore signal.** `Global.documentViewLoader` was sampled
 >   every 400 ms across an open and a close and never transitioned:
@@ -1204,10 +1206,9 @@ persisted.
 >   is nothing left on screen to tap, and AppLoad will not start a second
 >   frontend while one exists. Recovering the device took a xochitl restart.
 >
-> So: on AppLoad v0.5.3 a fullscreen app's window renders above the document
-> view, cannot be lowered, and cannot be minimised without becoming unreachable.
-> **Closing is the only way the reader is visible**, and §12.5's restore is what
-> makes closing cheap instead of making it clever.
+> So on the releases that render above the document, a fullscreen app's window
+> cannot be lowered and cannot be minimised into reach. If Quire ever has to run
+> on one of them, closing is the only option there is.
 >
 > #### A probe-design rule, learned the hard way
 >
@@ -2764,42 +2765,21 @@ worth knowing on its own.
   list is work nobody asked for. Text rows, like the watched list.
 - Paged like every other list (§12.1).
 
-#### Coming back from the reader
+#### Coming back from the reader *(built 2026-09-18, removed 2026-09-19)*
 
-Handing a document to the stock reader closes the frontend (§6 M6's footnote
-above), so the user comes back from a comic to whatever screen the app opens
-on — several taps from the chapter list they were reading. Rather than making
-the close cleverer, which the measurements say is not possible, this makes
-coming back cheap.
+For one day Quire remembered the chapter list a handoff was made from and put
+the next frontend back on it. It existed only to soften the frontend closing
+itself, and on AppLoad v0.5.0 there is no close to soften: the reader comes
+forward by itself and Quire is still behind it when the comic is closed, which
+is the behaviour the user asked to get back.
 
-- **The position lives in the backend's memory.** Not in QML, which is unloaded
-  — that is the whole problem — and deliberately **not in the state file**: that
-  file is what a user exports and imports to move a setup between devices, and a
-  reading position is not configuration. Losing the position when the backend
-  restarts is *correct* rather than a limitation: a restarted backend means the
-  app was fully stopped or the device rebooted, which is a new session. The
-  backend outliving its frontend is not an assumption — it is the same property
-  in-flight downloads rely on.
-- **It is recorded on the reader handoff**, which is the only thing that closes
-  the frontend, and pushed on the next attach beside the source list and the
-  watched list. A handoff that failed closed nothing and records nothing.
-- **Restored once.** A position is a place the user left, not a screen the app
-  opens on from then on.
-- **Three ways it expires, and all three land on the sources screen rather than
-  an error:** older than two hours (long enough to read a chapter and come
-  back, short enough that a new session starts fresh), the source removed while
-  they were reading, or the backend restarted.
-- **The page comes back too, clamped.** A long series is many pages, and page 1
-  of forty is barely better than the sources screen. The stored page can be past
-  the end of a list that has since been grouped into volumes, and landing past
-  the end is a blank screen that reads as a broken app.
-- **The view mode is never restored.** A series that published volumes last week
-  may not today, and restoring a Volumes view for a series with no volumes is
-  exactly the bug `volumesAvailable` was written to stop. The list opens the way
-  the fresh series detail says it should.
-- **The Back destination is validated in the backend**, against the three list
-  screens a series can be opened from. It ends up behind a button the user
-  presses without looking, so it is never passed through unchecked.
+It is recorded here rather than silently deleted because the shape of the
+decision is worth keeping if the stacking behaviour ever returns: the position
+belonged in the **backend's memory**, not in the state file — that file is what
+a user exports to move a setup between devices, and a reading position is not
+configuration — and losing it when the backend restarts was *correct*, because
+a restarted backend means a new session. The revert is one commit, and so is
+the close it was built for.
 
 **A note on answering at all.** *(2026-09-18.)* Every one of these handlers is a
 reply to a question the backend is blocking on, and until this date each called
