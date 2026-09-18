@@ -397,6 +397,45 @@ Window {
         // source" is the right label for a screen nobody is typing into.
         win.want("and searching follows that too", seriesGrid.searching, false)
 
+        // ---- Clear, on the search field ----------------------------------
+        //
+        // Asked for as a way to start a *new* search without holding backspace
+        // down, which is what decides its behaviour: clearing is the beginning
+        // of typing, so it must not put the keyboard away.
+
+        // Absent on an empty field: a control that is always lit is one people
+        // learn to ignore.
+        seriesGrid.query = ""
+        var clearButton = win.findChild(seriesGrid, "clearSearchButton")
+        win.want("an empty search offers nothing to clear", clearButton.visible, false)
+
+        // Present as soon as there is something to clear.
+        seriesGrid.query = "lantern"
+        win.want("a typed search offers Clear", clearButton.visible, true)
+
+        // A finger-sized target on an e-ink screen, asserted as geometry.
+        win.want("Clear is a real tap target",
+                 clearButton.width >= 120 && clearButton.height >= 60, true)
+
+        // It empties the field.
+        searchField.forceActiveFocus()
+        searchField.text = "lantern"
+        win.findChild(seriesGrid, "clearSearchArea").clicked(null)
+        win.want("Clear empties the field", searchField.text, "")
+        win.want("and the screen agrees", seriesGrid.query, "")
+
+        // **And keeps the keyboard up.** Tap Clear, keyboard vanishes, tap the
+        // field again to carry on -- that is more taps than the backspacing
+        // this replaced.
+        win.want("Clear keeps the field focused", searchField.activeFocus, true)
+        win.want("so the keyboard stays up", seriesGrid.searching, true)
+
+        // The results stay until a new search runs: the user is mid-task, and
+        // blanking the grid on the way to typing takes away what they may be
+        // comparing against.
+        win.want("Clear does not empty the grid", seriesGrid.model.count > 0, true)
+        seriesGrid.dismissInput()
+
         // Typing does not dismiss anything. The failure mode of an over-eager
         // rule is a field that closes its own keyboard mid-word.
         searchField.forceActiveFocus()

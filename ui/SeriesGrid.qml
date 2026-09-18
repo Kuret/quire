@@ -131,7 +131,10 @@ Item {
                 objectName: "searchField"
                 anchors {
                     left: parent.left; leftMargin: Style.gap
-                    right: parent.right; rightMargin: Style.gap
+                    // Stops where Clear starts, so the two never overlap and a
+                    // long query cannot run underneath the button.
+                    right: clearButton.visible ? clearButton.left : parent.right
+                    rightMargin: Style.gap
                     verticalCenter: parent.verticalCenter
                 }
                 clip: true
@@ -164,6 +167,62 @@ Item {
                 font.pointSize: Style.bodySize
                 color: Style.rule
                 visible: screen.query.length === 0 && !queryField.activeFocus
+            }
+
+            // Clear, asked for as a way to start a *new* search without holding
+            // backspace down. That purpose decides the behaviour: clearing is
+            // the beginning of typing, not the end of it, so it **keeps the
+            // field focused and the keyboard up**. Sending it through
+            // dismissInput would cost the user a tap to get back into the field
+            // — more taps than the backspacing they asked to be rid of.
+            //
+            // A word, not a glyph: the rest of the app labels its controls in
+            // words ("Latest", "Keep", "Save"), and the device's four fonts
+            // have already cost this project one tofu box.
+            Rectangle {
+                id: clearButton
+                objectName: "clearSearchButton"
+                anchors {
+                    right: parent.right; rightMargin: Style.gap / 2
+                    verticalCenter: parent.verticalCenter
+                }
+                // Only when there is something to clear. A control that is
+                // always lit on an empty field is one people learn to ignore.
+                visible: screen.query.length > 0
+                width: 150
+                height: Style.buttonHeight - 8
+                color: clearArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.rule
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Clear"
+                    font.pointSize: Style.smallSize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: clearArea
+                    objectName: "clearSearchArea"
+                    anchors.fill: parent
+                    onClicked: {
+                        screen.query = ""
+                        queryField.text = ""
+                        // Deliberately *not* dismissInput: the user is about to
+                        // type. Focus is forced rather than assumed, because a
+                        // tap on this button does not move focus by itself and
+                        // the field may never have had it.
+                        queryField.forceActiveFocus()
+                        // The results on screen stay until a new search runs.
+                        // The user is mid-task, and blanking the grid on the
+                        // way to typing is a jolt that also takes away what
+                        // they might be comparing against. `reset()` is what
+                        // empties the screen, and it is called on a real
+                        // change of source.
+                    }
+                }
             }
         }
 
