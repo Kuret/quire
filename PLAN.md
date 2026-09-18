@@ -2178,6 +2178,37 @@ Answer by experiment, then move the answer into §3.1 and delete it here.
    > The `qml-check.sh` glyph audit **stays**. It was written when our keyboard
    > drew U+232B as a tofu box, but it guards every string in `ui/`, and the
    > keyboard leaving does not make the device's four fonts any wider.
+   >
+   > **And the cost of a keyboard we do not own, found the day after.** *"Seems
+   > the keyboard will just stay active once toggled"* — AppLoad's panel raises
+   > itself when a field takes focus and **lowers itself for nothing**. Ours was
+   > part of the layout and went away with the screen that owned it; this one is
+   > an overlay that stays up over the pager and the last rows of whatever comes
+   > next. Nothing about that was foreseeable from "the keyboard appears and
+   > follows focus", which is what the probe asked; it is the ordinary price of
+   > depending on someone else's component, and it is worth stating beside the
+   > decision to adopt it.
+   >
+   > Quire dismisses it on navigation (`showScreen`, the one funnel every route
+   > goes through — this is the payoff of that refactor), on accept, and when a
+   > panel closes either way. **Never while the user is still in the field**: a
+   > rule that closes its own keyboard mid-word would be worse than one that
+   > overstays.
+   >
+   > **The order is the design, and it was measured before the code was
+   > written:** `Qt.inputMethod.hide` is a function and does not throw; a tap
+   > somewhere else does **not** move focus; and `hide()` does not clear focus
+   > either. So focus is dropped **first** and the panel hidden **second** —
+   > hiding while a field is still focused is an invitation to be raised again
+   > by the next focus event, and hiding harder produces a flicker rather than a
+   > dismissal.
+   >
+   > **What is covered and what is not.** The harness drives the focus half in
+   > full: that a tap elsewhere leaves focus alone, that dismissing drops it,
+   > that accept dismisses, and that typing does not. Whether the panel *obeys*
+   > `Qt.inputMethod.hide()` is device-only and is not asserted — there is no
+   > panel offscreen to obey anything. Dropping focus is the second lever
+   > precisely because "should hear it" is not "does".
    *Cheaper alternative if M3 runs long:* §7.5 stage 5 already permits probing
    via "the popular/latest listing if search needs a query", so a v1 without a
    search box is coherent — browse-only, keyboard deferred. Prefer building the
