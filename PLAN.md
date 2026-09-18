@@ -1168,11 +1168,18 @@ persisted.
 > relative to the Quire window*, and both times it looked like an OS difference
 > and was not:
 >
-> | AppLoad | on-screen keyboard | after a handoff |
-> | --- | --- | --- |
-> | v0.4.2 | no | **reader in front**, Quire behind it |
-> | v0.5.0 | yes | **reader in front**, Quire behind it |
-> | v0.5.1 and later | yes | **Quire on top**, reader hidden behind it |
+> | AppLoad | on-screen keyboard | after a handoff | how we know |
+> | --- | --- | --- | --- |
+> | v0.4.2 | no | **reader in front**, Quire behind it | used on 3.25 |
+> | v0.5.0 | yes | **reader in front**, Quire behind it | **measured on hardware 2026-09-19**, on 3.26 |
+> | v0.5.1 and later | yes | **Quire on top**, reader hidden behind it | met on 3.27 |
+>
+> The middle row was an inference from an absent commit when 3.26 was chosen.
+> The user has since tapped Read on it and watched the reader come forward with
+> Quire behind it: **the commit is the explanation, the tap is the evidence.**
+> Both workarounds built for v0.5.3 — the close after a handoff, and the resume
+> position that existed to soften it — were reverted on the strength of the
+> inference, and the same test confirms the reverts.
 >
 > The dividing line is upstream's *"Always render windows on top of document"*
 > (April 2026), which lands after v0.5.0. **This is the second time the AppLoad
@@ -2868,3 +2875,22 @@ than reinvented.
   that stayed is not mentioned at all: it is a tidy-up rather than the thing the
   user asked for, and claiming one that did not happen would be worse than
   saying nothing.
+
+  **It runs after any delete that empties a series, not only after the series
+  delete.** *(corrected 2026-09-19.)* It was wired into the series delete alone,
+  so removing a series from its Downloaded row tidied up and removing its last
+  chapter from the chapter row did not — the same end state with two outcomes,
+  met on 3.26 as a Kingdom folder that stayed. Both deletes now reach one
+  function. The ordering it depends on is the mirror of an older bug: *"are
+  there records left for this series?"* is asked **after** the record is
+  dropped, exactly as `reclaimPages` reads the remaining records after the
+  removal — asked first, it finds the record on its way out, concludes the
+  series still has downloads, and never fires.
+
+  **There is deliberately no sweep for folders left behind before this.** The
+  user has one stray folder from the gap above and can remove it by hand. A pass
+  that hunts the library for empty folders to delete is a categorically more
+  dangerous thing than a cleanup attached to an action the user just took: it
+  runs without anyone asking, against folders nobody mentioned, on a surface
+  where the wrong argument is accepted and ignored. **If you are reading this
+  and about to add one because the gap looks like an oversight: it is not.**
