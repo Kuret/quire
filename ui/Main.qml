@@ -131,58 +131,6 @@ Rectangle {
             "detail": answer.detail})
     }
 
-    // The page to land on when a restored series' chapters arrive, or 0.
-    //
-    // It cannot be applied when MessageResume lands: the list is empty until
-    // the detail comes back, so a page set then would be clamped to 1 by the
-    // screen's own binding and lost.
-    property int pendingResumePage: 0
-
-    // wherePositionIs is what the backend remembers when this frontend closes
-    // itself for a handoff (PLAN §12.5), or null when there is nothing worth
-    // remembering.
-    //
-    // Only the chapter list. It is the only screen a handoff can be made from,
-    // and the point is to remove a few taps after reading rather than to model
-    // navigation history.
-    //
-    // **The view mode is deliberately not included.** A series that published
-    // volumes last week may not today, and restoring a Volumes view for a
-    // series with no volumes is the bug `volumesAvailable` exists to stop. The
-    // restored list opens the way the fresh series detail says it should.
-    function wherePositionIs() {
-        if (root.screen !== "series" || !root.currentSeriesId)
-            return null
-        return {
-            "sourceId": root.currentSourceId,
-            "sourceName": root.currentSourceName,
-            "seriesId": root.currentSeriesId,
-            "title": chapterListScreen.seriesTitle,
-            "page": chapterListScreen.page,
-            "cameFrom": root.seriesCameFrom
-        }
-    }
-
-    // applyResume puts the user back where the handoff closed them (PLAN §12.5).
-    //
-    // Whether the position is worth restoring at all — how old it is, whether
-    // the source still exists — was decided in the backend, which is the side
-    // that outlives this one and the side that knows (PLAN §2). Nothing is
-    // second-guessed here.
-    function applyResume(msg) {
-        if (!msg || msg.screen !== "series" || !msg.sourceId || !msg.seriesId)
-            return
-        root.currentSourceId = msg.sourceId
-        root.currentSourceName = msg.sourceName ? msg.sourceName : ""
-        root.pendingResumePage = msg.page ? msg.page : 1
-        root.openSeries(msg.seriesId, msg.title ? msg.title : "")
-        // After openSeries, which works the origin out from the screen it was
-        // called on — and it was called on whatever screen the app opened with.
-        // The backend checked this one against the screens Back may lead to.
-        if (msg.cameFrom)
-            root.seriesCameFrom = msg.cameFrom
-    }
-
     // bridge is ReaderHandoff.qml, or null when its imports of xochitl's own QML
     // did not resolve. Every handler below goes through it, and through
     // Answers.js, so that "the bridge is missing" and "the bridge threw" both
@@ -198,7 +146,7 @@ Rectangle {
         // The reply, whether the rows must forget this document, and whether the
         // frontend gets out of the reader's way — one decision, made in
         // Answers.js where the harness can drive it.
-        var answer = Answers.handoff(root.bridge(), documentUuid, -1, root.wherePositionIs())
+        var answer = Answers.handoff(root.bridge(), documentUuid, -1)
 
         // Tell the backend, which owns both the record and the wording.
         root.send(Msg.OpenInReader, answer.reply)
@@ -424,10 +372,6 @@ Rectangle {
             root.fillDownloaded(msg)
             return
 
-        case Msg.Resume:
-            root.applyResume(msg)
-            return
-
         case Msg.DeleteFolder:
             // The backend listed that folder and found it empty; this side is
             // the only one that can delete anything. Nothing here decides
@@ -633,16 +577,6 @@ Rectangle {
         // so anything picked before this refill has to be checked against what
         // is actually on screen now.
         chapterListScreen.pruneSelection()
-
-        // And the page, now that there are rows to count. Clamped, because the
-        // stored page can be past the end of a list that has since been grouped
-        // into volumes or lost chapters — landing on a blank page reads as a
-        // broken app rather than a restored one.
-        if (root.pendingResumePage) {
-            chapterListScreen.page = Screens.resumePage(root.pendingResumePage,
-                                                        chapterListScreen.totalPages)
-            root.pendingResumePage = 0
-        }
     }
 
     // ---- watched series (PLAN §12.2) ---------------------------------------

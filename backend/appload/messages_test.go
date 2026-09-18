@@ -58,7 +58,6 @@ func TestMessageTypeValues(t *testing.T) {
 		"DownloadedList":        66,
 		"DeleteFolder":          67,
 		"FolderDeleted":         68,
-		"Resume":                69,
 		"SetConsultRobots":      70,
 		"GetCacheSize":          71,
 		"CacheStatus":           72,

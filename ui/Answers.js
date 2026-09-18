@@ -167,11 +167,7 @@ function manyFailure(uuids, detail) {
 //
 // It is here rather than in Main.qml so the harness can drive it: Main.qml
 // imports AppLoad and cannot be instantiated off a device.
-// `where` is the screen the frontend is about to close on, or null. It rides on
-// the *successful* reply only: a handoff that did not happen did not close
-// anything, so there is nowhere to come back to and the backend must not be
-// told there is (PLAN §12.5).
-function handoff(bridge, uuid, page, where) {
+function handoff(bridge, uuid, page) {
     var opened = false
     var detail = NO_BRIDGE
     if (bridge) {
@@ -184,12 +180,8 @@ function handoff(bridge, uuid, page, where) {
         }
     }
 
-    if (opened) {
-        var reply = {"documentUuid": uuid}
-        if (where)
-            reply.resume = where
-        return {"reply": reply, "forget": false, "close": true}
-    }
+    if (opened)
+        return {"reply": {"documentUuid": uuid}, "forget": false, "close": true}
     return {
         "reply": {"documentUuid": uuid, "missing": true, "detail": detail},
         "forget": true,

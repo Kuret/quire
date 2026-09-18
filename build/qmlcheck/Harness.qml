@@ -1654,43 +1654,6 @@ Window {
         win.want("no bridge does not close the app", noReader.close, false)
         win.want("and says why", noReader.reply.detail, Answers.NO_BRIDGE)
 
-        // ---- coming back from the reader (PLAN §12.5) ----------------------
-        //
-        // The handoff closes the frontend, because on AppLoad v0.5.3 that is
-        // the only way the reader is visible at all. So the position the user
-        // closed on rides with the successful reply, and the next frontend is
-        // put back on it.
-
-        var here = {"sourceId": "src-a", "sourceName": "Example Reader",
-                    "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
-                    "page": 4, "cameFrom": "downloaded"}
-
-        var went = Answers.handoff({open: function () { return true }}, "doc-a", -1, here)
-        win.want("a successful handoff carries the position", went.reply.resume.page, 4)
-        win.want("naming the series it was on", went.reply.resume.seriesId, "/manga/lantern/")
-        win.want("and where Back should go", went.reply.resume.cameFrom, "downloaded")
-
-        // A handoff that did not happen did not close anything, so there is
-        // nowhere to come back to and the backend must not be told there is.
-        var failed = Answers.handoff({open: function () { return false }}, "doc-a", -1, here)
-        win.want("a failed handoff carries no position", failed.reply.resume, undefined)
-        var threwHandoff = Answers.handoff(angryBridge(), "doc-a", -1, here)
-        win.want("nor does one that threw", threwHandoff.reply.resume, undefined)
-
-        // Nowhere worth remembering: the handoff was made from a screen this
-        // does not restore, so nothing rides along.
-        var nowhere = Answers.handoff({open: function () { return true }}, "doc-a", -1, null)
-        win.want("a handoff from nowhere carries no position", nowhere.reply.resume, undefined)
-
-        // The page is clamped when it is applied, because the stored one can be
-        // past the end: the series has since been grouped into volumes, or lost
-        // chapters. Landing past the end is a blank screen.
-        win.want("the page is restored when it still exists", Screens.resumePage(4, 9), 4)
-        win.want("the last page is used when it does not", Screens.resumePage(40, 9), 9)
-        win.want("a list with nothing in it is still page 1", Screens.resumePage(4, 0), 1)
-        win.want("page 0 is page 1", Screens.resumePage(0, 9), 1)
-        win.want("and so is a negative one", Screens.resumePage(-3, 9), 1)
-
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
     }

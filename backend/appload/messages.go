@@ -328,24 +328,6 @@ const (
 	MessageDeleteFolder  MessageType = 67
 	MessageFolderDeleted MessageType = 68
 
-	// MessageResume is BE→UI, JSON {screen, sourceId, sourceName, seriesId,
-	// title, page, cameFrom}. Pushed on attach, and only when there is a
-	// position worth restoring.
-	//
-	// Handing a document to the stock reader closes the frontend (PLAN §6 M6,
-	// footnote 2026-09-18), so the user comes back from a comic to whatever
-	// screen the app opens on. This puts them back on the chapter list they
-	// tapped Read from.
-	//
-	// It is pushed rather than asked for, like the source list and the watched
-	// list, and for the same reason: a frontend that asks races the socket
-	// coming up, and this one has no second chance — by the time anything else
-	// happens the user has already navigated.
-	//
-	// There is no UI→BE counterpart. The position is recorded on the reader
-	// handoff, which is the only thing that closes the frontend.
-	MessageResume MessageType = 69
-
 	// The 70s are device-wide settings — things that are about Quire rather
 	// than about any one source.
 	//
@@ -434,7 +416,6 @@ var messageNames = map[MessageType]string{
 	MessageDownloadedList:        "DownloadedList",
 	MessageDeleteFolder:          "DeleteFolder",
 	MessageFolderDeleted:         "FolderDeleted",
-	MessageResume:                "Resume",
 	MessageSetConsultRobots:      "SetConsultRobots",
 	MessageGetCacheSize:          "GetCacheSize",
 	MessageCacheStatus:           "CacheStatus",

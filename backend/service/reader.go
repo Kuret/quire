@@ -18,18 +18,6 @@ type openRequest struct {
 	// Missing is set by the frontend when Library.entryForId returned null.
 	Missing bool `json:"missing,omitempty"`
 
-	// Resume is where the frontend was when it closed itself to get out of the
-	// reader's way. Sent with the successful open because that is the moment
-	// the frontend closes; see resume.go for why it is remembered in memory.
-	Resume *struct {
-		SourceID   string `json:"sourceId"`
-		SourceName string `json:"sourceName"`
-		SeriesID   string `json:"seriesId"`
-		Title      string `json:"title"`
-		Page       int    `json:"page"`
-		CameFrom   string `json:"cameFrom"`
-	} `json:"resume,omitempty"`
-
 	// Detail is why it did not open, when the cause was not simply a UUID that
 	// no longer resolves — a bridge that is not there, or a call that threw.
 	// It changes nothing here; it is how a device-side failure reaches this
@@ -53,13 +41,6 @@ func (s *Service) openInReader(out Sender, req openRequest) error {
 	}
 	if !req.Missing {
 		s.log.Info("opened in the stock reader", "document", req.DocumentUUID)
-		if r := req.Resume; r != nil {
-			s.rememberPosition(resumePosition{
-				SourceID: r.SourceID, SourceName: r.SourceName,
-				SeriesID: r.SeriesID, Title: r.Title,
-				Page: r.Page, CameFrom: r.CameFrom,
-			})
-		}
 		return nil
 	}
 

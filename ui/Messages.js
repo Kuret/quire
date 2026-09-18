@@ -82,7 +82,6 @@ var ListDownloaded = 65
 var DownloadedList = 66
 var DeleteFolder = 67
 var FolderDeleted = 68
-var Resume = 69
 
 // The one global robots.txt switch (PLAN §7.4, off by default). The current
 // value comes back on the Pong status rather than in a reply of its own.
