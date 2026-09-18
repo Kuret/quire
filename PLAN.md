@@ -1111,6 +1111,33 @@ persisted.
 > **The `.qmd` route stays documented, not deleted**, in case a future OS closes
 > this door. Everything below is that fallback, no longer the plan of record.
 
+> ### ⚠️ FOOTNOTE 2026-09-18 — on 3.27 the reader opens *behind* the app.
+>
+> The handoff itself is unchanged and still works — the log says "opened in the
+> stock reader" — but on OS 3.27 with **AppLoad v0.5.3** the stock reader comes
+> up *behind* the Quire window, and the user has to quit or minimise Quire to
+> read the chapter they just tapped Read on. On 3.25 with AppLoad v0.4.2 it came
+> to the front.
+>
+> It is not a xochitl change: AppLoad v0.5.3 renders its windows above the
+> document view (upstream *"Always render windows on top of document"*, April
+> 2026). **So this is a difference between the two AppLoad versions we support,
+> not between the two OS versions**, even though that is how it was met.
+>
+> **The fix is to close the frontend after a successful handoff.** `close()`
+> unloads the frontend only; AppLoad's README is explicit that a backend keeps
+> running unless the app kills it, and `appload.terminate()` is what would kill
+> it. **Terminate must never be called here** — a download in flight has to
+> survive being handed off to the reader, which is something the user relies on.
+> Only on success: a failed open leaves the app up, because the sentence saying
+> why is on that screen.
+>
+> **It is done on both OS versions, deliberately.** Closing is an improvement on
+> 3.25 too — the user tapped Read, so the reader is what they want in front —
+> and the alternative is two behaviours keyed off a version Quire cannot detect
+> cleanly. One behaviour that is right on both beats a fork on a fact we would
+> have to guess.
+
 Keep the `.qmd` **as small as physically possible**. Every line breaks on the
 next OS update.
 
@@ -2656,6 +2683,19 @@ worth knowing on its own.
 - **No covers.** Records carry no cover URL and inventing a lookup to decorate a
   list is work nobody asked for. Text rows, like the watched list.
 - Paged like every other list (§12.1).
+
+**A note on answering at all.** *(2026-09-18.)* Every one of these handlers is a
+reply to a question the backend is blocking on, and until this date each called
+into `ReaderHandoff.qml` unprotected. On 3.27 one of those calls threw, the
+exception unwound past the `send` that would have reported it, and the backend
+sat out its thirty-second ceiling — *"no answer about a filing"* — while the
+error sat in a QML console nobody reads on a tablet. `ui/Answers.js` now stands
+between every handler and the bridge: a throw becomes the negative reply the
+handler already knew how to send, carrying the exception text to the backend's
+log. **The timeouts are backstops, and a backstop reached routinely is a
+mechanism.** The harness asserts first that nothing escapes at all, because the
+symptom of a missing catch is a script that dies where it stands — the same
+silence, in the one place it could otherwise hide.
 
 **A note on testing an inert row.** The harness first asserted "tapping the
 removed-source row does nothing" by emitting `clicked()` on its MouseArea — which
