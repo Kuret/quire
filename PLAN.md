@@ -1111,6 +1111,56 @@ persisted.
 > **The `.qmd` route stays documented, not deleted**, in case a future OS closes
 > this door. Everything below is that fallback, no longer the plan of record.
 
+> ### ⚠️ FOOTNOTE 2026-09-18 — an id string, never an object. Six times now.
+>
+> Quire drove two of its three library operations through xochitl's tree
+> explorer: select the documents, then `selectionMove(folderId)` or
+> `selectionMoveToTrash()`. On **OS 3.27 inside an AppLoad app that stops
+> working**, and the first symptom was a download whose folder was created and
+> whose document never moved, with *no reply to the backend at all*.
+>
+> **What is missing is `explorer.selection`, not the explorer.** Measured, not
+> inferred from the stack trace:
+>
+> ```
+> NavigationManager=object  treeExplorer=[xofm::libs::explorer::TreeExplorer(0x273eb4b0)]
+> ```
+>
+> The explorer resolves; its `selection` is undefined, and the old code's first
+> act was `selection.clear()`. Deleting guarded with `if (!ex || !ex.selection)`
+> and so returned an honest failure; sorting did not, and threw. That is the
+> whole difference between the two symptoms.
+>
+> **The replacement is library-level and needs no UI component at all.** All
+> three are in xochitl's own binary on 3.25 and 3.27, and all three were
+> measured on 3.27 against the state on disk:
+>
+> | call | result |
+> | --- | --- |
+> | `moveEntries([uuid], destUuid)` | **moved** |
+> | `moveEntries([entry.id], destEntry.id)` | **moved** |
+> | `moveEntries([entry], destEntry)` | **accepted and ignored** |
+> | `moveEntriesToTrash([uuid])` | **trashed** |
+> | `moveEntriesToTrash([entry])` | **accepted and ignored** |
+> | `deleteEntries([entry.id])`, after trashing | **deleted** |
+>
+> So: **every argument on this surface is an id string, and an object where an
+> id belongs is accepted and ignored.** That is now six instances — the folder
+> parent, `deleteEntries`, `moveEntries`, `moveEntriesToTrash`, and the two
+> earlier librarian cases — and it is no longer a list of anecdotes. It is the
+> rule. The corollary is the older one: a return value is never evidence, so
+> every one of these is followed by reading the state back.
+>
+> Quire passes `Library.entryForId(uuid).id` rather than the uuid. They are the
+> same string on 3.25 and 3.27; rm-librarian had to introduce exactly that
+> mapping on 3.28 when the controller stopped accepting raw uuids. It is free
+> now and is already the 3.28 form.
+>
+> **One path, not two.** Since every call works on both OS versions, the
+> explorer is gone rather than kept as a 3.25 fallback — and with it the trap
+> that `Library.documentSelection` must never be written, which cost a xochitl
+> restart to learn. There is no selection left to confuse.
+
 > ### ⚠️ FOOTNOTE 2026-09-18 — on 3.27 the reader opens *behind* the app.
 >
 > The handoff itself is unchanged and still works — the log says "opened in the
