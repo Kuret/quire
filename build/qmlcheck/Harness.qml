@@ -241,22 +241,6 @@ Window {
     }
     PagerBar    { id: lonePager;   width: 1620 }
 
-    // Both keyboard layouts, so the URL one can be inspected without driving a
-    // screen into its search state.
-    Keyboard {
-        id: textKeys
-        objectName: "textKeys"
-        width: 1620
-        layout: "text"
-        onKeyTyped: { win.typed.push(text); win.typedChanged() }
-    }
-    Keyboard {
-        id: urlKeys
-        objectName: "urlKeys"
-        width: 1620
-        layout: "url"
-        onKeyTyped: { win.typed.push(text); win.typedChanged() }
-    }
 
     Component.onCompleted: {
         for (var i = 0; i < 40; ++i)
@@ -328,14 +312,51 @@ Window {
         win.want("the log opens at the newest page", settings.logPage > 1, true)
         win.want("the log has a total", lp.totalPages > 1, true)
 
-        // The keyboard must not move the pager or change the page size.
-        var sizeBefore = seriesGrid.pageSize
-        var pagerYBefore = win.findChild(seriesGrid, "seriesPager").y
-        seriesGrid.searching = true
-        win.want("the keyboard does not resize the page", seriesGrid.pageSize, sizeBefore)
-        win.want("the keyboard does not move the pager",
-                 win.findChild(seriesGrid, "seriesPager").y, pagerYBefore)
-        seriesGrid.searching = false
+        // ---- AppLoad's keyboard, and what it covers ---------------------
+        //
+        // Quire's own keyboard was part of the layout: it took the bottom of
+        // the screen and the screens were built around it. AppLoad's is an
+        // *overlay* — measured on hardware 2026-09-19, **1620×544** on a
+        // 2160-tall screen, in the same place for a prose field and a URL one.
+        //
+        // So the question is no longer "does the keyboard move the pager", it
+        // is **"does the keyboard cover the field being typed into"**. That is
+        // geometry, and it can be asked honestly without a device.
+        //
+        // The panel's rectangle came back with a `0,0` origin, which cannot be
+        // right for something drawn at the bottom of the screen, so only its
+        // *height* is trusted here. If a later AppLoad reports a real origin,
+        // this constant is the thing to replace with it.
+        var panelHeight = 544
+        var safeBottom = win.height - panelHeight
+
+        function fieldBottom(screen, name) {
+            var field = win.findChild(screen, name)
+            if (!field)
+                return -1
+            var p = field.mapToItem(win.contentItem, 0, field.height)
+            return p.y
+        }
+
+        // Every field a keyboard can be raised for, with its screen showing.
+        seriesGrid.visible = true
+        win.want("the search field sits above the keyboard",
+                 fieldBottom(seriesGrid, "searchField") <= safeBottom, true)
+        win.want("and it is a real field, not a label",
+                 win.findChild(seriesGrid, "searchField") !== null, true)
+
+        addSource.visible = true
+        addSource.reset()
+        win.want("the address field sits above the keyboard",
+                 fieldBottom(addSource, "urlField") <= safeBottom, true)
+
+        sourceList.renamingId = "src-a"
+        sourceList.visible = true
+        win.want("the rename field sits above the keyboard",
+                 fieldBottom(sourceList, "nameField") <= safeBottom, true)
+        sourceList.renamingId = ""
+        seriesGrid.visible = false
+        addSource.visible = false
 
         // ---- PLAN §12.2: watched series --------------------------------
         //
@@ -498,50 +519,6 @@ Window {
 
         settings.consultRobots = false
         win.want("the toggle follows the push back", robotsState.text, "Off")
-
-        // ---- the on-screen keyboard ------------------------------------
-        //
-        // The device ships Noto Sans, Noto Serif, NotoSansUI and Noto Mono and
-        // nothing else. U+232B ERASE TO THE LEFT is in Noto Sans *Symbols*,
-        // which is not installed, so the backspace key rendered as a tofu box.
-        // It is drawn now, and the assertion is that nothing in the keyboard
-        // depends on a glyph at all.
-        var backKey = win.findChild(urlKeys, "keyboardBackspace")
-        win.want("the backspace key exists", backKey !== null, true)
-        var glyph = null
-        for (var g = 0; g < backKey.children.length; ++g)
-            if (backKey.children[g].toString().indexOf("QQuickCanvasItem") === 0)
-                glyph = backKey.children[g]
-        win.want("the backspace glyph is drawn, not typed", glyph !== null, true)
-        win.want("the drawn glyph has a size", glyph.width > 0 && glyph.height > 0, true)
-        win.want("the backspace key carries no text",
-                 win.countLabel(backKey, "") === 0 && win.visibleKeyLabels(backKey).length, 0)
-
-        // A URL layout with two full stops had one key that did nothing the
-        // other did not, and a space bar that silently was not one.
-        win.want("the URL layout has exactly one full stop", win.countLabel(urlKeys, "."), 1)
-        win.want("the URL layout has no space bar",
-                 win.findChild(urlKeys, "keyboardSpace").visible, false)
-        win.want("the text layout keeps its space bar",
-                 win.findChild(textKeys, "keyboardSpace").visible, true)
-        win.want("the text layout has one full stop", win.countLabel(textKeys, "."), 1)
-
-        // The suffix keys, in the URL layout only, inserting the whole string.
-        var urlSuffixes = win.findChildren(urlKeys, "keyboardSuffix", [])
-        var textSuffixes = win.findChildren(textKeys, "keyboardSuffix", [])
-        win.want("the URL layout has two suffix keys", urlSuffixes.length, 2)
-        win.want("the text layout has none", textSuffixes.length, 0)
-
-        win.typed = []
-        urlSuffixes[0].children[1].clicked(null)
-        urlSuffixes[1].children[1].clicked(null)
-        win.want("the first suffix types .com", win.typed[0], ".com")
-        win.want("the second suffix types .org", win.typed[1], ".org")
-
-        // The row still fits the panel without reflowing or shrinking keys.
-        win.want("the URL keyboard fits the panel", urlKeys.width >= 1620, true)
-        win.want("the suffix keys stay a comfortable target",
-                 urlSuffixes[0].width >= 150 && urlSuffixes[0].height >= 80, true)
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12

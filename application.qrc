@@ -25,7 +25,6 @@
         <file>ui/DownloadedList.qml</file>
         <file>ui/ReaderHandoff.qml</file>
         <file>ui/Settings.qml</file>
-        <file>ui/Keyboard.qml</file>
         <file>ui/PagerBar.qml</file>
     </qresource>
 </RCC>

@@ -570,10 +570,9 @@ Item {
 
     // ---- rename ------------------------------------------------------------
     //
-    // A panel over the list rather than a screen of its own: it is one field,
-    // and the device has no system keyboard available to an AppLoad app
-    // (PLAN §11 Q5), so the text comes from ui/Keyboard.qml exactly as the
-    // add-source form does.
+    // A panel over the list rather than a screen of its own: it is one field.
+    // AppLoad's own keyboard serves it (PLAN §11 Q5, settled 2026-09-19), the
+    // same as the add-source form.
     Rectangle {
         id: renamePanel
         objectName: "renamePanel"
@@ -622,9 +621,9 @@ Item {
                     color: Style.ink
                     // schema/source.schema.json: 1-120 characters.
                     maximumLength: 120
-                    activeFocusOnPress: false
                     text: screen.renameText
                     onTextChanged: screen.renameText = text
+                    onAccepted: screen.commitRename()
                 }
             }
 
@@ -679,14 +678,6 @@ Item {
             }
         }
 
-        Keyboard {
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-            layout: "text"
-            onKeyTyped: screen.renameText += text
-            onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
-            onClearAll: screen.renameText = ""
-            onSubmit: screen.commitRename()
-        }
     }
 
     // ---- strip splitting ---------------------------------------------------

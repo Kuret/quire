@@ -112,6 +112,34 @@ Item {
             border.color: Style.ink
             radius: 6
 
+            // A real field, because AppLoad's own keyboard serves one (PLAN
+            // §11 Q5, settled 2026-09-19). It used to be a Text showing what
+            // Quire's keyboard had typed into `query`, since nothing on the
+            // device would raise a keyboard for a focused input.
+            TextInput {
+                id: queryField
+                objectName: "searchField"
+                anchors {
+                    left: parent.left; leftMargin: Style.gap
+                    right: parent.right; rightMargin: Style.gap
+                    verticalCenter: parent.verticalCenter
+                }
+                clip: true
+                text: screen.query
+                onTextChanged: screen.query = text
+                font.pointSize: Style.bodySize
+                color: Style.ink
+                // `searching` follows the field rather than a tap handler, so
+                // the two cannot disagree about whether a search is being
+                // typed.
+                onActiveFocusChanged: screen.searching = activeFocus
+                onAccepted: {
+                    screen.searching = false
+                    if (screen.query.length > 0)
+                        screen.searchRequested(screen.query)
+                }
+            }
+
             Text {
                 anchors {
                     left: parent.left; leftMargin: Style.gap
@@ -119,14 +147,10 @@ Item {
                     verticalCenter: parent.verticalCenter
                 }
                 elide: Text.ElideRight
-                text: screen.query.length > 0 ? screen.query : "Search this source"
+                text: "Search this source"
                 font.pointSize: Style.bodySize
-                color: screen.query.length > 0 ? Style.ink : Style.rule
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: screen.searching = true
+                color: Style.rule
+                visible: screen.query.length === 0 && !queryField.activeFocus
             }
         }
 
@@ -291,24 +315,4 @@ Item {
         onNextRequested: screen.turnTo(screen.page + 1)
     }
 
-    // ---- search input ------------------------------------------------------
-    //
-    // Anchored to the pager rather than to the bottom of the screen, so the
-    // pager stays exactly where it was while the keyboard is up.
-
-    Keyboard {
-        id: keyboard
-        anchors { left: parent.left; right: parent.right; bottom: pagerBar.top }
-        visible: screen.searching
-        layout: "text"
-        onKeyTyped: screen.query += text
-        onBackspace: screen.query = screen.query.substring(0, screen.query.length - 1)
-        onClearAll: screen.query = ""
-        onSubmit: {
-            screen.searching = false
-            if (screen.query.length > 0) {
-                screen.searchRequested(screen.query)
-            }
-        }
-    }
 }

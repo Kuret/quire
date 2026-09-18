@@ -176,10 +176,14 @@ Item {
                 verticalAlignment: TextInput.AlignVCenter
                 font.pointSize: Style.bodySize
                 color: Style.ink
-                // The device has no system keyboard available to an AppLoad app
-                // (PLAN §11 Q5), so text comes from ui/Keyboard.qml below and
-                // this field is never focused for input of its own.
-                activeFocusOnPress: false
+                // AppLoad's own keyboard serves this field (PLAN §11 Q5,
+                // settled 2026-09-19): it appears when a field takes focus and
+                // follows focus between fields, so Quire ships no keyboard of
+                // its own and this one behaves like an ordinary input.
+                //
+                // The keyboard's return key starts the check, so the field and
+                // the button under it do the same thing.
+                onAccepted: screen.start()
                 text: screen.url
                 onTextChanged: screen.url = text
             }
@@ -218,17 +222,6 @@ Item {
                 onClicked: screen.start()
             }
         }
-    }
-
-    Keyboard {
-        id: keyboard
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        visible: screen.phase === "form"
-        layout: "url"
-        onKeyTyped: screen.url += text
-        onBackspace: screen.url = screen.url.substring(0, screen.url.length - 1)
-        onClearAll: screen.url = ""
-        onSubmit: screen.start()
     }
 
     // ---- progress ----------------------------------------------------------

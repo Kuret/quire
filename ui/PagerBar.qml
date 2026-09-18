@@ -8,12 +8,15 @@
 //   - **Wrapping.** Next at the end is dead, not a jump back to page 1. A
 //     control that wraps lies about where the end is, and the end is the one
 //     thing a pager exists to make visible.
-//   - **A page-number field.** Typing a number would want the keyboard, and the
+//   - **A page-number field.** Typing a number would want a keyboard, and a
 //     keyboard is the thing that must not move this bar.
 //
-// It sits at the very bottom of every screen that has one and never moves:
-// ui/Keyboard.qml is anchored above it rather than over it, so opening the
-// keyboard cannot shift the control out from under a thumb.
+// It sits at the very bottom of every screen that has one and never moves.
+// Quire's own keyboard used to be anchored above it rather than over it, for
+// exactly that reason; AppLoad's keyboard (PLAN §11 Q5, settled 2026-09-19) is
+// an overlay and moves nothing at all — it draws over the bottom 544 px while
+// it is up, which is why every text field is checked against that height in the
+// harness rather than against where this bar happens to be.
 
 import QtQuick 2.5
 import "Style.js" as Style
