@@ -14,6 +14,7 @@ import "../../ui/Sorting.js" as Sorting
 import "../../ui/Reconcile.js" as Reconcile
 import "../../ui/Deleting.js" as Deleting
 import "../../ui/Screens.js" as Screens
+import "../../ui/Answers.js" as Answers
 import "../../ui/Style.js" as Style
 
 
@@ -1520,6 +1521,131 @@ Window {
         win.want("a row with no source still offers Delete",
                  win.downloadedDeleteAsks, asksBefore + 1)
         win.want("for its own series", win.downloadedAskedSeries, "/manga/orphan/")
+
+        // ---- answering even when the device throws -------------------------
+        //
+        // On 3.27 a filing request got **no answer at all**: the call into
+        // xochitl's QML threw, the exception unwound past the send that would
+        // have reported it, and the backend waited out its thirty-second
+        // ceiling on a question the frontend had already given up on. Every
+        // handler has the same shape, so every handler is driven here against a
+        // bridge that throws.
+
+        function angryBridge() {
+            return {
+                sort: function () { throw new Error("treeExplorerForNavigation is null") },
+                check: function () { throw new Error("entryForId is not a function") },
+                trash: function () { throw new Error("selection is undefined") },
+                trashMany: function () { throw new Error("selection is undefined") },
+                open: function () { throw new Error("documentViewLoader is null") }
+            }
+        }
+
+        // First, the property underneath all of them: **nothing
+        // escapes**. Without this the symptom of a missing catch is that the
+        // harness itself dies mid-script -- silence, which is exactly the
+        // failure being guarded against and a terrible thing to have to read.
+        function escapes(call) {
+            try {
+                call()
+            } catch (e) {
+                return true
+            }
+            return false
+        }
+
+        win.want("a throw never escapes the filing answer",
+                 escapes(function () { Answers.sorted(angryBridge(), {"documentUuids": ["doc-a"]}) }), false)
+        win.want("nor the reconcile answer",
+                 escapes(function () { Answers.checked(angryBridge(), ["doc-a"]) }), false)
+        win.want("nor the delete answer",
+                 escapes(function () { Answers.trashed(angryBridge(), "doc-a") }), false)
+        win.want("nor the series delete answer",
+                 escapes(function () { Answers.trashedMany(angryBridge(), ["doc-a"]) }), false)
+        win.want("nor the reader handoff",
+                 escapes(function () { Answers.handoff(angryBridge(), "doc-a", -1) }), false)
+
+        // Filing: an answer, naming the throw, and claiming nothing was moved.
+        var sortAsk = {"documentUuids": ["doc-a", "doc-b"], "folderId": "f1",
+                       "folderName": "Kingdom", "sourceId": "src", "seriesId": "ser"}
+        var sortReply = Answers.sorted(angryBridge(), sortAsk)
+        win.want("a filing that threw still answers", sortReply.moved.length, 0)
+        win.want("and keeps the documents it was asked about",
+                 sortReply.documentUuids.length, 2)
+        win.want("and reports the throw", sortReply.detail.indexOf("treeExplorerForNavigation") >= 0, true)
+        win.want("and does not claim a folder was made", sortReply.created, false)
+
+        // Without a bridge at all the answer is the same shape, with the other
+        // reason: the log must be able to tell the two apart.
+        var noBridge = Answers.sorted(null, sortAsk)
+        win.want("no bridge answers too", noBridge.moved.length, 0)
+        win.want("with its own reason", noBridge.detail, Answers.NO_BRIDGE)
+
+        // Reconcile: the dangerous one. A throw must answer `checked: false`
+        // with an empty missing list -- never an empty list on its own, which
+        // the backend is entitled to read as "none of them exist" and act on by
+        // deleting every record and the whole page cache.
+        var checkReply = Answers.checked(angryBridge(), ["doc-a", "doc-b"])
+        win.want("a check that threw says it could not check", checkReply.checked, false)
+        win.want("and reports nothing missing", checkReply.missing.length, 0)
+        win.want("and echoes what it was asked about", checkReply.documentUuids.length, 2)
+        win.want("and reports the throw", checkReply.detail.indexOf("entryForId") >= 0, true)
+
+        // A bridge that answers with nothing has not answered.
+        var mute = Answers.checked({check: function () { return null }}, ["doc-a"])
+        win.want("a silent bridge is not a clean check", mute.checked, false)
+        win.want("and nothing is reported missing", mute.missing.length, 0)
+
+        // A bridge's own answer is passed through untouched: deciding here what
+        // a reply "really means" would be a second opinion on a question only
+        // the bridge can ask.
+        var real = Answers.checked({check: function () {
+            return {"checked": true, "documentUuids": ["doc-a"], "missing": ["doc-a"]}
+        }}, ["doc-a"])
+        win.want("a real check is passed through", real.checked, true)
+        win.want("with its own findings", real.missing[0], "doc-a")
+
+        // Deleting one document: a throw is "failed", which is what stops the
+        // backend forgetting a record whose document is still on the tablet.
+        var one = Answers.trashed(angryBridge(), "doc-a")
+        win.want("a delete that threw is a failure", one.result, "failed")
+        win.want("and says why", one.detail.indexOf("selection is undefined") >= 0, true)
+
+        // Deleting a series: one failure per document, not one for the batch.
+        var batch = Answers.trashedMany(angryBridge(), ["doc-a", "doc-b", "doc-c"])
+        win.want("a batch that threw reports every document", batch.results.length, 3)
+        win.want("each as a failure", batch.results[2].trashed, false)
+        win.want("nothing deleted", batch.deleted, 0)
+        win.want("and says why once", batch.detail.indexOf("selection is undefined") >= 0, true)
+
+        // ---- the handoff, and getting out of the reader's way ---------------
+
+        // A successful open closes the frontend: AppLoad v0.5.3 draws its
+        // windows above the document view, so staying up hides the reader
+        // behind Quire.
+        var good = Answers.handoff({open: function () { return true }}, "doc-a", -1)
+        win.want("a successful open closes the frontend", good.close, true)
+        win.want("and forgets nothing", good.forget, false)
+        win.want("and reports no missing document", good.reply.missing, undefined)
+
+        // A failed open leaves the app up -- the sentence about why is on that
+        // screen -- and the row forgets the dead document.
+        var bad = Answers.handoff({open: function () { return false }}, "doc-a", -1)
+        win.want("a failed open leaves the app up", bad.close, false)
+        win.want("and reports the document missing", bad.reply.missing, true)
+        win.want("and the row forgets it", bad.forget, true)
+
+        // A throw is a failed open, with the reason carried to the backend log.
+        var threwOpen = Answers.handoff(angryBridge(), "doc-a", -1)
+        win.want("an open that threw does not close the app", threwOpen.close, false)
+        win.want("and still answers the backend", threwOpen.reply.missing, true)
+        win.want("and reports the throw",
+                 threwOpen.reply.detail.indexOf("documentViewLoader") >= 0, true)
+
+        // No bridge: the same, with the other reason.
+        var noReader = Answers.handoff(null, "doc-a", -1)
+        win.want("no bridge does not close the app", noReader.close, false)
+        win.want("and says why", noReader.reply.detail, Answers.NO_BRIDGE)
 
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)

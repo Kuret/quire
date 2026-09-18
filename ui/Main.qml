@@ -24,7 +24,7 @@ import "Messages.js" as Msg
 import "Style.js" as Style
 import "Watch.js" as WatchJs
 import "Screens.js" as Screens
-import "Deleting.js" as Deleting
+import "Answers.js" as Answers
 
 Rectangle {
     id: root
@@ -94,15 +94,10 @@ Rectangle {
         if (!uuids || !uuids.length)
             return
 
-        var outcome
-        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
-            outcome = readerHandoff.item.trashMany(uuids)
-        } else {
-            // The bridge is the one file that imports xochitl's QML. With no
-            // bridge nothing was deleted, and every document says so rather
-            // than the whole thing reporting one vague failure.
-            outcome = Deleting.deleteMany(null, uuids)
-        }
+        // With no bridge — or one that threw — nothing was deleted, and every
+        // document says so rather than the whole thing reporting one vague
+        // failure.
+        var outcome = Answers.trashedMany(root.bridge(), uuids)
 
         for (var i = 0; i < outcome.results.length; ++i)
             root.forgetDocument(outcome.results[i].documentUuid)
@@ -111,7 +106,8 @@ Rectangle {
             "sourceId": sourceId,
             "seriesId": seriesId,
             "confirmed": true,
-            "results": outcome.results})
+            "results": outcome.results,
+            "detail": outcome.detail ? outcome.detail : ""})
     }
 
     // deleteFolder removes the now-empty series folder the backend asked about.
@@ -126,29 +122,56 @@ Rectangle {
     function deleteFolder(folderId, folderName) {
         if (!folderId)
             return
-        var result = readerHandoff.status === Loader.Ready && readerHandoff.item
-                     ? readerHandoff.item.trash(folderId)
-                     : "failed"
+        var answer = Answers.trashed(root.bridge(), folderId)
         root.send(Msg.FolderDeleted, {
             "folderId": folderId,
             "folderName": folderName ? folderName : "",
-            "trashed": result === "ok" || result === "kept",
-            "removed": result === "ok"})
+            "trashed": answer.result === "ok" || answer.result === "kept",
+            "removed": answer.result === "ok",
+            "detail": answer.detail})
+    }
+
+    // bridge is ReaderHandoff.qml, or null when its imports of xochitl's own QML
+    // did not resolve. Every handler below goes through it, and through
+    // Answers.js, so that "the bridge is missing" and "the bridge threw" both
+    // end in a reply rather than in silence.
+    function bridge() {
+        return readerHandoff.status === Loader.Ready && readerHandoff.item
+               ? readerHandoff.item : null
     }
 
     function openInReader(documentUuid) {
         if (!documentUuid)
             return
-        var opened = readerHandoff.status === Loader.Ready && readerHandoff.item
-                     ? readerHandoff.item.open(documentUuid, -1)
-                     : false
-        if (!opened) {
-            // Tell the backend, which owns both the record and the wording.
-            root.send(Msg.OpenInReader, {"documentUuid": documentUuid, "missing": true})
+        // The reply, whether the rows must forget this document, and whether the
+        // frontend gets out of the reader's way — one decision, made in
+        // Answers.js where the harness can drive it.
+        var answer = Answers.handoff(root.bridge(), documentUuid, -1)
+
+        // Tell the backend, which owns both the record and the wording.
+        root.send(Msg.OpenInReader, answer.reply)
+        if (answer.forget)
             root.forgetDocument(documentUuid)
+        if (!answer.close)
             return
-        }
-        root.send(Msg.OpenInReader, {"documentUuid": documentUuid})
+
+        // **And then get out of the way.**
+        //
+        // AppLoad v0.5.3 renders its windows above the document view (upstream
+        // "Always render windows on top of document", April 2026), so on OS
+        // 3.27 the reader opens *behind* Quire and the user has to quit the app
+        // to see the manga they just tapped Read on. Closing the frontend is
+        // what puts the reader in front.
+        //
+        // `close()` unloads the frontend only. `appload.terminate()` is what
+        // stops the backend, and it must not be called here: a download in
+        // flight has to survive the handoff, which is something the user
+        // relies on. AppLoad's README is explicit that a backend keeps running
+        // unless the app kills it.
+        //
+        // Only on success. A failed open leaves the app up, because the
+        // sentence saying why is on this screen.
+        root.close()
     }
 
     // deleteDownload moves a document to xochitl's Trash and tells the backend
@@ -163,9 +186,8 @@ Rectangle {
     function deleteDownload(documentUuid) {
         if (!documentUuid)
             return
-        var result = readerHandoff.status === Loader.Ready && readerHandoff.item
-                     ? readerHandoff.item.trash(documentUuid)
-                     : "failed"
+        var answer = Answers.trashed(root.bridge(), documentUuid)
+        var result = answer.result
         if (result === "gone") {
             root.send(Msg.OpenInReader, {"documentUuid": documentUuid, "missing": true})
             root.forgetDocument(documentUuid)
@@ -180,7 +202,8 @@ Rectangle {
             "documentUuid": documentUuid,
             "confirmed": true,
             "trashed": result === "ok" || result === "kept",
-            "removed": result === "ok"})
+            "removed": result === "ok",
+            "detail": answer.detail})
     }
 
     // sortDownload puts a finished download in its series folder and tells the
@@ -193,19 +216,11 @@ Rectangle {
     function sortDownload(msg) {
         if (!msg || !msg.documentUuids || !msg.documentUuids.length)
             return
-        var answer
-        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
-            answer = readerHandoff.item.sort(msg)
-        } else {
-            // The bridge is the one file that imports xochitl's QML, so a
-            // future OS closing that door takes sorting with it and nothing
-            // else (PLAN §6 M6).
-            answer = {"documentUuids": msg.documentUuids, "moved": [],
-                      "folderId": msg.folderId ? msg.folderId : "",
-                      "folderName": msg.folderName ? msg.folderName : "",
-                      "created": false,
-                      "detail": "this build cannot reach the library's folders"}
-        }
+        // The bridge is the one file that imports xochitl's QML, so a future OS
+        // closing that door — or a call inside it throwing, which is what 3.27
+        // did — takes sorting with it and nothing else (PLAN §6 M6). Either way
+        // the backend gets an answer.
+        var answer = Answers.sorted(root.bridge(), msg)
         answer.sourceId = msg.sourceId
         answer.seriesId = msg.seriesId
         root.send(Msg.DocumentsSorted, answer)
@@ -220,13 +235,7 @@ Rectangle {
     // record and the whole page cache.
     function checkDocuments(msg) {
         var uuids = msg && msg.documentUuids ? msg.documentUuids : []
-        var answer
-        if (readerHandoff.status === Loader.Ready && readerHandoff.item) {
-            answer = readerHandoff.item.check(uuids)
-        } else {
-            answer = {"checked": false, "documentUuids": uuids, "missing": []}
-        }
-        root.send(Msg.DocumentsChecked, answer)
+        root.send(Msg.DocumentsChecked, Answers.checked(root.bridge(), uuids))
     }
 
     // forgetDocument clears a dead UUID off every row that carried it, so the
