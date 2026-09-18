@@ -1187,6 +1187,36 @@ persisted.
 > and the alternative is two behaviours keyed off a version Quire cannot detect
 > cleanly. One behaviour that is right on both beats a fork on a fact we would
 > have to guess.
+>
+> **And hiding instead is not available. Measured, not assumed.** Closing is its
+> own annoyance — *"it does show the comic now but it causes Quire to exit,
+> previously it was still there when exiting the comic"* — so the obvious fix
+> was to hide the frontend and restore it when the reader closed. Both halves
+> were probed and both failed:
+>
+> - **There is no restore signal.** `Global.documentViewLoader` was sampled
+>   every 400 ms across an open and a close and never transitioned:
+>   `item=present active=true status=1 visible=true` throughout, document or no
+>   document. Nothing there says the reader has gone away.
+> - **Hiding makes the app unreachable.** AppLoad's `minimized` property does
+>   set (`read back as true`), and its `minimized` state collapses the window to
+>   `topbar.height` — but **a fullscreen app has no topbar rendered**, so there
+>   is nothing left on screen to tap, and AppLoad will not start a second
+>   frontend while one exists. Recovering the device took a xochitl restart.
+>
+> So: on AppLoad v0.5.3 a fullscreen app's window renders above the document
+> view, cannot be lowered, and cannot be minimised without becoming unreachable.
+> **Closing is the only way the reader is visible**, and §12.5's restore is what
+> makes closing cheap instead of making it clever.
+>
+> #### A probe-design rule, learned the hard way
+>
+> **A probe that can hide or disable its own UI must recover on a timer, never
+> on a button.** That probe had an "un-hide me" button and it was correct in
+> principle and unreachable in practice: it was inside the thing that
+> disappeared. The timed variant of the same test had a 15-second restore and
+> would have recovered on its own. The general form: *the escape hatch must not
+> live behind the failure it exists for.*
 
 Keep the `.qmd` **as small as physically possible**. Every line breaks on the
 next OS update.
@@ -2733,6 +2763,43 @@ worth knowing on its own.
 - **No covers.** Records carry no cover URL and inventing a lookup to decorate a
   list is work nobody asked for. Text rows, like the watched list.
 - Paged like every other list (§12.1).
+
+#### Coming back from the reader
+
+Handing a document to the stock reader closes the frontend (§6 M6's footnote
+above), so the user comes back from a comic to whatever screen the app opens
+on — several taps from the chapter list they were reading. Rather than making
+the close cleverer, which the measurements say is not possible, this makes
+coming back cheap.
+
+- **The position lives in the backend's memory.** Not in QML, which is unloaded
+  — that is the whole problem — and deliberately **not in the state file**: that
+  file is what a user exports and imports to move a setup between devices, and a
+  reading position is not configuration. Losing the position when the backend
+  restarts is *correct* rather than a limitation: a restarted backend means the
+  app was fully stopped or the device rebooted, which is a new session. The
+  backend outliving its frontend is not an assumption — it is the same property
+  in-flight downloads rely on.
+- **It is recorded on the reader handoff**, which is the only thing that closes
+  the frontend, and pushed on the next attach beside the source list and the
+  watched list. A handoff that failed closed nothing and records nothing.
+- **Restored once.** A position is a place the user left, not a screen the app
+  opens on from then on.
+- **Three ways it expires, and all three land on the sources screen rather than
+  an error:** older than two hours (long enough to read a chapter and come
+  back, short enough that a new session starts fresh), the source removed while
+  they were reading, or the backend restarted.
+- **The page comes back too, clamped.** A long series is many pages, and page 1
+  of forty is barely better than the sources screen. The stored page can be past
+  the end of a list that has since been grouped into volumes, and landing past
+  the end is a blank screen that reads as a broken app.
+- **The view mode is never restored.** A series that published volumes last week
+  may not today, and restoring a Volumes view for a series with no volumes is
+  exactly the bug `volumesAvailable` was written to stop. The list opens the way
+  the fresh series detail says it should.
+- **The Back destination is validated in the backend**, against the three list
+  screens a series can be opened from. It ends up behind a button the user
+  presses without looking, so it is never passed through unchecked.
 
 **A note on answering at all.** *(2026-09-18.)* Every one of these handlers is a
 reply to a question the backend is blocking on, and until this date each called
