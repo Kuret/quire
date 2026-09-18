@@ -43,3 +43,19 @@ function refreshOnShow(screen) {
         return "listDownloaded"
     return ""
 }
+
+// resumePage is the page to land on when a screen is restored.
+//
+// The stored page can be past the end: the series published fewer chapters than
+// it had, or the list is grouped into volumes this time. Landing past the end
+// is a blank screen, which reads as a broken app rather than as a restored one.
+//
+// A list with nothing in it is still page 1 — pages are 1-based and there is no
+// page 0 to show.
+function resumePage(want, totalPages) {
+    if (!want || want < 1)
+        return 1
+    if (!totalPages || totalPages < 1)
+        return 1
+    return want > totalPages ? totalPages : want
+}
