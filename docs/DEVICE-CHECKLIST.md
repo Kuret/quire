@@ -53,18 +53,19 @@ blank — an unticked box and an untested box look identical a week later.
       passing and finish with the first-run steps.
 - [ ] Run `./install.sh` a second time. Same result, no errors: it is idempotent.
 - [ ] Quire appears in the Annex sidebar, after `systemctl restart xochitl`.
-- [ ] `./install.sh --verify` reports `files ... complete` and
+- [ ] `./install.sh` re-run reports every check green (there is no --verify;
+      the install ends in the same verification stage)
       `backend published /home/root/annex/run/quire.json`.
 - [ ] Quire opens and does not crash.
 
 ### Refusals worth provoking once per release
 
-- [ ] Point `./install.sh --host` at an unreachable address → a clear
+- [ ] Point `./install.sh 192.0.2.1` (unreachable) at it → a clear
       explanation, not an ssh error.
 - [ ] Move `annex.qmd` aside → `./install.sh` refuses, names the missing file,
       and points at Annex's `deploy.sh`. Put it back afterwards.
 - [ ] `systemctl stop annex-app@quire; rm -f /home/root/annex/run/quire.json`,
-      then `./install.sh --verify` → it fails on the endpoint file and prints
+      then re-run `./install.sh` → it fails on the endpoint file and prints
       the `annex-service log quire` command. This is the check that catches a
       crash-looping backend, so it is worth knowing it still fires.
 
@@ -152,7 +153,7 @@ makes the later ones meaningless.
       there.
 - [ ] Downloaded volumes are still in `Comics` and still open in the stock
       reader.
-- [ ] `./install.sh --verify` is clean after the reboot.
+- [ ] `./install.sh` re-run is clean after the reboot.
 
 ## 5. Redeploy and uninstall
 

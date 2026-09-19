@@ -1,5 +1,31 @@
 # Quire
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/Kuret/quire/main/install.sh | sh
+```
+
+Before you run it, here is what it does:
+
+- **It runs on your computer**, not on the tablet, and drives the tablet over
+  ssh — `10.11.99.1` on the USB cable by default, or `... | sh -s -- 192.168.1.42`
+  over wifi. It asks for the device's ssh password once, if there is no key.
+- **Quire needs [Annex](https://github.com/Kuret/annex)**, the framework that
+  puts it in xochitl's sidebar and runs its backend as a service. If Annex is
+  not there, the installer explains what it is and **asks** whether to run
+  Annex's own installer. Say no and it stops, having changed nothing.
+- It installs one directory, `/home/root/annex/apps/quire`, and then asks
+  Annex's own tools to index it and start its backend.
+- The backend is a 26 MB `linux/arm64` binary that is not in this repository:
+  from a checkout with Go 1.25+ it is **built**, otherwise it is **downloaded**
+  from the latest release. If neither is possible the installer stops and says
+  so, rather than installing an app that cannot start.
+- **It never touches `/home/root/.local/share/quire/state/`** — the sources you
+  configured, your library and the cover cache. Reinstalling and upgrading
+  cannot eat them. `install.sh --uninstall` asks before removing them, and
+  defaults to keeping them.
+- It modifies no system files of its own, and `install.sh --help` lists all of
+  the above without installing anything.
+
 A comic/manga downloader for the **reMarkable Paper Pro** that files downloads
 into the stock library and hands reading off to the stock xochitl reader — so
 reading position, pen annotations and cloud sync all stay where they already
@@ -54,21 +80,26 @@ challenge is a site operator declining, and Quire takes the answer. See
   The OS coupling lives one layer down, in Annex. The installer warns on other
   versions rather than refusing.
 - [xovi](https://github.com/asivery/xovi), `qt-resource-rebuilder`, and
-  **Annex**, the host that puts Quire in xochitl's sidebar. Annex is built in
-  this project but installs itself: run its own `deploy.sh` **before** Quire's
-  installer. `install.sh` checks for both halves of it — the tools at
+  **Annex**, the host that puts Quire in xochitl's sidebar. You do not have to
+  install these first: `install.sh` checks for Annex — the tools at
   `/home/root/annex/tools/` and the QML patch at
-  `/home/root/xovi/exthome/qt-resource-rebuilder/annex.qmd` — and stops with an
-  explanation if either is missing.
+  `/home/root/xovi/exthome/qt-resource-rebuilder/annex.qmd` — and, if it is
+  missing, **offers** to run [Annex's own installer](https://github.com/Kuret/annex),
+  which installs xovi and `qt-resource-rebuilder` along the way. Decline and
+  Quire's installer stops without changing anything.
 - `xovi-tripletap`, so a triple-press of the power button disables xovi. This
   is your escape hatch. **Do not skip it.**
 
 **On your computer:**
 
-- **Go 1.25 or newer** ([go.dev/dl](https://go.dev/dl/)). That is the *only*
-  build dependency — there is nothing else to install.
-- `ssh`, with a key already installed on the tablet (`ssh-copy-id root@10.11.99.1`).
-  The installer does not prompt for passwords.
+- A POSIX shell, `curl`, `ssh` and `tar`. macOS and Linux both have all four.
+  No ssh key is required: the installer opens **one** multiplexed connection,
+  so the tablet's password is typed once for the whole install. A key, if you
+  have one on the device, makes it unattended.
+- **Go 1.25 or newer** ([go.dev/dl](https://go.dev/dl/)) — *only* if you are
+  installing from a clone and want the backend built here. Installing from the
+  published release needs no toolchain at all, and Go is the only build
+  dependency there has ever been.
 
 Qt is **not** needed. Annex reads an app's QML as loose files from disk, by
 path, so there is no resource bundle to compile and no `rcc` to hunt for.
@@ -108,17 +139,24 @@ reboot. See [`docs/DEVICE-NOTES.md`](docs/DEVICE-NOTES.md) §3.
 
 ## Install
 
-From a clone of this repository, with the tablet plugged in over USB:
+With the tablet plugged in over USB, from nothing:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Kuret/quire/main/install.sh | sh
+```
+
+or, from a clone of this repository:
 
 ```sh
 ./install.sh
 ```
 
-That is the whole thing. It checks your machine (Go, `ssh`), checks the tablet
-(Paper Pro, OS version, xovi, `qt-resource-rebuilder`, and that Annex is
-installed — both its tools and its QML patch), builds, deploys, and then
+That is the whole thing. It reaches the tablet over ssh, makes sure Annex is
+there — offering to install it if it is not — gets the backend binary (built
+from the clone if you have Go, downloaded from the latest release otherwise),
+installs the app, asks Annex to index it and start its service, and then
 verifies the app directory is complete, that **the backend actually came up**,
-and that xovi is still injected.
+and that Quire is in the index the sidebar is built from.
 
 The backend check is the one worth knowing about: `quired` writes
 `/home/root/annex/run/quire.json` once it has bound its port, and Annex's
@@ -133,11 +171,13 @@ library records, cover cache and part-finished downloads live. Reinstalling
 cannot eat them. That directory sits outside the app directory for exactly this
 reason.
 
-Useful flags:
+Useful arguments:
 
 ```sh
-./install.sh --host 192.168.1.42   # over wifi instead of USB
-./install.sh --verify              # re-run every check, build and deploy nothing
+./install.sh 192.168.1.42     # over wifi instead of USB (or $QUIRE_DEVICE)
+./install.sh --uninstall      # remove it again; asks about your state
+./install.sh --help           # what it does to your device, in full
+QUIRE_RELEASE=v0.2.0 ./install.sh   # pin the published build to install
 ```
 
 xochitl builds the Annex sidebar when it starts, so if Quire is not in it yet:
@@ -203,7 +243,7 @@ cannot tell you what is wrong, Annex can:
 ## Uninstall
 
 ```sh
-./uninstall.sh
+./install.sh --uninstall      # or ./uninstall.sh, from a clone
 ```
 
 Removes the app. **Asks** before removing your sources and downloads, and
@@ -227,8 +267,10 @@ the one event that can break all of this.
 3. If the UI is visibly wrong rather than merely missing the entry, run
    `/home/root/annex/tools/annex-disable` to pull the injection and restart
    xochitl, then sort it out from a stock screen.
-4. Re-run `./install.sh`. It will warn about the unfamiliar OS version and then
-   check Annex, the app directory and the backend endpoint.
+4. Re-run `./install.sh`. It checks Annex, reinstalls the app, and verifies the
+   app directory, the backend endpoint and the sidebar index. (The OS-version
+   warning belongs to Annex's installer, which is where the version coupling
+   is.)
 5. Walk [`docs/DEVICE-CHECKLIST.md`](docs/DEVICE-CHECKLIST.md) §1, §2 and §4.
 
 Note that the backend is a systemd service (`annex-app@quire`) and is entirely
@@ -278,11 +320,13 @@ make pc         # build a host bundle into output/ for development
 `make qml` lints `ui/` and instantiates every screen offscreen; it skips itself
 on a machine with no Qt 6, so `make check` is green with Go alone.
 
-`build/install-device.sh` is the deploy step on its own; `install.sh` calls it
-rather than duplicating it, so there is one implementation of "put the bundle on
-the tablet". It also runs Annex's own `annex-index` and
-`annex-service enable quire` afterwards, because indexing an app and starting
-its service belong to the host, not to the app.
+`build/install-device.sh` is the developer inner loop: it assumes a working
+device, an existing Annex and a built `output-rmpp/`, and only pushes the tree
+(`make install` is the same thing). `install.sh` is the *user* path — ssh
+multiplexing, the Annex prerequisite, fetching a published build when there is
+no toolchain — and it does not call it. Both end by running Annex's own
+`annex-index` and `annex-service`, because indexing an app and starting its
+service belong to the host, not to the app.
 
 There is no resource bundle to build any more: `ui/` ships as loose `.qml`
 files and Annex loads them from disk by path.
