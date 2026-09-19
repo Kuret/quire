@@ -1,11 +1,13 @@
 // Command quired is the Quire backend daemon.
 //
-// AppLoad starts it with argv[1] set to the path of a unix socket it has
-// already created. quired connects, then serves the PLAN §7.1 message loop
-// until the host sends MessageSystemTerminate or closes the socket.
+// Under Annex, systemd starts it as annex-app@quire. It binds a loopback port,
+// publishes the port and a token to /home/root/annex/run/quire.json, and
+// serves the PLAN §7.1 message loop until it is stopped.
 //
-// M1 wires up Ping/Pong only. Everything else is answered with MessageError so
-// a frontend never hangs waiting for a reply that is not coming yet.
+// Under AppLoad it was started with argv[1] set to the path of a unix socket
+// the host had already created. That still works: pass a socket path and it
+// dials, exactly as before. The message protocol is identical either way — see
+// backend/annex for why the transport moved and what was preserved.
 package main
 
 import (
@@ -16,12 +18,15 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/rickl/quire/backend/annex"
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/download"
@@ -77,18 +82,12 @@ func main() {
 		log.Info("logging to file", "path", logFile.Path(), "maxBytes", logging.MaxBytes)
 	}
 
-	if len(os.Args) < 2 {
-		log.Error("no socket path given", "usage", "quired <appload-socket>")
-		os.Exit(2)
-	}
-	socket := os.Args[1]
-
 	// Page resizing allocates in ~170 MB steps, and unbounded Go GC pacing on
 	// a 2 GB device shared with xochitl ends in an OOM kill rather than a slow
 	// download (docs/DEVICE-NOTES.md §10.4).
 	memLimit := download.SetMemoryLimit()
 
-	log.Info("starting", "socket", socket, "go", runtime.Version(), "arch", runtime.GOARCH,
+	log.Info("starting", "go", runtime.Version(), "arch", runtime.GOARCH,
 		"pid", os.Getpid(), "memLimitMiB", memLimit>>20)
 
 	svc, session, err := newService(log)
@@ -99,15 +98,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := appload.Dial(socket)
+	c, err := connect(log)
 	if err != nil {
 		log.Error("connect failed", "err", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
-	log.Info("connected")
+	defer c.Close()
 
-	serveErr := serve(conn, log, svc)
+	// Under systemd, stopping the service is SIGTERM. Closing the transport
+	// makes Recv return io.EOF, which is the same clean-shutdown path AppLoad
+	// took when the host closed the socket — so the loop below is unchanged
+	// and an ordinary `systemctl stop` is not reported as a crash.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig, ok := <-stop
+		if !ok {
+			return
+		}
+		log.Info("shutting down", "signal", sig.String())
+		c.Close()
+	}()
+	defer signal.Stop(stop)
+
+	serveErr := serve(c, log, svc)
 
 	// Stop the service's background work and wait for it, whichever way the
 	// loop ended. A watched-series check or an automatic re-probe outlives the
@@ -136,9 +150,48 @@ func main() {
 	log.Info("exiting cleanly")
 }
 
+// conn is the transport quired speaks over.
+//
+// Both backend/annex (loopback HTTP, started by systemd) and backend/appload
+// (a unix socket handed over by the AppLoad host) satisfy it, because the
+// protocol above the transport is the same one. It is also a superset of
+// service.Sender, so the service layer needs no knowledge of which is in use.
+type conn interface {
+	Send(msgType int32, payload []byte) error
+	Recv() (int32, []byte, error)
+	Close() error
+}
+
+// annexAppID names the endpoint file the frontend reads. It must match the
+// manifest id and the systemd instance name.
+const annexAppID = "quire"
+
+// connect picks a transport.
+//
+// A socket path in argv[1] means AppLoad started us and this is the old world;
+// anything else is Annex. Keeping both is nearly free — they differ in one
+// constructor — and it means the device can be moved back to AppLoad without
+// rebuilding, which matters while only one of the two has been proven on
+// hardware.
+func connect(log *slog.Logger) (conn, error) {
+	if len(os.Args) >= 2 && os.Args[1] != "" {
+		socket := os.Args[1]
+		log.Info("using the AppLoad transport", "socket", socket)
+		c, err := appload.Dial(socket)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("connected")
+		return c, nil
+	}
+
+	log.Info("using the Annex transport", "app", annexAppID)
+	return annex.Listen(annex.Options{AppID: annexAppID, Log: log})
+}
+
 // serve runs the message loop. It returns nil for the two clean shutdown
 // paths — host terminate and EOF — and an error for anything else.
-func serve(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
+func serve(conn conn, log *slog.Logger, svc *service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -149,7 +202,10 @@ func serve(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
 			log.Info("host requested termination")
 			return nil
 		case errors.Is(err, io.EOF):
-			log.Info("host closed the socket")
+			// Under AppLoad this is the host closing the socket; under Annex
+			// it is Close, which is what SIGTERM does. Both are the ordinary
+			// way this process ends.
+			log.Info("transport closed")
 			return nil
 		case err != nil:
 			return err
@@ -164,7 +220,7 @@ func serve(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
 	}
 }
 
-func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *service.Service, msgType int32, payload []byte) error {
+func handle(ctx context.Context, conn conn, log *slog.Logger, svc *service.Service, msgType int32, payload []byte) error {
 	// Everything M3 added lives in the service. Ping and the host's own
 	// messages stay here, where M1 put them.
 	if svc != nil {
@@ -230,13 +286,13 @@ func handle(ctx context.Context, conn *appload.Conn, log *slog.Logger, svc *serv
 // sendStatus answers a Ping, and is also what a freshly attached frontend gets
 // unprompted. It carries the startup notice, so there is exactly one message
 // the shell has to receive before it can draw itself correctly.
-func sendStatus(conn *appload.Conn, log *slog.Logger, svc *service.Service) error {
+func sendStatus(conn conn, log *slog.Logger, svc *service.Service) error {
 	return send(conn, log, svc, nil)
 }
 
 // sendStatusWithLog is sendStatus plus the tail of the log file, for the in-app
 // viewer.
-func sendStatusWithLog(conn *appload.Conn, log *slog.Logger, svc *service.Service, lines int) error {
+func sendStatusWithLog(conn conn, log *slog.Logger, svc *service.Service, lines int) error {
 	if logDir == "" {
 		return send(conn, log, svc, []string{
 			"Quire is not writing a log file on this device, so there is nothing to show."})
@@ -252,12 +308,13 @@ func sendStatusWithLog(conn *appload.Conn, log *slog.Logger, svc *service.Servic
 	return send(conn, log, svc, tail)
 }
 
-func send(conn *appload.Conn, log *slog.Logger, svc *service.Service, logTail []string) error {
+func send(conn conn, log *slog.Logger, svc *service.Service, logTail []string) error {
 	st := newStatus()
 	st.LogTail = logTail
 	if svc != nil {
 		st.Notice = svc.StartupNotice()
 		st.ConsultRobots = svc.ConsultRobots()
+		st.Views = svc.Views()
 	}
 	body, err := json.Marshal(st)
 	if err != nil {
@@ -268,7 +325,7 @@ func send(conn *appload.Conn, log *slog.Logger, svc *service.Service, logTail []
 	return conn.Send(appload.MessagePong, body)
 }
 
-func sendError(conn *appload.Conn, code, message string) error {
+func sendError(conn conn, code, message string) error {
 	// PLAN §7.1: Error is JSON {code, message}.
 	b, err := json.Marshal(struct {
 		Code    string `json:"code"`
@@ -305,6 +362,16 @@ type status struct {
 	// the right position the moment it appears, and a second round trip to
 	// find out would show it in the wrong one first.
 	ConsultRobots bool `json:"consultRobots"`
+
+	// Views is PLAN §7.1 type 75's per-screen layout, {screen: "grid"|"list"}.
+	// It rides here for the same reason ConsultRobots does, and with more at
+	// stake: a screen that draws a grid and then rearranges itself into a list
+	// once a second round trip lands is worse than one that waits.
+	//
+	// A map here, where the stored settings are explicit fields: this end is a
+	// read-only snapshot the frontend looks a screen up in, not the thing that
+	// is written back to disk, so there is no key to leak into the envelope.
+	Views map[string]string `json:"views,omitempty"`
 
 	// LogTail is the most recent log lines, sent only when asked for. Bounded
 	// by backend/logging: the socket is SOCK_SEQPACKET and a whole message has

@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/state"
+	"github.com/rickl/quire/backend/theme"
 )
 
 func discardLogger() *slog.Logger {
@@ -245,5 +248,56 @@ func TestStatusReportsUptimeError(t *testing.T) {
 	}
 	if s.Uptime != "unknown" {
 		t.Errorf("uptime = %q, want %q", s.Uptime, "unknown")
+	}
+}
+
+// capture is a conn that keeps what was sent and never expects a Recv.
+type capture struct {
+	msgType int32
+	payload []byte
+}
+
+func (c *capture) Send(msgType int32, payload []byte) error {
+	c.msgType = msgType
+	c.payload = append([]byte(nil), payload...)
+	return nil
+}
+func (c *capture) Recv() (int32, []byte, error) { return 0, nil, io.EOF }
+func (c *capture) Close() error                 { return nil }
+
+// The per-screen views ride on the status (PLAN §7.1 type 75), because a screen
+// that draws a grid and then rearranges itself into a list once a second round
+// trip lands is worse than one that waits.
+func TestStatusCarriesThePerScreenViews(t *testing.T) {
+	store, err := state.Open(t.TempDir(), theme.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetView(state.ScreenSearch, state.ViewList); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(service.Options{Store: store})
+	t.Cleanup(svc.Close)
+
+	c := &capture{}
+	if err := send(c, discardLogger(), svc, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c.msgType != appload.MessagePong {
+		t.Fatalf("type = %d, want Pong", c.msgType)
+	}
+	var s status
+	if err := json.Unmarshal(c.payload, &s); err != nil {
+		t.Fatalf("Pong payload is not JSON: %v (%q)", err, c.payload)
+	}
+	if s.Views[state.ScreenSearch] != state.ViewList {
+		t.Errorf("status says search is %q, want %q", s.Views[state.ScreenSearch], state.ViewList)
+	}
+	if s.Views[state.ScreenDownloaded] != state.ViewGrid {
+		t.Errorf("status says downloaded is %q, want the default %q",
+			s.Views[state.ScreenDownloaded], state.ViewGrid)
+	}
+	if len(s.Views) != len(state.Screens) {
+		t.Errorf("status carries %d screens, want %d: %v", len(s.Views), len(state.Screens), s.Views)
 	}
 }
