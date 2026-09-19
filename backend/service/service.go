@@ -118,9 +118,16 @@ type Service struct {
 
 	// pager caches the listing the frontend is paging through, so that a page
 	// turn is not an HTTP request (PLAN §12.1). See paging.go.
-	pagerMu  sync.Mutex
-	pagerKey pagerKey
-	pager    *seriesPager
+	//
+	// searchAllPager is the same idea across every source at once, and shares
+	// pagerMu because dropPagers throws both away together: a source that was
+	// removed or re-probed invalidates a combined listing exactly as much as a
+	// single-source one.
+	pagerMu           sync.Mutex
+	pagerKey          pagerKey
+	pager             *seriesPager
+	searchAllQuery    string
+	searchAllPagerCur *searchAllPager
 
 	// coverMu guards the cover batch in flight. The frontend sends the set of
 	// tiles now on screen; the previous set is cancelled, because a page turn
@@ -289,6 +296,20 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		})
 		return true, nil
 
+	case appload.MessageSearchAll:
+		var req struct {
+			Query    string `json:"query"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"pageSize"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		s.goBackground(ctx, func(ctx context.Context) {
+			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize)
+		})
+		return true, nil
+
 	case appload.MessageBrowse:
 		var req struct {
 			SourceID string `json:"sourceId"`
@@ -319,27 +340,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 
 	case appload.MessageRequestCover:
 		// The payload is the set of tiles *now on screen*. A single
-		// {seriesId,url} is still accepted and means a set of one.
-		var req struct {
-			SourceID string `json:"sourceId"`
-			SeriesID string `json:"seriesId"`
-			URL      string `json:"url"`
-			Covers   []struct {
-				SeriesID string `json:"seriesId"`
-				URL      string `json:"url"`
-			} `json:"covers"`
-		}
+		// {seriesId,url} is still accepted and means a set of one, and an entry
+		// may name its own source; see coverWants.
+		var req coverRequest
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		want := make([]coverWant, 0, len(req.Covers)+1)
-		for _, c := range req.Covers {
-			want = append(want, coverWant{SeriesID: c.SeriesID, URL: c.URL})
-		}
-		if len(want) == 0 && req.SeriesID != "" {
-			want = append(want, coverWant{SeriesID: req.SeriesID, URL: req.URL})
-		}
-		s.runCoverBatch(ctx, out, req.SourceID, want)
+		s.runCoverBatch(ctx, out, coverWants(req))
 		return true, nil
 
 	case appload.MessageOpenInReader:
@@ -455,6 +462,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 	case robotsMessage:
 		return s.handleRobots(out, payload)
 
+	case viewMessage:
+		return s.handleSetView(out, payload)
+
 	case appload.MessageWatchSeries:
 		var req struct {
 			SourceID string `json:"sourceId"`
@@ -475,6 +485,26 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		return true, s.unwatchSeries(out, req.SourceID, req.SeriesID)
+
+	case appload.MessageDownloadNewChapters:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.downloadNewChapters(ctx, out, req.SourceID, req.SeriesID)
+
+	case appload.MessageMarkSeen:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.markSeenNow(out, req.SourceID, req.SeriesID)
 
 	case appload.MessageCheckWatched:
 		// "Check now", so the per-source cooldown is overridden. An empty
@@ -794,10 +824,15 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 	}
 
 	rows := make([]seriesRow, 0, len(res.Items))
+	refs := make([]state.CoverRef, 0, len(res.Items))
 	for _, st := range res.Items {
 		s.rememberCoverReferrer(sourceID, st.CoverURL, st.CoverReferrer)
+		refs = append(refs, state.CoverRef{SeriesID: st.ID, URL: st.CoverURL})
 		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL})
 	}
+	// After the loop, not inside it: one listing is one write. See
+	// state.Store.RememberCovers.
+	s.rememberCoverURLs(sourceID, refs)
 	// An *empty listing* is evidence the site changed; an empty search is not.
 	// See maybeReprobe for why that distinction is the whole trigger.
 	if len(rows) == 0 && err == nil && strings.TrimSpace(query) == "" && page == 1 {
@@ -829,6 +864,7 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		return
 	}
 	s.rememberCoverReferrer(sourceID, series.CoverURL, series.CoverReferrer)
+	s.rememberCoverURLs(sourceID, []state.CoverRef{{SeriesID: seriesID, URL: series.CoverURL}})
 	chapters, err := th.Chapters(ctx, src, seriesID)
 	if err != nil {
 		_ = s.sendError(out, "chapters_failed", plain(err))
