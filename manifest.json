@@ -1,8 +1,6 @@
 {
     "id": "quire",
     "name": "Quire",
-    "loadsBackend": true,
-    "entry": "/ui/Main.qml",
-    "supportsScaling": false,
-    "canHaveMultipleFrontends": false
+    "entry": "ui/Main.qml",
+    "icon": "icon.svg"
 }

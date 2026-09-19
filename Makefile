@@ -4,24 +4,16 @@
 # installs are not on PATH for non-interactive shells).
 GO := $(shell build/go-path.sh)
 
-.PHONY: all check test vet fmt qml prebuilt prebuilt-update rmpp pc install icon clean
+.PHONY: all check test vet fmt qml rmpp pc install icon clean
 
 all: check rmpp
 
 ## check: everything CI would run
-check: fmt vet test qml prebuilt
+check: fmt vet test qml
 
 ## qml: lint ui/ and instantiate every screen offscreen (skips without Qt 6)
 qml:
 	build/qml-check.sh
-
-## prebuilt: fail if the committed resources.rcc has drifted from ui/
-prebuilt:
-	build/prebuilt.sh check
-
-## prebuilt-update: regenerate the committed resources.rcc (needs Qt rcc)
-prebuilt-update:
-	build/prebuilt.sh update
 
 # The `quiretest` tag compiles the fixture server's integration tests, which
 # need fetch's test-only loopback exemption (backend/fetch/loopback_quiretest.go).
@@ -44,7 +36,7 @@ fmt:
 rmpp:
 	build/build-rmpp.sh
 
-## pc: build the host bundle into output/ for the AppLoad PC emulator
+## pc: build a host bundle into output/ for development
 pc:
 	build/build-pc.sh
 
