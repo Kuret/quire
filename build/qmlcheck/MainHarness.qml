@@ -1,0 +1,1261 @@
+// The offscreen harness for the real ui/Main.qml.
+//
+// # It really is the app
+//
+// Everything here drives `ui/Main.qml` itself — the shell, its models, its
+// dispatch table and its navigation — not a copy of any part of it. For a long
+// time comments in this repository said that could not be done because Main.qml
+// "imports the Backend plugin". **That was wrong.** `Backend` is a plain QML
+// file in Annex's lib/ (annex/lib/qmldir says so in as many words), and the only
+// obstacle was ever a path: Main.qml's
+//
+//     import "../../../lib"
+//
+// resolves against the device layout, /home/root/annex/apps/quire/ui, and so
+// lands on /home/root/annex/lib. From the repository it lands on /Users/…/lib,
+// which does not exist.
+//
+// So build/qml-check.sh builds a directory with the device's shape at check
+// time —
+//
+//     <fixture>/lib/Backend.qml        the stub, build/qmlcheck/fixture/
+//     <fixture>/lib/qmldir
+//     <fixture>/apps/quire/ui    ->    the repository's real ui/
+//     <fixture>/apps/quire/harness/MainHarness.qml   this file
+//
+// — and the import resolves. **This file is only valid from that generated
+// location**: its relative paths are the device's, not the repository's.
+//
+// # What a green run here does and does not mean
+//
+// The Backend next door is a stub (see its own comments). It records what the
+// app sends and hands replies back in process, which covers our half of the
+// conversation completely — and nothing else. It cannot catch the real
+// Backend.qml failing to find its endpoint file, the HTTP transport mangling a
+// payload, Annex failing to load the app at all, or anything about what draws
+// over what on the device. A green harness is not a working device.
+//
+// The reader bridge is absent here too, and deliberately: ReaderHandoff.qml
+// imports xochitl's own QML singletons, which do not exist off the tablet. So
+// every answer this file asserts about deleting, sorting, checking and opening
+// documents is the **no-bridge** branch — the honest failure Answers.js
+// composes. The branches where the bridge answers are Answers.js's own, and
+// they are driven from Harness.qml.
+//
+// # How it drives
+//
+// By message and by tap wherever it can: `deliver()` emits the transport's own
+// message signal, exactly as a poll would, and the screens' controls are
+// clicked. Where a case is about the wiring *between* a screen and the shell,
+// it emits the screen's own signal — that signal is the wiring under test, and
+// the taps that raise it are already asserted in Harness.qml. Nothing here
+// calls a dispatch handler directly: a test that calls the handler proves the
+// handler works, not that anything reaches it.
+import QtQuick 2.5
+import QtQuick.Window 2.2
+import "../ui/Messages.js" as Msg
+import "../ui/Views.js" as Views
+import "../ui/Answers.js" as Answers
+import "../ui/Style.js" as Style
+
+Window {
+    id: win
+    width: 1620; height: 2160
+    visible: true
+
+    // The app, loaded by path rather than as a type, so a failure to load is a
+    // status and an error string rather than a compile error in this file.
+    Loader {
+        id: appLoader
+        anchors.fill: parent
+        asynchronous: false
+        source: "../ui/Main.qml"
+        onStatusChanged: if (status === Loader.Error)
+                             console.log("FAIL Main.qml did not load: " + sourceComponent)
+    }
+
+    property var app: appLoader.item
+    property var backend: null
+
+    property int failures: 0
+    function want(label, got, expected) {
+        if (got !== expected) {
+            console.log("FAIL " + label + ": got " + got + " want " + expected)
+            win.failures++
+        } else {
+            console.log("ok   " + label + " = " + got)
+        }
+    }
+
+    // deliver is one backend→frontend message, emitted on the transport's own
+    // signal. This is the whole of how the backend talks to the app, so it is
+    // the whole of how this file does.
+    function deliver(type, payload) {
+        win.backend.message(type, payload === undefined ? "" : JSON.stringify(payload), false)
+    }
+
+    function findChild(item, name) {
+        if (!item)
+            return null
+        if (item.objectName === name)
+            return item
+        for (var i = 0; i < item.children.length; ++i) {
+            var hit = win.findChild(item.children[i], name)
+            if (hit)
+                return hit
+        }
+        return null
+    }
+
+    function findChildren(item, name, into) {
+        if (!item)
+            return into
+        if (item.objectName === name)
+            into.push(item)
+        for (var i = 0; i < item.children.length; ++i)
+            win.findChildren(item.children[i], name, into)
+        return into
+    }
+
+    // colorOf names a colour the way Style.js writes it: QML hands them back in
+    // lower case, and a comparison against the token would otherwise fail for
+    // the spelling rather than for the colour. Same as the other harness.
+    function colorOf(item) {
+        return String(item.color).toUpperCase()
+    }
+
+    // Every piece of text under an item, found by what a Text *is* rather than
+    // by objectName — the same walk the other harness uses, and for the same
+    // reason: the word somebody recolours later is the one with no name on it.
+    function textsUnder(item, out) {
+        if (!item)
+            return out
+        if (item.font !== undefined && typeof item.text === "string")
+            out.push(item)
+        for (var i = 0; i < item.children.length; ++i)
+            win.textsUnder(item.children[i], out)
+        return out
+    }
+
+    // The screens, by the objectName Main.qml gives each one.
+    function screenNamed(name) { return win.findChild(win.app, name) }
+
+    // ---- fixtures ----------------------------------------------------------
+
+    property var lanternGroup: ({
+        "key": "the lantern keeper", "title": "The Lantern Keeper",
+        "coverUrl": "https://example.invalid/lantern.jpg",
+        "matches": [
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "coverUrl": "https://example.invalid/a.jpg"},
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/lantern", "coverUrl": "https://example.invalid/b.jpg"}]})
+
+    property var orphanGroup: ({
+        "key": "an orphan", "title": "An Orphan", "coverUrl": "",
+        "matches": [
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/orphan", "coverUrl": "https://example.invalid/o.jpg"}]})
+
+    // A listing for src-a with one cover and one without, which is what makes
+    // the cover batch worth asserting: it holds one entry, not two.
+    function seriesReply(page, totalPages, hasMore) {
+        return {
+            "series": [
+                {"id": "/manga/lantern/", "title": "The Lantern Keeper",
+                 "coverUrl": "https://example.invalid/a.jpg"},
+                {"id": "/manga/orphan/", "title": "An Orphan", "coverUrl": ""}],
+            "page": page, "totalPages": totalPages, "hasMore": hasMore}
+    }
+
+    function downloadedReply() {
+        return {"series": [
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+             "detail": "3 downloads", "openable": true, "note": "",
+             "coverUrl": "https://example.invalid/a.jpg", "latestUuid": "doc-9"},
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/orphan", "title": "An Orphan",
+             "detail": "1 download", "openable": false, "note": "One file is missing.",
+             "coverUrl": "", "latestUuid": ""}],
+            "empty": ""}
+    }
+
+    function watchReply(rows, summary) {
+        return {"watched": rows, "summary": summary}
+    }
+
+    property var lanternWatch: ({
+        "sourceId": "src-a", "seriesId": "/manga/lantern/",
+        "sourceName": "Example Reader", "title": "The Lantern Keeper",
+        "newChapters": 0, "badge": "", "state": "ok", "status": "Up to date",
+        "checkedAt": "2026-09-19T00:00:00Z",
+        "coverUrl": "https://example.invalid/a.jpg"})
+
+    // A watch with a cover nothing has fetched yet, so a push has something to
+    // ask for.
+    property var newWatch: ({
+        "sourceId": "src-b", "seriesId": "/series/newone",
+        "sourceName": "Other Reader", "title": "A New One",
+        "newChapters": 0, "badge": "", "state": "ok", "status": "Up to date",
+        "checkedAt": "2026-09-19T00:00:00Z",
+        "coverUrl": "https://example.invalid/n.jpg"})
+
+    property var orphanWatch: ({
+        "sourceId": "src-b", "seriesId": "/series/orphan",
+        "sourceName": "Other Reader", "title": "An Orphan",
+        "newChapters": 0, "badge": "", "state": "ok", "status": "Up to date",
+        "checkedAt": "2026-09-19T00:00:00Z", "coverUrl": ""})
+
+    // Layout has to have run before a tile can be tapped: a page size comes
+    // from a real viewport, and before the first pass there is none.
+    Timer {
+        interval: 120; running: true
+        onTriggered: win.check()
+    }
+
+    // A case that throws would otherwise hang this process rather than fail it,
+    // and a hang is not a failure anyone can read.
+    function check() {
+        try {
+            win.runChecks()
+        } catch (err) {
+            console.log("FAIL the main harness threw before it finished: " + err)
+            win.failures++
+        }
+        win.finish()
+    }
+
+    function runChecks() {
+        // ---- it loads, and it is the real thing ---------------------------
+
+        win.want("the real ui/Main.qml loads", appLoader.status, Loader.Ready)
+        win.want("and there is a root to drive", win.app !== null, true)
+        win.want("it opens on the source list", win.app.screen, "sources")
+
+        // The transport it found for itself, not one handed to it: the app
+        // declared a Backend and the fixture's lib/ is what satisfied it.
+        win.backend = win.findChild(win.app, "stubBackend")
+        win.want("the app connected itself to a Backend", win.backend !== null, true)
+        win.want("naming the app the manifest names", win.backend.appId, "quire")
+        win.want("which started itself", win.backend.status, "connected")
+
+        // Off the device there is no library to hand documents to, so every
+        // document answer below is the no-bridge one. Asserted rather than
+        // assumed, because it is what those cases mean.
+        win.want("there is no reader bridge off the device", win.app.bridge(), null)
+
+        var backend = win.backend
+        var sourceList = win.screenNamed("sourceList")
+        var addSource = win.screenNamed("addSource")
+        var seriesGrid = win.screenNamed("seriesGrid")
+        var searchAll = win.screenNamed("searchAll")
+        var chapterList = win.screenNamed("chapterList")
+        var watchList = win.screenNamed("watchList")
+        var downloadedList = win.screenNamed("downloadedList")
+        var settings = win.screenNamed("settings")
+        win.want("every screen is in the tree",
+                 [sourceList, addSource, seriesGrid, searchAll, chapterList,
+                  watchList, downloadedList, settings].indexOf(null), -1)
+
+        // ---- what it says on startup ---------------------------------------
+        //
+        // Component.onCompleted asks for the source list and the status, in
+        // that order, and nothing else. Both are sent before the backend has
+        // been discovered on the device, which is why they may not be lost.
+        win.want("startup asks for the sources and then the status",
+                 backend.types(), Msg.ListSources + "," + Msg.Ping)
+        win.want("and asks for nothing else", backend.sendCount, 2)
+        win.want("with an empty JSON payload, never a bare send",
+                 backend.rawOf(Msg.Ping), "{}")
+
+        // ---- the status, and everything that rides on it -------------------
+
+        backend.forget()
+        win.deliver(Msg.Pong, {
+            "version": "1.4.0", "os": "linux", "arch": "arm64",
+            "notice": "Quire closed unexpectedly last time.",
+            "consultRobots": true,
+            "logTail": ["one", "two", "three"],
+            "views": {"search": "list", "downloaded": "list", "watching": "grid"}})
+
+        win.want("the status becomes the line the settings screen shows",
+                 win.app.backendStatus, "Backend 1.4.0 on linux/arm64")
+        win.want("and reaches that screen", settings.backendStatus,
+                 "Backend 1.4.0 on linux/arm64")
+        win.want("the notice reaches the source list",
+                 sourceList.notice, "Quire closed unexpectedly last time.")
+        win.want("the log tail reaches the viewer", settings.logLines.length, 3)
+        win.want("the robots switch follows the store", settings.consultRobots, true)
+        win.want("a status answers nothing back", backend.sendCount, 0)
+
+        // The three stored layouts, off the same status and for the same
+        // reason (Views.js).
+        win.want("the search layout comes off the status", win.app.searchView, Views.LIST)
+        win.want("the downloaded layout too", win.app.downloadedView, Views.LIST)
+        win.want("and watching keeps its own", win.app.watchingView, Views.GRID)
+        win.want("a screen draws the layout stored for it",
+                 seriesGrid.view, Views.LIST)
+        win.want("the combined search shares the search one",
+                 searchAll.view, Views.LIST)
+        win.want("the watched screen has its own", watchList.view, Views.GRID)
+
+        // A backend too old to send layouts, or a status that arrived without
+        // them, leaves every screen drawable rather than blank.
+        win.deliver(Msg.Pong, {"version": "1.4.0", "os": "linux", "arch": "arm64"})
+        win.want("a status with no layouts falls back to grid",
+                 win.app.searchView, Views.GRID)
+        win.want("on every screen",
+                 win.app.downloadedView + "," + win.app.watchingView,
+                 Views.GRID + "," + Views.GRID)
+        win.want("and a status with no notice leaves the one showing alone",
+                 win.app.notice, "Quire closed unexpectedly last time.")
+        sourceList.noticeDismissed()
+        win.want("dismissing the notice clears it", win.app.notice, "")
+
+        // A status with no payload at all is still an answer.
+        backend.message(Msg.Pong, "", false)
+        win.want("an empty status still answers", win.app.backendStatus, "Backend answered.")
+        win.want("and reads as robots off", settings.consultRobots, false)
+
+        // A payload that is not JSON is reported rather than thrown past.
+        backend.message(Msg.Pong, "{not json", false)
+        win.want("an unreadable payload is reported",
+                 win.app.lastError, "The backend sent something unreadable.")
+        settings.clearErrorRequested()
+        win.want("and the settings screen can clear it", win.app.lastError, "")
+
+        // ---- the layout switch does not flip optimistically ----------------
+        //
+        // The value comes back on the *status*, never in a reply of its own, so
+        // the screen draws what the store says rather than what the switch
+        // hoped. A write that did not save cannot leave the two disagreeing.
+
+        win.deliver(Msg.Pong, {"version": "1.4.0", "os": "linux", "arch": "arm64",
+                               "views": {"search": "list", "downloaded": "list",
+                                         "watching": "grid"}})
+        backend.forget()
+        win.app.setView("downloaded", Views.GRID)
+        win.want("asking for a layout sets it and then asks for the status",
+                 backend.types(), Msg.SetView + "," + Msg.Ping)
+        win.want("naming the screen on the wire", backend.bodyOf(Msg.SetView).screen,
+                 "downloaded")
+        win.want("and the layout asked for", backend.bodyOf(Msg.SetView).view, Views.GRID)
+        win.want("**and the screen does not flip on its own**",
+                 win.app.downloadedView, Views.LIST)
+        win.want("so the screen is still drawn the stored way",
+                 downloadedList.view, Views.LIST)
+
+        win.deliver(Msg.Pong, {"version": "1.4.0", "os": "linux", "arch": "arm64",
+                               "views": {"search": "list", "downloaded": "grid",
+                                         "watching": "grid"}})
+        win.want("the status is what turns it over", win.app.downloadedView, Views.GRID)
+        win.want("and the screen with it", downloadedList.view, Views.GRID)
+
+        backend.forget()
+        win.app.setView("sources", Views.LIST)
+        win.want("a screen with no layout to remember sends nothing",
+                 backend.sendCount, 0)
+
+        // The same thing by hand, from the header. The toggle lives in the
+        // chrome, so it is the one control that belongs to Main.qml itself.
+        win.app.showScreen("watching")
+        var toggle = win.findChild(win.app, "viewToggle")
+        win.want("the header offers the switch on a screen that remembers one",
+                 toggle.visible, true)
+        win.want("showing the layout stored for that screen", toggle.view, Views.GRID)
+        win.want("and the half you are in is inert",
+                 win.findChild(toggle, "viewToggleGridArea").enabled, false)
+
+        backend.forget()
+        win.findChild(toggle, "viewToggleListArea").clicked(null)
+        win.want("tapping the other half asks once",
+                 backend.countOf(Msg.SetView), 1)
+        win.want("for that screen", backend.bodyOf(Msg.SetView).screen, "watching")
+        win.want("and that layout", backend.bodyOf(Msg.SetView).view, Views.LIST)
+        win.want("and asks for the status behind it", backend.countOf(Msg.Ping), 1)
+        win.want("the switch does not move until the store says so",
+                 win.app.watchingView, Views.GRID)
+
+        win.deliver(Msg.Pong, {"version": "1.4.0", "os": "linux", "arch": "arm64",
+                               "views": {"watching": "list"}})
+        win.want("and moves when it does", win.app.watchingView, Views.LIST)
+        win.want("the toggle follows", toggle.view, Views.LIST)
+        win.want("with the other half now the live one",
+                 win.findChild(toggle, "viewToggleGridArea").enabled, true)
+
+        win.app.showScreen("sources")
+        win.want("a screen with nothing to remember draws no switch",
+                 toggle.visible, false)
+
+        // ---- showScreen, and what a screen re-asks for ---------------------
+
+        backend.forget()
+        win.app.showScreen("downloaded")
+        win.want("opening Downloaded re-asks for the list",
+                 backend.types(), String(Msg.ListDownloaded))
+        win.want("with an empty payload", backend.rawOf(Msg.ListDownloaded), "{}")
+        win.want("and the screen is the one showing", win.app.screen, "downloaded")
+        win.want("which is the visible one", downloadedList.visible, true)
+        win.want("and the others are not", sourceList.visible, false)
+
+        backend.forget()
+        win.app.showScreen("browse")
+        win.want("a screen that needs nothing re-asks for nothing",
+                 backend.sendCount, 0)
+        win.app.goBack()
+        win.want("Back from a listing goes to the sources", win.app.screen, "sources")
+
+        // ---- the source list -----------------------------------------------
+
+        win.deliver(Msg.Sources, {"sources": [
+            {"id": "src-a", "name": "Example Reader", "baseUrl": "https://example.invalid",
+             "theme": "madara", "lang": "en", "enabled": true, "splitStrips": "never",
+             "status": "Working", "statusDetail": ""},
+            {"id": "src-b", "name": "Other Reader", "baseUrl": "https://other.invalid",
+             "theme": "mangadex", "lang": "en", "enabled": false,
+             "status": "Off", "statusDetail": ""}]})
+        win.want("the sources fill the list", sourceList.model.count, 2)
+        win.want("with the name the backend gave", sourceList.model.get(0).name,
+                 "Example Reader")
+        win.want("and its stored splitting", sourceList.model.get(0).splitStrips, "never")
+        // A source stored before PLAN §12.3 existed has none, and it must read
+        // as Automatic rather than as blank.
+        win.want("a source with none reads as automatic",
+                 sourceList.model.get(1).splitStrips, "auto")
+        win.want("and its enabled flag survives the trip",
+                 sourceList.model.get(1).enabled, false)
+
+        backend.forget()
+        sourceList.toggleRequested("src-b", true)
+        win.want("a toggle names the source",
+                 backend.bodyOf(Msg.SetSourceEnabled).sourceId, "src-b")
+        win.want("and what it was set to",
+                 backend.bodyOf(Msg.SetSourceEnabled).enabled, true)
+        sourceList.renameRequested("src-b", "A new name")
+        win.want("a rename carries the name",
+                 backend.bodyOf(Msg.RenameSource).name, "A new name")
+        sourceList.splitStripsRequested("src-b", "always")
+        win.want("splitting sends the schema's spelling",
+                 backend.bodyOf(Msg.SetSourceSplitStrips).splitStrips, "always")
+        sourceList.removeRequested("src-b")
+        win.want("and a removal names it",
+                 backend.bodyOf(Msg.RemoveSource).sourceId, "src-b")
+
+        // ---- adding a source ------------------------------------------------
+
+        sourceList.addRequested()
+        win.want("Add opens the form", win.app.screen, "add")
+        win.want("on a fresh one", addSource.phase, "form")
+        backend.forget()
+        addSource.probeRequested("https://example.invalid")
+        win.want("the check is asked for once", backend.countOf(Msg.ProbeSource), 1)
+        win.want("naming the address typed",
+                 backend.bodyOf(Msg.ProbeSource).url, "https://example.invalid")
+
+        addSource.phase = "probing"
+        win.deliver(Msg.ProbeVerdict, {
+            "headline": "Looks like a Madara site", "detail": "Found 20 series.",
+            "addable": true, "name": "Example Reader", "theme": "madara", "lang": "en",
+            "url": "https://example.invalid"})
+        win.want("the verdict reaches the form", addSource.phase, "verdict")
+        win.want("headline and all", addSource.verdictHeadline, "Looks like a Madara site")
+        win.want("and the name it proposes", addSource.draftName, "Example Reader")
+
+        backend.forget()
+        addSource.confirmRequested("https://example.invalid", "madara", "Example Reader", "en")
+        win.want("confirming adds the source",
+                 backend.bodyOf(Msg.ConfirmAddSource).theme, "madara")
+        win.want("and leaves the form behind", win.app.screen, "sources")
+
+        // An error mid-check is the verdict, not a silence.
+        sourceList.addRequested()
+        addSource.phase = "probing"
+        win.deliver(Msg.Error, {"message": "The site did not answer."})
+        win.want("an error during a check ends the check", addSource.phase, "verdict")
+        win.want("saying so", addSource.verdictHeadline, "Couldn't finish")
+        win.want("in the backend's words", addSource.verdictDetail,
+                 "The site did not answer.")
+        win.want("and it is the app's last error too", win.app.lastError,
+                 "The site did not answer.")
+        addSource.doneRequested()
+        settings.clearErrorRequested()
+
+        // ---- browsing one source --------------------------------------------
+
+        backend.forget()
+        sourceList.openRequested("src-a", "Example Reader")
+        win.want("opening a source browses it", win.app.screen, "browse")
+        win.want("and remembers which", win.app.currentSourceId, "src-a")
+        win.want("by name as well as by id", win.app.currentSourceName, "Example Reader")
+        win.want("the grid waits for its first page", seriesGrid.busy, true)
+        win.want("and names the page it is waiting for", seriesGrid.pendingPage, 1)
+        win.want("a listing is a browse, not a search", backend.countOf(Msg.Browse), 1)
+        win.want("and not a search", backend.countOf(Msg.Search), 0)
+        win.want("naming the source", backend.bodyOf(Msg.Browse).sourceId, "src-a")
+        win.want("the page asked for", backend.bodyOf(Msg.Browse).page, 1)
+        // The page size is the grid's own geometry's answer, never a constant.
+        win.want("and how much fits on this panel",
+                 backend.bodyOf(Msg.Browse).pageSize, seriesGrid.pageSize)
+        win.want("which is a real number of tiles", seriesGrid.pageSize > 0, true)
+
+        backend.forget()
+        seriesGrid.searchRequested("lantern")
+        win.want("a query makes it a search", backend.countOf(Msg.Search), 1)
+        win.want("carrying the query", backend.bodyOf(Msg.Search).query, "lantern")
+        win.want("and no browse with it", backend.countOf(Msg.Browse), 0)
+
+        // ---- one page of results --------------------------------------------
+
+        backend.forget()
+        win.deliver(Msg.SearchResults, win.seriesReply(2, 5, true))
+        win.want("the results fill the grid", seriesGrid.model.count, 2)
+        win.want("titled as they arrived", seriesGrid.model.get(0).title,
+                 "The Lantern Keeper")
+        win.want("with no cover on disk yet", seriesGrid.model.get(0).coverPath, "")
+        win.want("the page is where the backend says", seriesGrid.page, 2)
+        win.want("the total is the backend's too", seriesGrid.totalPages, 5)
+        win.want("and whether there is more", seriesGrid.hasMore, true)
+        win.want("the grid stops waiting", seriesGrid.busy, false)
+        win.want("and forgets the page it was waiting for", seriesGrid.pendingPage, 0)
+        win.want("a page with rows says nothing about being empty",
+                 seriesGrid.emptyMessage, "")
+
+        // The cover batch. This screen's rows carry no source of their own —
+        // every row is the source being browsed — so the batch is what
+        // Main.qml knows and the rows do not.
+        win.want("one batch of covers is asked for", backend.countOf(Msg.RequestCover), 1)
+        win.want("holding only the rows that have a cover to fetch",
+                 backend.bodyOf(Msg.RequestCover).covers.length, 1)
+        win.want("each entry named with the source being browsed",
+                 backend.bodyOf(Msg.RequestCover).covers[0].sourceId, "src-a")
+        win.want("and that source's series id",
+                 backend.bodyOf(Msg.RequestCover).covers[0].seriesId, "/manga/lantern/")
+
+        // **An empty batch is not sent at all.** SeriesGrid reports an empty
+        // set rather than staying quiet, and the backend cancels the batch in
+        // flight before it looks at whether the new one is empty — so a
+        // message here would cancel a page of covers for nothing.
+        backend.forget()
+        win.deliver(Msg.SearchResults, {"series": [], "page": 1})
+        win.want("a page with nothing on it says so",
+                 seriesGrid.emptyMessage, "Nothing came back for that.")
+        win.want("and empties the grid", seriesGrid.model.count, 0)
+        win.want("**and asks for no covers at all**",
+                 backend.countOf(Msg.RequestCover), 0)
+        win.want("having sent nothing whatsoever", backend.sendCount, 0)
+
+        // A page turn is composed in the one place that knows whether the
+        // screen is showing a search or the site's own listing, so turning the
+        // page of a search stays a search.
+        backend.forget()
+        seriesGrid.pageRequested(3)
+        win.want("turning the page of a search stays a search",
+                 backend.countOf(Msg.Search), 1)
+        win.want("asking for the page turned to", backend.bodyOf(Msg.Search).page, 3)
+        win.want("and never re-browses the catalogue underneath it",
+                 backend.countOf(Msg.Browse), 0)
+
+        // ---- a cover arrives ------------------------------------------------
+        //
+        // The same series can be on four screens at once, and the fan-out is
+        // what keeps a cover already on disk from being fetched again for each
+        // of them. So all four are filled and all four are asserted.
+
+        win.deliver(Msg.SearchResults, win.seriesReply(1, 1, false))
+        win.deliver(Msg.DownloadedList, win.downloadedReply())
+        win.deliver(Msg.WatchList, win.watchReply([win.lanternWatch, win.orphanWatch], {}))
+        win.app.openSearchAll()
+        searchAll.query = "lantern"
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": true,
+            "groups": [win.lanternGroup, win.orphanGroup], "sourceErrors": []})
+
+        win.want("the search grid is showing the series", seriesGrid.model.count, 2)
+        win.want("the combined search is too", searchAll.model.count, 2)
+        win.want("the downloaded overview is too", downloadedList.model.count, 2)
+        win.want("and the watched list is too", watchList.model.count, 2)
+
+        win.deliver(Msg.CoverReady, {"seriesId": "/manga/lantern/",
+                                     "path": "/tmp/lantern.png"})
+        win.want("the cover lands on the search grid's row",
+                 seriesGrid.model.get(0).coverPath, "file:///tmp/lantern.png")
+        win.want("on the combined search's row",
+                 searchAll.model.get(0).coverPath, "file:///tmp/lantern.png")
+        win.want("on the downloaded row",
+                 downloadedList.model.get(0).coverPath, "file:///tmp/lantern.png")
+        win.want("and on the watched row",
+                 watchList.model.get(0).coverPath, "file:///tmp/lantern.png")
+        win.want("and nowhere it does not belong",
+                 seriesGrid.model.get(1).coverPath, "")
+
+        // A cover for a series no screen is showing is a log line, not a
+        // throw, and it writes nothing anywhere.
+        win.deliver(Msg.CoverReady, {"seriesId": "/manga/nobody/", "path": "/tmp/x.png"})
+        win.want("a cover for a series nothing shows writes nothing",
+                 seriesGrid.model.get(0).coverPath, "file:///tmp/lantern.png")
+        win.want("nor on the other screens",
+                 downloadedList.model.get(0).coverPath + "," +
+                 watchList.model.get(0).coverPath,
+                 "file:///tmp/lantern.png,file:///tmp/lantern.png")
+        // A cover with no series id at all is ignored before anything is
+        // written, which is what stops a malformed reply blanking a row.
+        win.deliver(Msg.CoverReady, {"path": "/tmp/y.png"})
+        win.want("a cover naming no series is ignored",
+                 seriesGrid.model.get(0).coverPath, "file:///tmp/lantern.png")
+
+        // ---- the combined search --------------------------------------------
+
+        win.want("the combined search is the screen showing", win.app.screen, "searchall")
+        win.want("a group is one row", searchAll.model.count, 2)
+        win.want("titled with the group's title", searchAll.model.get(0).title,
+                 "The Lantern Keeper")
+        win.want("opening on the first match's source",
+                 searchAll.model.get(0).sourceId, "src-a")
+        win.want("and that source's own series id",
+                 searchAll.model.get(0).seriesId, "/manga/lantern/")
+        win.want("the screen stops waiting", searchAll.busy, false)
+        win.want("and a page of groups is not empty", searchAll.emptyMessage, "")
+
+        // A source that did not answer is a line underneath, never an error
+        // over the results.
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": true,
+            "groups": [win.lanternGroup, win.orphanGroup],
+            "sourceErrors": [{"sourceId": "src-c", "sourceName": "Third Reader",
+                              "message": "the request timed out"}]})
+        win.want("a source that failed is named under the results",
+                 searchAll.failedSources, "No answer from Third Reader")
+        win.want("and is not an error", win.app.lastError, "")
+        win.want("nor does it empty the page", searchAll.model.count, 2)
+
+        // **An empty query sends nothing.** The screen has the first guard and
+        // this is the second, here because this is where the message is
+        // composed and three routes arrive at it.
+        backend.forget()
+        searchAll.query = ""
+        searchAll.searchRequested("")
+        win.want("an empty query is not a search", backend.countOf(Msg.SearchAll), 0)
+        searchAll.query = "   "
+        searchAll.pageRequested(2)
+        win.want("nor is a page of one", backend.countOf(Msg.SearchAll), 0)
+        searchAll.query = "lantern"
+        searchAll.searchRequested("lantern")
+        win.want("a real query is", backend.countOf(Msg.SearchAll), 1)
+        win.want("carrying the query", backend.bodyOf(Msg.SearchAll).query, "lantern")
+        win.want("and how much fits", backend.bodyOf(Msg.SearchAll).pageSize,
+                 searchAll.pageSize)
+
+        // ---- opening a group: the matches become the source switcher --------
+        //
+        // Tapped for real, on the tile the user would touch. What arrives at
+        // openSeries is the group — every source the same series was found in
+        // — and it is the only route that carries one.
+
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": true,
+            "groups": [win.lanternGroup, win.orphanGroup], "sourceErrors": []})
+        var saTiles = win.findChild(searchAll, "searchAllTiles")
+        win.findChild(saTiles, "coverTiles").forceLayout()
+        var saTileAreas = win.findChildren(saTiles, "coverTileArea", [])
+        win.want("every group on the page is a tap target", saTileAreas.length, 2)
+
+        backend.forget()
+        saTileAreas[0].clicked(null)
+        win.want("tapping a group opens a series", win.app.screen, "series")
+        win.want("on the first match's source", win.app.currentSourceId, "src-a")
+        win.want("named as the group named it", win.app.currentSourceName,
+                 "Example Reader")
+        win.want("with that source's series id", win.app.currentSeriesId,
+                 "/manga/lantern/")
+        win.want("**and the group's matches become the source switcher**",
+                 chapterList.sources.length, 2)
+        win.want("in the reply's order, which is the user's source order",
+                 chapterList.sources[0].sourceId + "," + chapterList.sources[1].sourceId,
+                 "src-a,src-b")
+        win.want("each carrying its own series id",
+                 chapterList.sources[1].seriesId, "/series/lantern")
+        win.want("so the strip of chips is drawn",
+                 win.findChild(chapterList, "sourceStrip").visible, true)
+        win.want("with a chip for the other source",
+                 win.findChild(chapterList, "sourceChip-src-b") !== null, true)
+        win.want("and the one being read is inert",
+                 win.findChild(chapterList, "sourceChipArea-src-a").enabled, false)
+        win.want("the detail is asked for", backend.countOf(Msg.SeriesDetail), 1)
+        win.want("naming the pair", backend.bodyOf(Msg.SeriesDetail).sourceId, "src-a")
+        win.want("both halves of it", backend.bodyOf(Msg.SeriesDetail).seriesId,
+                 "/manga/lantern/")
+        win.want("the screen waits for it", chapterList.busy, true)
+        win.want("and Back remembers where the user came from",
+                 win.app.seriesCameFrom, "searchall")
+
+        // Switching source switches the *pair*, and keeps the alternatives:
+        // they belong to the group, not to the source being read.
+        backend.forget()
+        win.findChild(chapterList, "sourceChipArea-src-b").clicked(null)
+        win.want("a chip switches the source", win.app.currentSourceId, "src-b")
+        win.want("and its name", win.app.currentSourceName, "Other Reader")
+        win.want("**with that source's own series id**",
+                 win.app.currentSeriesId, "/series/lantern")
+        win.want("the detail is re-asked for the new pair",
+                 backend.bodyOf(Msg.SeriesDetail).sourceId, "src-b")
+        win.want("naming its series, not the old one",
+                 backend.bodyOf(Msg.SeriesDetail).seriesId, "/series/lantern")
+        win.want("**the alternatives survive the switch**",
+                 chapterList.sources.length, 2)
+        win.want("the title is kept rather than re-derived",
+                 chapterList.seriesTitle, "The Lantern Keeper")
+        win.want("and Back still goes where the user came from",
+                 win.app.seriesCameFrom, "searchall")
+        win.want("now the other chip is the inert one",
+                 win.findChild(chapterList, "sourceChipArea-src-b").enabled, false)
+
+        win.app.goBack()
+        win.want("Back returns to the combined search", win.app.screen, "searchall")
+
+        // ---- and a series reached any other way has no switcher -------------
+        //
+        // The other half of the same line: with no matches the list is empty,
+        // not undefined, and the strip collapses to nothing.
+
+        win.app.showScreen("downloaded")
+        backend.forget()
+        downloadedList.openRequested("src-a", "Example Reader", "/manga/lantern/",
+                                     "The Lantern Keeper")
+        win.want("a downloaded row opens the series", win.app.screen, "series")
+        win.want("**with no alternatives at all**", chapterList.sources.length, 0)
+        win.want("so no chips are drawn",
+                 win.findChild(chapterList, "sourceStrip").visible, false)
+        win.want("and Back goes back to Downloaded", win.app.seriesCameFrom, "downloaded")
+        win.want("the detail is still asked for", backend.countOf(Msg.SeriesDetail), 1)
+
+        // ---- the series detail ----------------------------------------------
+
+        backend.forget()
+        win.deliver(Msg.SeriesDetailResult, {
+            "series": {"title": "The Lantern Keeper", "description": "A long description."},
+            "chapters": [
+                {"id": "c1", "title": "Chapter 1", "number": 1,
+                 "published": "2026-01-01", "scanlator": "Group"},
+                {"id": "c2", "title": "Chapter 2", "number": 2,
+                 "published": "2026-01-02", "scanlator": "Group",
+                 "documentUuid": "doc-1"}],
+            "volumes": [
+                {"id": "c1", "title": "Volume 1", "detail": "7 chapters",
+                 "chapterCount": 7}]})
+        win.want("the chapters fill the list", chapterList.model.count, 2)
+        win.want("titled as they arrived", chapterList.model.get(0).title, "Chapter 1")
+        win.want("with the scanlator the source named",
+                 chapterList.model.get(0).scanlator, "Group")
+        win.want("a chapter with nothing downloaded is blank",
+                 chapterList.model.get(0).downloadState, "")
+        win.want("and one with a document says so",
+                 chapterList.model.get(1).downloadState, "done")
+        win.want("carrying the document", chapterList.model.get(1).documentUuid, "doc-1")
+        win.want("the volumes fill their own list", chapterList.volumeModel.count, 1)
+        win.want("each naming its first chapter",
+                 chapterList.volumeModel.get(0).chapterId, "c1")
+        win.want("the header takes the series' title",
+                 chapterList.seriesTitle, "The Lantern Keeper")
+        win.want("which is what the chrome draws", win.app.screenTitle(),
+                 "The Lantern Keeper")
+
+        // ---- the screen title, and the bar under it --------------------------
+        //
+        // The title is the one piece of chrome with the same shape on every
+        // screen, so it is the one worth making findable by colour (PLAN §6 M3
+        // as amended). It is **not** coloured itself: measured on the device,
+        // coloured text reads muddy on this panel, and the title was the
+        // largest coloured text in the app. The accent is a filled bar under
+        // it instead (ui/Style.js, ui/AccentRule.qml).
+        //
+        // What is asserted with it is the part a stale palette would quietly
+        // break: the title still *says* where you are, and the controls either
+        // side of it are still black. A header where everything were marked
+        // would pass "the title has a bar" and have lost the point.
+        var titleText = win.findChild(win.app, "screenTitle")
+        var titleRule = win.findChild(win.app, "screenTitleRule")
+        win.want("the screen title is ink, like every other word",
+                 win.colorOf(titleText), Style.ink)
+        win.want("with the accent in a bar under it",
+                 win.colorOf(titleRule), Style.accent)
+        win.want("which is a solid area rather than a hairline",
+                 titleRule.height >= Style.hairline * 4, true)
+        win.want("and as wide as the title's own words",
+                 Math.round(titleRule.width), Math.round(titleText.contentWidth))
+        win.want("sitting under the title, not through it",
+                 titleRule.y >= titleText.y + titleText.height, true)
+        win.want("and still names the screen in words", titleText.text,
+                 "The Lantern Keeper")
+        win.want("while Back beside it stays ink",
+                 win.colorOf(win.findChild(win.app, "backButton")), Style.ink)
+        // The intent, which comparing against the token cannot catch: set
+        // Style.accent to black and every assertion above still passes, and
+        // the title is no longer marked at all.
+        win.want("which is a different colour from the title it marks",
+                 win.colorOf(titleRule) !== Style.ink, true)
+
+        // The colour belongs to the chrome, not to this screen: it is still
+        // there after navigating, with whatever title the new screen has.
+        win.app.showScreen("settings")
+        win.want("the bar keeps the accent on another screen",
+                 win.colorOf(titleRule), Style.accent)
+        win.want("and follows the new title's width",
+                 Math.round(titleRule.width), Math.round(titleText.contentWidth))
+        win.want("under that screen's own name", titleText.text, "Settings")
+
+        // The chrome's own sweep, the counterpart to the one over the screens
+        // in build/qmlcheck/Harness.qml: the header is the one part of the UI
+        // that is not on any screen, so nothing there would catch a coloured
+        // word in it.
+        var chromeText = win.textsUnder(win.findChild(win.app, "screenTitle").parent, [])
+        win.want("the header has its words on it", chromeText.length >= 3, true)
+        var chromeOffenders = []
+        for (var ci = 0; ci < chromeText.length; ++ci)
+            if (win.colorOf(chromeText[ci]) === Style.accent)
+                chromeOffenders.push(String(chromeText[ci].text))
+        win.want("and not one of them is drawn in the accent",
+                 chromeOffenders.join(" | "), "")
+        win.app.showScreen("series")
+        win.want("the synopsis is the backend's words", chapterList.synopsis,
+                 "A long description.")
+        win.want("and the screen stops waiting", chapterList.busy, false)
+        win.want("a series with volumes offers the view switch",
+                 win.findChild(chapterList, "viewSwitch").visible, true)
+
+        // ---- a download's progress -------------------------------------------
+
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "downloading", "message": "Page 3 of 20."})
+        win.want("progress lands on the chapter's row",
+                 chapterList.model.get(0).downloadState, "downloading")
+        win.want("with the backend's sentence",
+                 chapterList.model.get(0).downloadMessage, "Page 3 of 20.")
+        win.want("and nowhere else", chapterList.model.get(1).downloadState, "done")
+
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "confirm",
+            "message": "That is 40 chapters. Download them all?"})
+        win.want("a confirm phase asks in the strip", chapterList.confirmingId, "c1")
+        win.want("in the backend's words", chapterList.confirmingMessage,
+                 "That is 40 chapters. Download them all?")
+
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "queued", "message": "Queued."})
+        win.want("any other phase is an answer, so the question closes",
+                 chapterList.confirmingId, "")
+
+        // The same id is in both models — a volume's id is its first chapter's
+        // — so the backend says which it meant.
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "done", "grouping": "volume",
+            "message": "Downloaded.", "documentUuid": "doc-vol"})
+        win.want("a volume's progress lands on the volume row",
+                 chapterList.volumeModel.get(0).downloadState, "done")
+        win.want("carrying its document",
+                 chapterList.volumeModel.get(0).documentUuid, "doc-vol")
+        win.want("and leaves the chapter row where it was",
+                 chapterList.model.get(0).downloadState, "queued")
+
+        // A stopped download goes back to where it started rather than leaving
+        // a message that looks like frozen progress.
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "cancelled", "message": "Stopped."})
+        win.want("a cancelled row keeps no message",
+                 chapterList.model.get(0).downloadMessage, "")
+
+        // ---- what the series screen sends -------------------------------------
+
+        backend.forget()
+        chapterList.downloadRequested("c1")
+        win.want("a download names the pair and the chapter",
+                 backend.bodyOf(Msg.EnqueueDownload).volumeId, "c1")
+        win.want("on the source being read",
+                 backend.bodyOf(Msg.EnqueueDownload).sourceId, "src-a")
+        chapterList.volumeDownloadRequested("c1")
+        win.want("a volume download says which grouping it meant",
+                 backend.bodyOf(Msg.EnqueueDownload).grouping, "volume")
+        chapterList.queueConfirmed(["c1", "c2"], false)
+        win.want("a selection is queued in one message",
+                 backend.countOf(Msg.EnqueueDownloads), 1)
+        win.want("holding every row picked",
+                 backend.bodyOf(Msg.EnqueueDownloads).chapterIds.length, 2)
+        win.want("and saying they are chapters",
+                 backend.bodyOf(Msg.EnqueueDownloads).grouping, "chapter")
+
+        // ---- deleting one download --------------------------------------------
+        //
+        // Two steps: the question is the backend's, the deleting is ours.
+
+        backend.forget()
+        chapterList.deleteRequested("doc-1")
+        win.want("the first tap asks the backend for the question",
+                 backend.countOf(Msg.DeleteDownload), 1)
+        win.want("naming the document", backend.bodyOf(Msg.DeleteDownload).documentUuid,
+                 "doc-1")
+        win.want("and nothing is confirmed by it",
+                 backend.bodyOf(Msg.DeleteDownload).confirmed, undefined)
+
+        win.deliver(Msg.DeleteConfirm, {"documentUuid": "doc-1",
+                                        "message": "Delete Chapter 2?"})
+        win.want("the question lands in the strip", chapterList.confirmingKind, "delete")
+        win.want("about that document", chapterList.confirmingId, "doc-1")
+        win.want("in the backend's words", chapterList.confirmingMessage,
+                 "Delete Chapter 2?")
+
+        backend.forget()
+        chapterList.deleteConfirmed("doc-1")
+        win.want("answering it reports what happened",
+                 backend.countOf(Msg.DeleteDownload), 1)
+        win.want("as a confirmed delete",
+                 backend.bodyOf(Msg.DeleteDownload).confirmed, true)
+        // No bridge off the device, so nothing moved — and saying so is what
+        // stops the backend forgetting a record whose document is still there.
+        win.want("with no library, nothing was trashed",
+                 backend.bodyOf(Msg.DeleteDownload).trashed, false)
+        win.want("nor removed", backend.bodyOf(Msg.DeleteDownload).removed, false)
+        win.want("and the reason travels with it",
+                 backend.bodyOf(Msg.DeleteDownload).detail, Answers.NO_BRIDGE)
+
+        // The store deciding is what clears the row, not the trash call.
+        win.want("the row still carries its document",
+                 chapterList.model.get(1).documentUuid, "doc-1")
+        win.deliver(Msg.DownloadDeleted, {"documentUuid": "doc-1"})
+        win.want("the backend forgetting it is what clears the row",
+                 chapterList.model.get(1).documentUuid, "")
+        win.want("and the row offers a download again",
+                 chapterList.model.get(1).downloadState, "")
+
+        // ---- handing a document to the reader ----------------------------------
+
+        win.deliver(Msg.SeriesDetailResult, {
+            "series": {"title": "The Lantern Keeper", "description": ""},
+            "chapters": [{"id": "c2", "title": "Chapter 2", "number": 2,
+                          "documentUuid": "doc-1"}],
+            "volumes": []})
+        backend.forget()
+        chapterList.readRequested("doc-1")
+        win.want("Read answers the backend once", backend.countOf(Msg.OpenInReader), 1)
+        win.want("naming the document", backend.bodyOf(Msg.OpenInReader).documentUuid,
+                 "doc-1")
+        win.want("with no library, it reports it as missing",
+                 backend.bodyOf(Msg.OpenInReader).missing, true)
+        win.want("and says why", backend.bodyOf(Msg.OpenInReader).detail,
+                 Answers.NO_BRIDGE)
+        win.want("a document that did not open is cleared off the row",
+                 chapterList.model.get(0).documentUuid, "")
+
+        // ---- the downloaded overview -------------------------------------------
+
+        win.app.showScreen("downloaded")
+        backend.forget()
+        win.deliver(Msg.DownloadedList, win.downloadedReply())
+        win.want("the overview fills", downloadedList.model.count, 2)
+        win.want("with the backend's own detail line",
+                 downloadedList.model.get(0).detail, "3 downloads")
+        win.want("whether the series can be opened",
+                 downloadedList.model.get(0).openable, true)
+        win.want("and its note when it has one",
+                 downloadedList.model.get(1).note, "One file is missing.")
+        win.want("carrying the newest download",
+                 downloadedList.model.get(0).latestUuid, "doc-9")
+        win.want("the page starts at the top", downloadedList.page, 1)
+        win.want("one batch of covers is asked for",
+                 backend.countOf(Msg.RequestCover), 1)
+        win.want("holding only the row that has one",
+                 backend.bodyOf(Msg.RequestCover).covers.length, 1)
+        win.want("each entry naming its own source, not a fallback",
+                 backend.bodyOf(Msg.RequestCover).covers[0].sourceId, "src-a")
+
+        backend.forget()
+        win.deliver(Msg.DownloadedList, {"series": [], "empty": "Nothing downloaded yet."})
+        win.want("an empty library empties the list", downloadedList.model.count, 0)
+        win.want("and says so in the backend's words",
+                 downloadedList.emptyNote, "Nothing downloaded yet.")
+        win.want("asking for no covers", backend.countOf(Msg.RequestCover), 0)
+
+        win.deliver(Msg.DownloadedList, win.downloadedReply())
+
+        // Deleting a whole series: the question, then the answer, then the
+        // documents — which the backend names and the frontend deletes.
+        backend.forget()
+        downloadedList.deleteRequested("src-a", "/manga/lantern/")
+        win.want("asking to delete a series asks the backend first",
+                 backend.countOf(Msg.DeleteSeries), 1)
+        win.want("and confirms nothing",
+                 backend.bodyOf(Msg.DeleteSeries).confirmed, undefined)
+
+        win.deliver(Msg.DeleteSeriesConfirm, {
+            "sourceId": "src-a", "seriesId": "/manga/lantern/",
+            "message": "Delete 2 downloads of The Lantern Keeper?",
+            "documentUuids": ["doc-1", "doc-2"]})
+        win.want("the documents come with the question",
+                 win.app.confirmingSeriesUuids.length, 2)
+        win.want("and the question reaches the screen",
+                 downloadedList.confirmingMessage,
+                 "Delete 2 downloads of The Lantern Keeper?")
+        win.want("about that series", downloadedList.confirmingSeriesId,
+                 "/manga/lantern/")
+
+        backend.forget()
+        downloadedList.deleteConfirmed("src-a", "/manga/lantern/")
+        win.want("answering reports every document on its own",
+                 backend.bodyOf(Msg.DeleteSeries).results.length, 2)
+        win.want("as a confirmed delete",
+                 backend.bodyOf(Msg.DeleteSeries).confirmed, true)
+        win.want("with no library, none of them moved",
+                 backend.bodyOf(Msg.DeleteSeries).results[0].trashed, false)
+        win.want("and the reason travels once",
+                 backend.bodyOf(Msg.DeleteSeries).detail, Answers.NO_BRIDGE)
+        win.want("the question is spent", win.app.confirmingSeriesUuids.length, 0)
+
+        backend.forget()
+        downloadedList.deleteConfirmed("src-a", "/manga/lantern/")
+        win.want("so answering it twice deletes nothing twice", backend.sendCount, 0)
+
+        // The empty folder the backend then found.
+        backend.forget()
+        win.deliver(Msg.DeleteFolder, {"folderId": "f-1",
+                                       "folderName": "The Lantern Keeper"})
+        win.want("an empty folder is answered", backend.countOf(Msg.FolderDeleted), 1)
+        win.want("echoing the name the backend composed",
+                 backend.bodyOf(Msg.FolderDeleted).folderName, "The Lantern Keeper")
+        win.want("with no library, it did not go",
+                 backend.bodyOf(Msg.FolderDeleted).removed, false)
+
+        // ---- reconciling with the tablet -----------------------------------------
+        //
+        // **The failure answer is explicit.** An empty `missing` from a
+        // frontend that never looked would be read as "none of them exist",
+        // and the backend acts on that by deleting every record.
+
+        backend.forget()
+        win.deliver(Msg.CheckDocuments, {"documentUuids": ["doc-1", "doc-2"]})
+        win.want("the check is answered", backend.countOf(Msg.DocumentsChecked), 1)
+        win.want("**saying it could not look**",
+                 backend.bodyOf(Msg.DocumentsChecked).checked, false)
+        win.want("rather than that nothing is missing",
+                 backend.bodyOf(Msg.DocumentsChecked).missing.length, 0)
+        win.want("and saying why", backend.bodyOf(Msg.DocumentsChecked).detail,
+                 Answers.NO_BRIDGE)
+
+        backend.forget()
+        win.deliver(Msg.SortDocuments, {"documentUuids": ["doc-1"],
+                                        "sourceId": "src-a",
+                                        "seriesId": "/manga/lantern/",
+                                        "folderName": "The Lantern Keeper"})
+        win.want("a filing pass is always answered",
+                 backend.countOf(Msg.DocumentsSorted), 1)
+        win.want("with nothing moved", backend.bodyOf(Msg.DocumentsSorted).moved.length, 0)
+        win.want("no folder created", backend.bodyOf(Msg.DocumentsSorted).created, false)
+        win.want("and the pair echoed back so the backend knows what it is about",
+                 backend.bodyOf(Msg.DocumentsSorted).seriesId, "/manga/lantern/")
+
+        // ---- watched series --------------------------------------------------------
+
+        win.app.showScreen("watching")
+        backend.forget()
+        win.deliver(Msg.WatchList, win.watchReply(
+            [win.lanternWatch, win.orphanWatch, win.newWatch],
+            {"seriesWithNew": 0, "newChapters": 0, "failed": 0,
+             "short": "", "phrase": ""}))
+        win.want("the watched list fills", watchList.model.count, 3)
+        win.want("with the backend's status line", watchList.model.get(0).status,
+                 "Up to date")
+        win.want("no news is nothing to say", win.app.watchShort, "")
+        win.want("so the entry point is the plain noun",
+                 sourceList.watchingLabel, "")
+
+        // The list is pushed rather than fetched, so this is the only cue that
+        // a row the screen has no cover for has arrived. The lantern row
+        // already has its file from the CoverReady above and is **not** asked
+        // for again — a second fetch for a file on disk is work the politeness
+        // limiter would put in front of a cover nobody has yet (PLAN §7.4).
+        win.want("the rows that still need a cover ask for one",
+                 backend.countOf(Msg.RequestCover), 1)
+        win.want("and only those rows",
+                 backend.bodyOf(Msg.RequestCover).covers.length, 1)
+        win.want("naming that row's own source",
+                 backend.bodyOf(Msg.RequestCover).covers[0].sourceId, "src-b")
+        win.want("and its own series", backend.bodyOf(Msg.RequestCover).covers[0].seriesId,
+                 "/series/newone")
+
+        win.deliver(Msg.WatchList, win.watchReply(
+            [win.lanternWatch, win.orphanWatch, win.newWatch],
+            {"seriesWithNew": 1, "newChapters": 3, "failed": 0,
+             "short": "3 new", "phrase": "1 series has new chapters"}))
+        win.want("a summary is shown as it arrived", win.app.watchShort, "3 new")
+        win.want("on the entry point", sourceList.watchingLabel, "3 new")
+        win.want("and the phrase on the watched screen", watchList.phrase,
+                 "1 series has new chapters")
+
+        // One result arriving mid-round is written in place.
+        var updated = {"sourceId": "src-a", "seriesId": "/manga/lantern/",
+                       "sourceName": "Example Reader", "title": "The Lantern Keeper",
+                       "newChapters": 3, "badge": "3 new chapters",
+                       "state": "new", "status": "3 new chapters"}
+        win.deliver(Msg.WatchUpdate, {"watch": updated})
+        win.want("an update lands on its own row", watchList.model.get(0).badge,
+                 "3 new chapters")
+        win.want("with the backend's status", watchList.model.get(0).status,
+                 "3 new chapters")
+        win.want("and changes the count not at all", watchList.model.count, 3)
+        win.want("nor the order", watchList.model.get(1).seriesId, "/series/orphan")
+
+        // The flag on the other screens is re-derived from the store, never
+        // toggled where the user tapped.
+        win.deliver(Msg.DownloadedList, win.downloadedReply())
+        win.want("a downloaded row knows it is watched",
+                 downloadedList.model.get(0).watched, true)
+        win.want("and so does the row for the other source",
+                 downloadedList.model.get(1).watched, true)
+
+        backend.forget()
+        watchList.unwatchRequested("src-b", "/series/orphan")
+        win.want("unwatching asks the backend", backend.countOf(Msg.UnwatchSeries), 1)
+        win.want("naming the pair", backend.bodyOf(Msg.UnwatchSeries).seriesId,
+                 "/series/orphan")
+        win.want("and nothing is dropped until it answers", watchList.model.count, 3)
+
+        win.deliver(Msg.WatchList, win.watchReply([win.lanternWatch],
+                                                  {"short": "", "phrase": ""}))
+        win.want("the store dropping it is what drops the row",
+                 watchList.model.count, 1)
+        win.want("and the downloaded row follows the store",
+                 downloadedList.model.get(1).watched, false)
+        win.want("while the watched one stays watched",
+                 downloadedList.model.get(0).watched, true)
+        win.want("an empty summary shows nothing, not zero",
+                 sourceList.watchingLabel, "")
+
+        // The series screen's button follows the store too.
+        win.app.showScreen("watching")
+        backend.forget()
+        watchList.openRequested("src-a", "Example Reader", "/manga/lantern/",
+                                "The Lantern Keeper")
+        win.want("opening from the watched list opens the series",
+                 win.app.screen, "series")
+        win.want("and Back goes back there", win.app.seriesCameFrom, "watching")
+        win.want("the series is known to be watched", chapterList.watched, true)
+        win.deliver(Msg.WatchList, win.watchReply([], {"short": "", "phrase": ""}))
+        win.want("and stops being when the store says so", chapterList.watched, false)
+
+        backend.forget()
+        watchList.checkRequested()
+        win.want("a check round is asked for explicitly",
+                 backend.countOf(Msg.CheckWatched), 1)
+        watchList.downloadNewRequested("src-a", "/manga/lantern/")
+        win.want("the menu's download asks the backend to pick the chapters",
+                 backend.countOf(Msg.DownloadNewChapters), 1)
+        watchList.markSeenRequested("src-a", "/manga/lantern/")
+        win.want("and marking seen names the pair",
+                 backend.bodyOf(Msg.MarkSeen).seriesId, "/manga/lantern/")
+
+        // ---- what a queue could not take -------------------------------------------
+
+        win.deliver(Msg.QueueResult, {"message": "Two chapters did not fit."})
+        win.want("a queue that could not take everything says so",
+                 win.app.lastError, "Two chapters did not fit.")
+        settings.clearErrorRequested()
+        win.deliver(Msg.QueueResult, {})
+        win.want("and a queue that took the lot says nothing", win.app.lastError, "")
+
+        // ---- the cache ---------------------------------------------------------------
+
+        win.deliver(Msg.CacheConfirm, {"message": "Clear 3.2 MB of cached pages?"})
+        win.want("the cache question is the backend's",
+                 settings.cacheQuestion, "Clear 3.2 MB of cached pages?")
+        win.deliver(Msg.CacheStatus, {"message": "3.2 MB of pages cached."})
+        win.want("the cache line is the backend's too",
+                 settings.cacheSummary, "3.2 MB of pages cached.")
+        win.want("and an answer puts the question away", settings.cacheQuestion, "")
+
+        backend.forget()
+        settings.cacheSizeRequested()
+        settings.clearCacheRequested()
+        win.want("asking the size asks once", backend.countOf(Msg.GetCacheSize), 1)
+        win.want("and asking to clear asks for the question first",
+                 backend.bodyOf(Msg.ClearCache).confirmed, undefined)
+        settings.clearCacheConfirmed()
+        win.want("only the second step confirms",
+                 backend.bodyOf(Msg.ClearCache).confirmed, true)
+
+        // ---- the settings screen's own messages ---------------------------------------
+
+        backend.forget()
+        settings.pingRequested()
+        win.want("Ping is a ping", backend.rawOf(Msg.Ping), "{}")
+        settings.logRequested()
+        win.want("and the log rides on one", backend.bodyOf(Msg.Ping).log, true)
+        backend.forget()
+        settings.consultRobotsRequested(true)
+        win.want("the robots switch sets and then asks",
+                 backend.types(), Msg.SetConsultRobots + "," + Msg.Ping)
+        win.want("for the value tapped",
+                 backend.bodyOf(Msg.SetConsultRobots).consultRobots, true)
+        win.want("and does not flip the switch on its own",
+                 settings.consultRobots, false)
+
+        // ---- an error ------------------------------------------------------------------
+
+        win.app.showScreen("series")
+        win.deliver(Msg.DeleteConfirm, {"documentUuid": "doc-1", "message": "Delete it?"})
+        seriesGrid.busy = true
+        seriesGrid.pendingPage = 4
+        searchAll.busy = true
+        searchAll.pendingPage = 4
+        chapterList.busy = true
+        win.deliver(Msg.Error, {"message": "The source did not answer."})
+        win.want("an error is the app's last error",
+                 win.app.lastError, "The source did not answer.")
+        win.want("shown on the settings screen", settings.lastError,
+                 "The source did not answer.")
+        win.want("a delete question whose answer failed is put away",
+                 chapterList.confirmingId, "")
+        win.want("and the strip goes back to the ordinary kind",
+                 chapterList.confirmingKind, "download")
+        win.want("the grid stops waiting", seriesGrid.busy, false)
+        win.want("and stops naming a page that never arrived",
+                 seriesGrid.pendingPage, 0)
+        win.want("the combined search too", searchAll.busy, false)
+        win.want("and its pager as well", searchAll.pendingPage, 0)
+        win.want("and the series screen", chapterList.busy, false)
+
+        backend.message(Msg.Error, "", false)
+        win.want("an error with nothing in it still says something",
+                 win.app.lastError, "Something went wrong.")
+        settings.clearErrorRequested()
+
+        // A send that never reached the backend is not silent either: under
+        // Annex the service can be stopped while the app is perfectly happy.
+        backend.failed(Msg.Search, "The backend is not responding.")
+        win.want("a send that did not arrive is reported",
+                 win.app.lastError, "The backend is not responding.")
+        settings.clearErrorRequested()
+
+        // ---- a message nothing handles ---------------------------------------------------
+
+        backend.forget()
+        win.deliver(999, {"whatever": true})
+        win.want("a message nothing handles is ignored, not fatal",
+                 backend.sendCount, 0)
+        win.want("and the app is still on its screen", win.app.screen, "series")
+
+        // ---- leaving --------------------------------------------------------------------
+        //
+        // **It detaches; it does not terminate.** The backend is a service that
+        // outlives the screen, so unloading() stops the transport and nothing
+        // else. Last, because it is the end of the app's life.
+
+        win.want("the transport is still up", backend.status, "connected")
+        win.app.unloading()
+        win.want("unloading stops the transport once", backend.stops, 1)
+        win.want("which goes idle rather than dying", backend.status, "idle")
+    }
+
+    function finish() {
+        console.log(win.failures === 0 ? "MAIN HARNESS OK"
+                                       : "MAIN HARNESS FAILED: " + win.failures)
+        Qt.exit(win.failures === 0 ? 0 : 1)
+    }
+}

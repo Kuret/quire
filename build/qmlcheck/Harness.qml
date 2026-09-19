@@ -16,6 +16,9 @@ import "../../ui/Deleting.js" as Deleting
 import "../../ui/Screens.js" as Screens
 import "../../ui/Answers.js" as Answers
 import "../../ui/Style.js" as Style
+import "../../ui/Views.js" as Views
+import "../../ui/Grouping.js" as Grouping
+import "../../ui/Covers.js" as Covers
 
 
 Window {
@@ -40,8 +43,17 @@ Window {
     ListModel { id: watchedModel }
     ListModel { id: downloadedModel }
 
-    // Stands in for Main.qml's root, which the harness cannot load (it imports
-    // the AppLoad plugin). The counters make "did this repaint?" observable:
+    // One page of the combined search, filled per case from a whole reply the
+    // way Main.qml fills it — through Grouping.js, which is the half of that
+    // path the harness can run.
+    ListModel { id: searchAllModel }
+
+    // Stands in for Main.qml's root, so the summary can be applied to a target
+    // whose writes are counted. (Main.qml itself loads perfectly well and is
+    // driven by build/qmlcheck/MainHarness.qml — the comment that used to be
+    // here, saying it could not be loaded because of a plugin, was wrong:
+    // `Backend` is a plain QML file in Annex's lib/ and the obstacle was a
+    // relative path.) The counters make "did this repaint?" observable:
     // assigning the same string to a QML property emits no change signal, so a
     // count that does not move is a label that did not redraw.
     QtObject {
@@ -100,6 +112,75 @@ Window {
     property string downloadedOpenedSource: ""
     property string downloadedOpenedSeries: ""
 
+    // The layout switch (PLAN §7.1 type 75). A count, because the property
+    // under test is that the half you are already in asks for *nothing*.
+    property int viewAsks: 0
+    property string viewAskedFor: ""
+
+    // What each screen asked to open from a tile, and what each asked to fetch
+    // covers for. The cover batches are kept whole: a downloaded or watched
+    // batch can span sources, and which source each entry names is the thing
+    // Main.qml splits on.
+    property int seriesOpens: 0
+    property string seriesOpenedId: ""
+    property var seriesCovers: []
+
+    property int watchOpens: 0
+    property string watchOpenedSource: ""
+    property string watchOpenedSeries: ""
+    property int watchCoverAsks: 0
+    property var watchCovers: []
+
+    property int downloadedCoverAsks: 0
+    property var downloadedCovers: []
+
+    // What the long-press menu asked for, per screen. Counters again, and for
+    // the sharpest version of the usual reason: the menu's destructive lines
+    // must route into the question each screen already asks, so what is being
+    // asserted is a count that did **not** move — no delete, no unwatch —
+    // beside one that did.
+    property int seriesWatches: 0
+    property string seriesWatchedSeries: ""
+    property int seriesUnwatches: 0
+    property string seriesUnwatchedSeries: ""
+
+    property int downloadedReads: 0
+    property string downloadedReadUuid: ""
+    property int downloadedWatches: 0
+    property string downloadedWatchedSeries: ""
+    property int downloadedUnwatches: 0
+
+    property int watchDownloadNews: 0
+    property string watchDownloadNewSeries: ""
+    property int watchMarkSeens: 0
+    property string watchMarkSeenSeries: ""
+    property int watchUnwatches: 0
+
+    // What the combined search asked for. Counters throughout, because half of
+    // what this screen has to get right is a request that must **not** happen:
+    // an empty query fans out to every configured source, so "nothing was
+    // sent" is only observable as a count that did not move.
+    property int searchAllAsks: 0
+    property string searchAllAsked: ""
+    property int searchAllPageAsks: 0
+    property int searchAllPageAsked: 0
+    property int searchAllCoverAsks: 0
+    property var searchAllCovers: []
+    property int searchAllOpens: 0
+    property string searchAllOpenedKey: ""
+    property string searchAllOpenedSource: ""
+    property string searchAllOpenedSeries: ""
+    property string searchAllOpenedTitle: ""
+
+    // What the series screen's source switcher asked for. The pair, both
+    // halves: switching source switches *which* (sourceId, seriesId) every
+    // message from that screen is about, and a chip that sent the new source
+    // with the old series id would be a plausible-looking bug.
+    property int sourceSwitches: 0
+    property string switchedToSource: ""
+    property string switchedToName: ""
+    property string switchedToSeries: ""
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -147,6 +228,122 @@ Window {
         return n
     }
 
+    // ---- reading a long-press menu off a screen ---------------------------
+    //
+    // The menu is addressed the way a finger addresses it: by what is actually
+    // on screen. Nothing here reaches into the screen's item list — that list
+    // is the thing under test, and a test that asked the screen what it meant
+    // to draw would agree with it however wrong it was.
+
+    function menuActions(screen) {
+        var out = []
+        var items = win.findChildren(screen, "contextMenuItem", [])
+        for (var i = 0; i < items.length; ++i)
+            out.push(items[i].action)
+        return out
+    }
+
+    function menuLabels(screen) {
+        var out = []
+        var labels = win.findChildren(screen, "contextMenuLabel", [])
+        for (var i = 0; i < labels.length; ++i)
+            out.push(String(labels[i].text))
+        return out
+    }
+
+    function menuItemFor(screen, action) {
+        var items = win.findChildren(screen, "contextMenuItem", [])
+        for (var i = 0; i < items.length; ++i)
+            if (items[i].action === action)
+                return items[i]
+        return null
+    }
+
+    // menuLive answers "could a finger use this line?" with the property that
+    // decides it for real input. A synthesised clicked() would invoke the
+    // handler whatever `enabled` says, which is how a menu item that is greyed
+    // out and still live passes a test written the other way.
+    function menuLive(screen, action) {
+        var item = win.menuItemFor(screen, action)
+        if (!item)
+            return false
+        var area = win.findChild(item, "contextMenuItemArea")
+        return area !== null && area.enabled
+    }
+
+    function tapMenu(screen, action) {
+        var item = win.menuItemFor(screen, action)
+        if (!item)
+            return false
+        win.findChild(item, "contextMenuItemArea").clicked(null)
+        return true
+    }
+
+    // holdOn drives the long press the *screen* sees: the area's own signal,
+    // which runs the delegate's handler, the coordinate mapping and the item
+    // list with it. When the press has to be timed rather than assumed, the
+    // hold phase at the foot of this file drives beginPress() instead and
+    // lets the real timers decide.
+    // The press point is the middle of the item unless a case is about where
+    // the menu lands, which is what the clamping cases pass.
+    function holdOn(area, x, y) {
+        area.pressX = x === undefined ? area.width / 2 : x
+        area.pressY = y === undefined ? area.height / 2 : y
+        area.held()
+    }
+
+    // colorOf names a colour the way Style.js writes it. QML hands colours back
+    // in lower case, and a comparison against the token would otherwise fail
+    // for the spelling rather than for the colour.
+    function colorOf(item) {
+        return String(item.color).toUpperCase()
+    }
+
+    // channels splits "#RRGGBB" into its three numbers, so a case can say
+    // "this is not a grey" and "this is deep, not pale" without naming the
+    // value — which is the only way those two intents can be pinned at all.
+    // Comparing a colour against Style.accent proves nothing about what
+    // Style.accent is.
+    function channels(hex) {
+        return [parseInt(hex.substr(1, 2), 16),
+                parseInt(hex.substr(3, 2), 16),
+                parseInt(hex.substr(5, 2), 16)]
+    }
+
+    // The WCAG relative luminance and contrast ratio, so a case can assert the
+    // pairing the accent was *chosen* for rather than restating its hex.
+    // Style.js says black on the fill is 5.90:1 and the fill on paper is
+    // 3.56:1; these are what check that the value still delivers them.
+    function luminance(hex) {
+        var c = win.channels(hex)
+        var l = []
+        for (var i = 0; i < 3; ++i) {
+            var v = c[i] / 255
+            l.push(v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+        }
+        return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+    }
+
+    function contrast(a, b) {
+        var la = win.luminance(a)
+        var lb = win.luminance(b)
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+    }
+
+    // Every piece of text under an item, found by what a Text *is* rather than
+    // by objectName: a heading somebody recolours is exactly the one nobody
+    // remembered to give a name to. This is what "no word carries the accent"
+    // is asserted over.
+    function textsUnder(item, out) {
+        if (!item)
+            return out
+        if (item.font !== undefined && typeof item.text === "string")
+            out.push(item)
+        for (var i = 0; i < item.children.length; ++i)
+            win.textsUnder(item.children[i], out)
+        return out
+    }
+
     function findChild(item, name) {
         if (!item)
             return null
@@ -172,9 +369,59 @@ Window {
         }
     }
     AddSource   { id: addSource;   objectName: "addSource";   anchors.fill: parent }
-    SeriesGrid  { id: seriesGrid;  objectName: "seriesGrid";  anchors.fill: parent; model: seriesModel }
+    SeriesGrid {
+        id: seriesGrid
+        objectName: "seriesGrid"
+        anchors.fill: parent
+        model: seriesModel
+        onOpenRequested: {
+            win.seriesOpens++
+            win.seriesOpenedId = seriesId
+        }
+        onCoversRequested: win.seriesCovers = covers
+        onWatchRequested: {
+            win.seriesWatches++
+            win.seriesWatchedSeries = seriesId
+        }
+        onUnwatchRequested: {
+            win.seriesUnwatches++
+            win.seriesUnwatchedSeries = seriesId
+        }
+    }
+    SearchAll {
+        id: searchAll
+        objectName: "searchAll"
+        anchors.fill: parent
+        model: searchAllModel
+        onSearchRequested: {
+            win.searchAllAsks++
+            win.searchAllAsked = query
+        }
+        onPageRequested: {
+            win.searchAllPageAsks++
+            win.searchAllPageAsked = page
+        }
+        onCoversRequested: {
+            win.searchAllCoverAsks++
+            win.searchAllCovers = covers
+        }
+        onOpenRequested: {
+            win.searchAllOpens++
+            win.searchAllOpenedKey = key
+            win.searchAllOpenedSource = sourceId
+            win.searchAllOpenedSeries = seriesId
+            win.searchAllOpenedTitle = title
+        }
+    }
+
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
                   volumeModel: volumesModel
+                  onSourceSwitchRequested: {
+                      win.sourceSwitches++
+                      win.switchedToSource = sourceId
+                      win.switchedToName = sourceName
+                      win.switchedToSeries = seriesId
+                  }
                   onVolumeDownloadRequested: {
                       win.volumeAsks++
                       win.volumeAskedFor = chapterId
@@ -216,7 +463,44 @@ Window {
         onClearCacheRequested: win.cacheClearAsks++
         onClearCacheConfirmed: win.cacheClears++
     }
-    WatchList   { id: watchList;   objectName: "watchList";   anchors.fill: parent; model: watchedModel }
+    WatchList {
+        id: watchList
+        objectName: "watchList"
+        anchors.fill: parent
+        model: watchedModel
+        onOpenRequested: {
+            win.watchOpens++
+            win.watchOpenedSource = sourceId
+            win.watchOpenedSeries = seriesId
+        }
+        onCoversRequested: {
+            win.watchCoverAsks++
+            win.watchCovers = covers
+        }
+        onUnwatchRequested: win.watchUnwatches++
+        onDownloadNewRequested: {
+            win.watchDownloadNews++
+            win.watchDownloadNewSeries = seriesId
+        }
+        onMarkSeenRequested: {
+            win.watchMarkSeens++
+            win.watchMarkSeenSeries = seriesId
+        }
+    }
+
+    // The layout switch lives in Main.qml's header. It is driven here on its
+    // own, against Views.js, for what the control itself does: both halves
+    // drawn, the half you are already in inert. What it asks the *shell* for —
+    // and that the layout does not flip until the status comes back — is in
+    // build/qmlcheck/MainHarness.qml, which loads the real Main.qml.
+    ViewToggle {
+        id: viewToggle
+        objectName: "viewToggle"
+        onViewRequested: {
+            win.viewAsks++
+            win.viewAskedFor = view
+        }
+    }
 
     // The downloaded overview (PLAN §12.5). Its own model, filled per case, so
     // no case inherits the rows of the one before it.
@@ -238,14 +522,48 @@ Window {
             win.downloadedDeletes++
             win.downloadedDeletedSeries = seriesId
         }
+        onCoversRequested: {
+            win.downloadedCoverAsks++
+            win.downloadedCovers = covers
+        }
+        onReadRequested: {
+            win.downloadedReads++
+            win.downloadedReadUuid = documentUuid
+        }
+        onWatchRequested: {
+            win.downloadedWatches++
+            win.downloadedWatchedSeries = seriesId
+        }
+        onUnwatchRequested: win.downloadedUnwatches++
     }
     PagerBar    { id: lonePager;   width: 1620 }
 
+    // Both keyboard layouts, so the URL one can be inspected without driving a
+    // screen into its search state.
+    Keyboard {
+        id: textKeys
+        objectName: "textKeys"
+        width: 1620
+        layout: "text"
+        onKeyTyped: { win.typed.push(text); win.typedChanged() }
+    }
+    Keyboard {
+        id: urlKeys
+        objectName: "urlKeys"
+        width: 1620
+        layout: "url"
+        onKeyTyped: { win.typed.push(text); win.typedChanged() }
+    }
 
     Component.onCompleted: {
         for (var i = 0; i < 40; ++i)
+            // Every role Main.qml's fillSeries fills, including `watched`,
+            // which the long-press menu's Watch / Stop watching line reads. A
+            // ListModel fixes its roles on the first append, so a fixture
+            // without it could never be given one later.
             seriesModel.append({"seriesId": "x" + i, "title": "Series " + i,
-                                "coverUrl": "https://example.invalid/c.jpg", "coverPath": ""})
+                                "coverUrl": "https://example.invalid/c.jpg", "coverPath": "",
+                                "watched": false})
         for (var j = 0; j < 55; ++j)
             chaptersModel.append({"chapterId": "c" + j, "title": "Chapter " + j, "number": j,
                                   "published": "2026-01-01", "scanlator": "Group",
@@ -276,7 +594,22 @@ Window {
         onTriggered: win.check()
     }
 
+    // An exception thrown anywhere in the cases below would otherwise leave
+    // this process hung rather than failing: finish() is what exits, and a case
+    // that threw never reaches it. A hang is not a failure anyone can read, and
+    // it is exactly what a mutation that empties a batch produces when the next
+    // line indexes into it.
     function check() {
+        try {
+            win.runChecks()
+        } catch (err) {
+            console.log("FAIL the harness threw before it finished: " + err)
+            win.failures++
+            win.finish()
+        }
+    }
+
+    function runChecks() {
         win.want("sourceList pageSize holds whole rows", sourceList.pageSize > 1, true)
         win.want("chapterList pageSize holds whole rows", chapterList.pageSize > 1, true)
         win.want("seriesGrid pageSize is whole rows of 3", seriesGrid.pageSize % 3, 0)
@@ -312,56 +645,37 @@ Window {
         win.want("the log opens at the newest page", settings.logPage > 1, true)
         win.want("the log has a total", lp.totalPages > 1, true)
 
-        // ---- AppLoad's keyboard, and what it covers ---------------------
+        // ---- the keyboard, and what it must not disturb -----------------
         //
-        // Quire's own keyboard was part of the layout: it took the bottom of
-        // the screen and the screens were built around it. AppLoad's is an
-        // *overlay* — measured on hardware 2026-09-19, **1620×544** on a
-        // 2160-tall screen, in the same place for a prose field and a URL one.
-        //
-        // So the question is no longer "does the keyboard move the pager", it
-        // is **"does the keyboard cover the field being typed into"**. That is
-        // geometry, and it can be asked honestly without a device.
-        //
-        // The panel's rectangle came back with a `0,0` origin, which cannot be
-        // right for something drawn at the bottom of the screen, so only its
-        // *height* is trusted here. If a later AppLoad reports a real origin,
-        // this constant is the thing to replace with it.
-        var panelHeight = 544
-        var safeBottom = win.height - panelHeight
+        // Quire's keyboard (ui/Keyboard.qml) is part of the layout, not an
+        // overlay: it takes the bottom of the screen and the screens are built
+        // around it. On the series grid it is anchored above the pager rather
+        // than over it, so the question that matters is the one below — does
+        // raising it move the pager out from under a thumb, or change how many
+        // tiles a page holds?
+        var sizeBefore = seriesGrid.pageSize
+        var pagerYBefore = win.findChild(seriesGrid, "seriesPager").y
+        seriesGrid.searching = true
+        win.want("the keyboard does not resize the page", seriesGrid.pageSize, sizeBefore)
+        win.want("the keyboard does not move the pager",
+                 win.findChild(seriesGrid, "seriesPager").y, pagerYBefore)
+        seriesGrid.searching = false
 
-        function fieldBottom(screen, name) {
-            var field = win.findChild(screen, name)
-            if (!field)
-                return -1
-            var p = field.mapToItem(win.contentItem, 0, field.height)
-            return p.y
-        }
-
-        // Every field a keyboard can be raised for, with its screen showing.
+        // Every screen that owns a field, showing, for the dismissal cases.
         seriesGrid.visible = true
-        win.want("the search field sits above the keyboard",
-                 fieldBottom(seriesGrid, "searchField") <= safeBottom, true)
-        win.want("and it is a real field, not a label",
-                 win.findChild(seriesGrid, "searchField") !== null, true)
-
         addSource.visible = true
         addSource.reset()
-        win.want("the address field sits above the keyboard",
-                 fieldBottom(addSource, "urlField") <= safeBottom, true)
-
         sourceList.renamingId = "src-a"
         sourceList.visible = true
-        win.want("the rename field sits above the keyboard",
-                 fieldBottom(sourceList, "nameField") <= safeBottom, true)
+
         // ---- and what puts it away ---------------------------------------
         //
-        // AppLoad's panel raises itself on focus and lowers itself for nothing,
-        // so Quire has to. What the harness can drive is the *focus* half —
-        // which is the half that decides whether the panel is raised again a
-        // moment later. Whether the panel obeys `Qt.inputMethod.hide()` is
-        // device-only and is **not** asserted here; there is no panel offscreen
-        // to obey anything.
+        // Quire's keyboard goes away with the screen or the panel that owns it,
+        // and `dismissInput` is what the rest of the app calls to be sure. It
+        // is two moves in a fixed order — drop the field's focus, *then* lower
+        // the keyboard — and both halves are asserted here: the focus half on
+        // the two real TextInputs, the lowering half on the keyboard's own
+        // visibility.
 
         // First, the fact the rule is built on, measured rather than assumed:
         // **a tap somewhere else does not move focus.** If it did, most of this
@@ -373,9 +687,17 @@ Window {
         win.want("a tap elsewhere does not clear it by itself",
                  nameField.activeFocus || nameField.focus, true)
 
+        // The rename panel carries its own keyboard, so it is up exactly when
+        // the panel is.
+        var renameKeys = win.findChild(sourceList, "renameKeyboard")
+        win.want("the rename panel brings a keyboard", renameKeys !== null, true)
+        win.want("and it is up while the panel is", renameKeys.visible, true)
+
         // Closing the panel puts the keyboard away with it.
         sourceList.dismissInput()
         win.want("dismissing drops the field's focus", nameField.activeFocus, false)
+        sourceList.renamingId = ""
+        win.want("closing the panel takes the keyboard with it", renameKeys.visible, false)
 
         // Accept: the panel does not survive the thing it was raised for.
         sourceList.renamingId = "src-a"
@@ -387,15 +709,23 @@ Window {
         // Navigating away. showScreen is Main.qml's and cannot be driven here,
         // but what it calls is each screen's dismissInput, and that is what is
         // asserted: the screens put their own keyboards away when asked.
+        //
+        // The search bar is a display, not an input — nothing on the device
+        // would raise a keyboard for a focused field — so "the keyboard is up"
+        // is `searching`, and that is what is driven and asserted here, by way
+        // of a real tap on the bar.
         var searchField = win.findChild(seriesGrid, "searchField")
-        searchField.forceActiveFocus()
-        win.want("the search field takes focus", searchField.activeFocus, true)
-        win.want("and searching follows it", seriesGrid.searching, true)
+        var searchKeys = win.findChild(seriesGrid, "searchKeyboard")
+        win.findChild(seriesGrid, "searchBarArea").clicked(null)
+        win.want("tapping the search bar raises the keyboard", seriesGrid.searching, true)
+        win.want("and the keyboard is on screen", searchKeys.visible, true)
         seriesGrid.dismissInput()
-        win.want("dismissing drops the search field's focus", searchField.activeFocus, false)
+        win.want("dismissing lowers the search keyboard", searchKeys.visible, false)
         // The placeholder comes back with it, deliberately: "Search this
         // source" is the right label for a screen nobody is typing into.
         win.want("and searching follows that too", seriesGrid.searching, false)
+        win.want("the placeholder comes back",
+                 win.findChild(seriesGrid, "searchPlaceholder").visible, true)
 
         // ---- Clear, on the search field ----------------------------------
         //
@@ -418,16 +748,15 @@ Window {
                  clearButton.width >= 120 && clearButton.height >= 60, true)
 
         // It empties the field.
-        searchField.forceActiveFocus()
-        searchField.text = "lantern"
+        seriesGrid.query = "lantern"
         win.findChild(seriesGrid, "clearSearchArea").clicked(null)
         win.want("Clear empties the field", searchField.text, "")
         win.want("and the screen agrees", seriesGrid.query, "")
 
         // **And keeps the keyboard up.** Tap Clear, keyboard vanishes, tap the
-        // field again to carry on -- that is more taps than the backspacing
+        // bar again to carry on -- that is more taps than the backspacing
         // this replaced.
-        win.want("Clear keeps the field focused", searchField.activeFocus, true)
+        win.want("Clear leaves the keyboard on screen", searchKeys.visible, true)
         win.want("so the keyboard stays up", seriesGrid.searching, true)
 
         // The results stay until a new search runs: the user is mid-task, and
@@ -437,12 +766,24 @@ Window {
         seriesGrid.dismissInput()
 
         // Typing does not dismiss anything. The failure mode of an over-eager
-        // rule is a field that closes its own keyboard mid-word.
-        searchField.forceActiveFocus()
-        searchField.text = "lan"
-        win.want("typing keeps the focus", searchField.activeFocus, true)
-        searchField.text = "lant"
-        win.want("and keeps it as the query grows", searchField.activeFocus, true)
+        // rule is a field that closes its own keyboard mid-word. Driven
+        // through the keyboard's own signals, which is the only way text ever
+        // reaches this field.
+        seriesGrid.query = ""
+        seriesGrid.searching = true
+        searchKeys.keyTyped("l")
+        searchKeys.keyTyped("a")
+        searchKeys.keyTyped("n")
+        win.want("the keys reach the query", seriesGrid.query, "lan")
+        win.want("and the field shows what was typed", searchField.text, "lan")
+        win.want("typing keeps the keyboard up", seriesGrid.searching, true)
+        searchKeys.keyTyped("t")
+        win.want("and keeps it as the query grows", seriesGrid.searching, true)
+        searchKeys.backspace()
+        win.want("backspace takes one character back", seriesGrid.query, "lan")
+        searchKeys.clearAll()
+        win.want("and a held backspace clears the lot", seriesGrid.query, "")
+        win.want("without putting the keyboard away", seriesGrid.searching, true)
         seriesGrid.dismissInput()
 
         // The address field, the same way round.
@@ -451,7 +792,20 @@ Window {
         addSource.start()
         win.want("starting a check drops the address field's focus",
                  addrField.activeFocus, false)
+
+        // Its keyboard belongs to the form, so leaving the form lowers it.
+        // With no address typed, `start` returns early and the form — and the
+        // keyboard with it — is still there, which is right: the user has not
+        // finished.
+        var urlKeyboard = win.findChild(addSource, "addSourceKeyboard")
+        win.want("the form carries a keyboard", urlKeyboard !== null, true)
+        win.want("an empty address leaves the keyboard up", urlKeyboard.visible, true)
+        addSource.url = "example.invalid"
+        addSource.start()
+        win.want("a real check takes the form away", addSource.phase, "probing")
+        win.want("and the keyboard with it", urlKeyboard.visible, false)
         addSource.reset()
+        win.want("and it is back on the form", urlKeyboard.visible, true)
 
         sourceList.renamingId = ""
         seriesGrid.visible = false
@@ -618,6 +972,50 @@ Window {
 
         settings.consultRobots = false
         win.want("the toggle follows the push back", robotsState.text, "Off")
+
+        // ---- the on-screen keyboard ------------------------------------
+        //
+        // The device ships Noto Sans, Noto Serif, NotoSansUI and Noto Mono and
+        // nothing else. U+232B ERASE TO THE LEFT is in Noto Sans *Symbols*,
+        // which is not installed, so the backspace key rendered as a tofu box.
+        // It is drawn now, and the assertion is that nothing in the keyboard
+        // depends on a glyph at all.
+        var backKey = win.findChild(urlKeys, "keyboardBackspace")
+        win.want("the backspace key exists", backKey !== null, true)
+        var glyph = null
+        for (var g = 0; g < backKey.children.length; ++g)
+            if (backKey.children[g].toString().indexOf("QQuickCanvasItem") === 0)
+                glyph = backKey.children[g]
+        win.want("the backspace glyph is drawn, not typed", glyph !== null, true)
+        win.want("the drawn glyph has a size", glyph.width > 0 && glyph.height > 0, true)
+        win.want("the backspace key carries no text",
+                 win.countLabel(backKey, "") === 0 && win.visibleKeyLabels(backKey).length, 0)
+
+        // A URL layout with two full stops had one key that did nothing the
+        // other did not, and a space bar that silently was not one.
+        win.want("the URL layout has exactly one full stop", win.countLabel(urlKeys, "."), 1)
+        win.want("the URL layout has no space bar",
+                 win.findChild(urlKeys, "keyboardSpace").visible, false)
+        win.want("the text layout keeps its space bar",
+                 win.findChild(textKeys, "keyboardSpace").visible, true)
+        win.want("the text layout has one full stop", win.countLabel(textKeys, "."), 1)
+
+        // The suffix keys, in the URL layout only, inserting the whole string.
+        var urlSuffixes = win.findChildren(urlKeys, "keyboardSuffix", [])
+        var textSuffixes = win.findChildren(textKeys, "keyboardSuffix", [])
+        win.want("the URL layout has two suffix keys", urlSuffixes.length, 2)
+        win.want("the text layout has none", textSuffixes.length, 0)
+
+        win.typed = []
+        urlSuffixes[0].children[1].clicked(null)
+        urlSuffixes[1].children[1].clicked(null)
+        win.want("the first suffix types .com", win.typed[0], ".com")
+        win.want("the second suffix types .org", win.typed[1], ".org")
+
+        // The row still fits the panel without reflowing or shrinking keys.
+        win.want("the URL keyboard fits the panel", urlKeys.width >= 1620, true)
+        win.want("the suffix keys stay a comfortable target",
+                 urlSuffixes[0].width >= 150 && urlSuffixes[0].height >= 80, true)
 
         // The honest label.
         lonePager.page = 3; lonePager.totalPages = 12
@@ -1245,9 +1643,25 @@ Window {
         // the case before it is a row nobody chose.
         function downloadedRows(rows) {
             downloadedModel.clear()
-            for (var i = 0; i < rows.length; ++i)
-                downloadedModel.append(rows[i])
+            for (var i = 0; i < rows.length; ++i) {
+                // Every role Main.qml's fillDownloaded fills, on every row. A
+                // ListModel fixes its roles on the first append and silently
+                // drops keys added later, so a fixture that left the cover off
+                // the first row would take the cover off every row after it —
+                // and the tiles would then be asserted against a model shape
+                // the app never produces.
+                var r = rows[i]
+                downloadedModel.append({
+                    "sourceId": r.sourceId, "sourceName": r.sourceName,
+                    "seriesId": r.seriesId, "title": r.title, "detail": r.detail,
+                    "openable": r.openable, "note": r.note,
+                    "coverUrl": r.coverUrl ? r.coverUrl : "",
+                    "coverPath": r.coverPath ? r.coverPath : "",
+                    "latestUuid": r.latestUuid ? r.latestUuid : "",
+                    "watched": r.watched ? true : false})
+            }
             win.findChild(downloadedList, "downloadedRows").forceLayout()
+            win.findChild(downloadedList, "coverTiles").forceLayout()
         }
 
         function visibleRowAreas() {
@@ -1730,6 +2144,1861 @@ Window {
         win.want("no bridge reports the document missing", noReader.reply.missing, true)
         win.want("and says why", noReader.reply.detail, Answers.NO_BRIDGE)
 
+        // ---- the layout each screen is remembered in (PLAN §7.1 type 75) ---
+        //
+        // Three screens remember a layout. The value lives in the backend's
+        // store and comes back on the **Pong status**, never in a reply of its
+        // own, so the screen draws what the store says rather than what the
+        // switch hoped. Views.js is the frontend half of that contract.
+
+        // Nothing has arrived yet, and the screen still has a layout to draw.
+        // This is the case that would otherwise be a blank screen on the way
+        // in: the frontend pings on startup, but the user can be standing on
+        // Downloaded before the answer lands.
+        win.want("no status at all means grid", Views.fromStatus(null, "downloaded"), "grid")
+        win.want("a status with no views means grid", Views.fromStatus({}, "browse"), "grid")
+
+        var stored = {"views": {"search": "list", "downloaded": "grid", "watching": "list"}}
+        win.want("the search screen reads its own setting",
+                 Views.fromStatus(stored, "browse"), "list")
+        win.want("the downloaded screen reads its own",
+                 Views.fromStatus(stored, "downloaded"), "grid")
+        win.want("the watched screen reads its own",
+                 Views.fromStatus(stored, "watching"), "list")
+
+        // "browse" is "search" on the wire: one setting covers a source's
+        // catalogue and its search results, which are the same tiles.
+        win.want("browse is search on the wire", Views.wireName("browse"), "search")
+        win.want("a screen with nothing to remember has no wire name",
+                 Views.wireName("settings"), "")
+        win.want("so the switch is not offered there", Views.remembers("settings"), false)
+        win.want("but it is on watching", Views.remembers("watching"), true)
+
+        // A layout this Quire cannot draw -- a hand-edited file, or one written
+        // by a newer Quire -- is drawn the usual way rather than not at all.
+        win.want("a layout Quire cannot draw is drawn as grid",
+                 Views.fromStatus({"views": {"watching": "carousel"}}, "watching"), "grid")
+
+        // ---- the switch itself ---------------------------------------------
+
+        var gridHalf = win.findChild(viewToggle, "viewToggleGrid")
+        var listHalf = win.findChild(viewToggle, "viewToggleList")
+        var gridArea = win.findChild(viewToggle, "viewToggleGridArea")
+        var listArea = win.findChild(viewToggle, "viewToggleListArea")
+
+        win.want("the switch opens on grid", viewToggle.view, "grid")
+        win.want("both layouts are named on it, always",
+                 win.visibleKeyLabels(viewToggle).join(","), "Grid,List")
+        win.want("the layout showing is the filled half", gridHalf.current, true)
+        win.want("and the other half is not", listHalf.current, false)
+
+        // `enabled` is the assertion, not a synthesised tap: emitting clicked()
+        // invokes the handler directly and bypasses `enabled` entirely, so
+        // "tapping it does nothing" written that way passes for reasons that
+        // have nothing to do with the device.
+        win.want("the half you are already in is inert", gridArea.enabled, false)
+        win.want("and the other half is live", listArea.enabled, true)
+
+        win.viewAsks = 0
+        listArea.clicked(null)
+        win.want("tapping the other half asks once", win.viewAsks, 1)
+        win.want("for the layout it names", win.viewAskedFor, "list")
+
+        // It flips nothing itself. Until a status says otherwise the switch
+        // still shows the layout the store holds, which is what stops a write
+        // that failed leaving the control and the screen disagreeing.
+        win.want("the switch did not flip itself", viewToggle.view, "grid")
+        win.want("and the filled half did not move", gridHalf.current, true)
+
+        // The status arriving is what moves it.
+        viewToggle.view = Views.fromStatus(stored, "browse")
+        win.want("the stored layout is what fills a half", listHalf.current, true)
+        win.want("the half you left becomes live", gridArea.enabled, true)
+        win.want("and the one you are in goes inert", listArea.enabled, false)
+        gridArea.clicked(null)
+        win.want("asking to go back names grid, not “the other one”",
+                 win.viewAskedFor, "grid")
+        win.want("which is two asks in all", win.viewAsks, 2)
+
+        // ---- search results, as tiles and as rows --------------------------
+
+        // `visible` is effective visibility in QML, so a screen the harness
+        // hid earlier reports every child of it as hidden too.
+        seriesGrid.visible = true
+        var searchTiles = win.findChild(seriesGrid, "seriesTiles")
+        var searchRows = win.findChild(seriesGrid, "seriesRows")
+        win.want("search opens as tiles before any status", seriesGrid.view, "grid")
+        win.want("the tiles are what is on screen", searchTiles.visible, true)
+        win.want("and the rows are not", searchRows.visible, false)
+
+        var tilePage = seriesGrid.pageSize
+        win.want("a page of tiles is whole rows of three", tilePage % 3, 0)
+
+        seriesGrid.view = "list"
+        win.want("the switch swaps the layout", searchRows.visible, true)
+        win.want("and puts the tiles away", searchTiles.visible, false)
+        win.want("a page of rows is one column", seriesGrid.columns, 1)
+        win.want("and holds more results than a page of tiles",
+                 seriesGrid.pageSize > tilePage, true)
+        // Switching layout changes what a page *is*, so the page is refetched
+        // rather than re-sliced: the backend owns the listing and this screen
+        // has never held the extra rows a taller page needs.
+        win.want("switching layout asks for the page again", seriesGrid.pendingPage, 1)
+        seriesGrid.busy = false
+        seriesGrid.pendingPage = 0
+
+        // Covers are drawn in the rows now, so covers are asked for: this used
+        // to assert that a list layout asked for *nothing*, which was right
+        // while a row was two lines of text and is the wrong intent since the
+        // row grew a thumbnail. It is the same already-downscaled cache entry
+        // the tiles ask for -- no second size, no second request.
+        win.want("switching to rows asks for the covers the rows draw",
+                 win.seriesCovers.length, seriesGrid.rowCount)
+        win.want("and asks for the file the tiles ask for, not a second one",
+                 String(win.seriesCovers[0].url), "https://example.invalid/c.jpg")
+
+        searchRows.forceLayout()
+
+        // The thumbnail itself: on every row, inside the row's height, in the
+        // shape the cache writes. Every number comes from Style.js.
+        var searchThumbs = win.findChildren(searchRows, "rowCover", [])
+        win.want("every row on the page carries a cover", searchThumbs.length > 1, true)
+        win.want("the thumbnail is as wide as the token says",
+                 searchThumbs[0].width, Style.thumbWidth)
+        win.want("and as tall", searchThumbs[0].height, Style.thumbHeight)
+        // The shape the cache writes (300x450), so nothing has to crop.
+        win.want("which is the shape the cover cache writes", searchThumbs[0].width,
+                 Math.round(searchThumbs[0].height / Style.coverRatio))
+
+        // The arithmetic the thumbnail must not *decide*. The row height is
+        // chosen (Style.coverRowHeight) and the page size follows from it; what
+        // must never happen is a picture setting the row's height as a side
+        // effect, because then the number of results on a page is whatever the
+        // art happened to measure. The row was made taller on purpose after
+        // seeing it on the device -- fewer results per page is the price, and
+        // it was paid deliberately rather than by accident.
+        win.want("the thumbnail is shorter than the row it sits in",
+                 Style.thumbHeight < Style.coverRowHeight, true)
+        // The intent, which every other assertion here is relative to and so
+        // cannot catch: a row carrying a cover is deliberately taller than an
+        // ordinary one. Collapse the two back together and the thumbnail is a
+        // postage stamp again, with every proportion still "correct".
+        win.want("a cover row is taller than an ordinary row",
+                 Style.coverRowHeight > Style.rowHeight, true)
+        win.want("so a row is still exactly one row high",
+                 win.findChildren(seriesGrid, "seriesRowArea", [])[0].height,
+                 Style.coverRowHeight)
+        win.want("and a page of rows is still the rows that fit",
+                 searchRows.height, seriesGrid.pageSize * Style.coverRowHeight)
+
+        // No cover yet: the same titled placeholder the tiles draw, scaled
+        // down (ui/CoverArt.qml). Never a ragged gap, never a broken image.
+        var searchRowArt = win.findChildren(searchRows, "coverPlaceholder", [])
+        win.want("a row with no cover says which book it is",
+                 searchRowArt[0].text, "Series 0")
+        win.want("and that is what is drawn", searchRowArt[0].visible, true)
+
+        // And the cover arriving puts it away, on a row exactly as on a tile.
+        seriesModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.png")))
+        win.want("a cover that arrived puts the row's placeholder away",
+                 searchRowArt[0].visible, false)
+        win.want("and the picture is what is drawn instead",
+                 win.findChildren(searchRows, "coverImage", [])[0].visible, true)
+        seriesModel.setProperty(0, "coverPath", "")
+
+        seriesGrid.sourceName = "Example Reader"
+        win.want("a row says where the result came from",
+                 win.findChild(seriesGrid, "seriesRowSubtitle").text, "Example Reader")
+
+        win.seriesOpens = 0
+        var seriesRowAreas = win.findChildren(seriesGrid, "seriesRowArea", [])
+        win.want("every row on the page is a tap target", seriesRowAreas.length > 1, true)
+        seriesRowAreas[1].clicked(null)
+        win.want("tapping a row opens once", win.seriesOpens, 1)
+        win.want("the series that row names", win.seriesOpenedId, "x1")
+
+        seriesGrid.view = "grid"
+        seriesGrid.busy = false
+        seriesGrid.pendingPage = 0
+        win.findChild(searchTiles, "coverTiles").forceLayout()
+        win.want("going back to tiles asks for their covers again",
+                 win.seriesCovers.length > 0, true)
+        var seriesTileAreas = win.findChildren(searchTiles, "coverTileArea", [])
+        win.seriesOpens = 0
+        seriesTileAreas[1].clicked(null)
+        win.want("tapping a tile opens once", win.seriesOpens, 1)
+        win.want("the series that tile names", win.seriesOpenedId, "x1")
+
+        // ---- Downloaded as tiles -------------------------------------------
+        //
+        // The default, and the case the placeholder exists for: most of a
+        // library predates covers being stored at all.
+
+        win.want("Downloaded opens as tiles before any status", downloadedList.view, "grid")
+
+        downloadedRows([
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+             "detail": "3 downloads", "openable": true, "note": "",
+             "coverUrl": "https://example.invalid/lantern.jpg", "latestUuid": "doc-1"},
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/orphan/", "title": "An Orphan",
+             "detail": "1 download", "openable": true, "note": "", "coverUrl": ""},
+            {"sourceId": "gone", "sourceName": "gone",
+             "seriesId": "/manga/lost/", "title": "Lost",
+             "detail": "2 downloads", "openable": false,
+             "note": "The source this came from has been removed.", "coverUrl": ""}])
+
+        var dlTiles = win.findChild(downloadedList, "downloadedTiles")
+        var dlRows = win.findChild(downloadedList, "downloadedRows")
+        win.want("the tiles are what is on screen", dlTiles.visible, true)
+        win.want("and the rows are not", dlRows.visible, false)
+
+        // A row with no cover is a titled placeholder, never a blank square and
+        // never a broken image.
+        var dlPlaceholders = win.findChildren(dlTiles, "coverPlaceholder", [])
+        win.want("every tile can say which book it is", dlPlaceholders.length, 3)
+        win.want("a series with no cover shows its title instead",
+                 dlPlaceholders[1].text, "An Orphan")
+        win.want("and that is what is drawn", dlPlaceholders[1].visible, true)
+
+        // The batch names each row's own source: unlike a search, this screen
+        // draws series from every source at once, and only the source knows how
+        // to fetch its covers.
+        win.downloadedCoverAsks = 0
+        win.downloadedCovers = []
+        downloadedList.requestVisibleCovers()
+        win.want("covers are asked for once", win.downloadedCoverAsks, 1)
+        win.want("only for the rows that have one", win.downloadedCovers.length, 1)
+        win.want("named with that row's own source", win.downloadedCovers[0].sourceId, "src-a")
+        win.want("and that row's own series",
+                 win.downloadedCovers[0].seriesId, "/manga/lantern/")
+
+        // A cover that has arrived replaces the placeholder, and is not asked
+        // for a second time: the politeness limiter serialises fetches (PLAN
+        // §7.4), so a refetch stands in front of a cover nobody has yet.
+        downloadedModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.png")))
+        win.want("a cover that arrived puts the placeholder away",
+                 dlPlaceholders[0].visible, false)
+        win.downloadedCoverAsks = 0
+        downloadedList.requestVisibleCovers()
+        win.want("and is not asked for again", win.downloadedCoverAsks, 0)
+
+        win.downloadedOpens = 0
+        var dlTileAreas = win.findChildren(dlTiles, "coverTileArea", [])
+        dlTileAreas[0].clicked(null)
+        win.want("a tile opens its series once", win.downloadedOpens, 1)
+        win.want("on its own source", win.downloadedOpenedSource, "src-a")
+        win.want("and its own series", win.downloadedOpenedSeries, "/manga/lantern/")
+
+        // A row whose source has been removed is inert in the grid too: there
+        // is no source left to browse, and a tap that goes nowhere quietly is
+        // worse than a tile that never offered.
+        dlTileAreas[2].clicked(null)
+        win.want("a tile with no source left opens nothing", win.downloadedOpens, 1)
+
+        // Deleting stays in the rows for now. The grid is navigation only.
+        downloadedList.view = "list"
+        win.want("the switch swaps Downloaded's layout", dlRows.visible, true)
+        win.want("and puts the tiles away", dlTiles.visible, false)
+        win.want("rows hold more series than tiles",
+                 downloadedList.pageSize > dlTiles.pageSize, true)
+        win.want("Delete is on every row", win.findChildren(dlRows, "deleteSeriesArea", []).length, 3)
+        win.want("and on no tile", win.findChildren(dlTiles, "deleteSeriesArea", []).length, 0)
+
+        // The row's own cover. This screen is the one the placeholder exists
+        // for: a series downloaded before covers were remembered has no URL at
+        // all, so "no picture" is the common case and has to look deliberate.
+        dlRows.forceLayout()
+        var dlThumbs = win.findChildren(dlRows, "rowCover", [])
+        var dlRowArt = win.findChildren(dlRows, "coverPlaceholder", [])
+        win.want("every downloaded row carries a cover", dlThumbs.length, 3)
+        win.want("sized from the row, not sizing it",
+                 dlThumbs[0].height, Style.thumbHeight)
+        win.want("so the row is still one row high",
+                 win.findChildren(dlRows, "downloadedRowArea", [])[0].height,
+                 Style.coverRowHeight)
+        win.want("and the page still holds the rows that fit",
+                 dlRows.height, downloadedList.pageSize * Style.coverRowHeight)
+        win.want("a series with no cover shows its title instead",
+                 dlRowArt[1].text, "An Orphan")
+        win.want("and that is what is drawn", dlRowArt[1].visible, true)
+        win.want("while the row whose cover arrived draws the picture",
+                 dlRowArt[0].visible, false)
+
+        // Covers for the rows on the page, in **one** message spanning both
+        // sources. Splitting it per source was a real bug -- the backend
+        // cancels the batch before it, so each message cancelled the last
+        // (ui/Main.qml requestCoversBySource, backend/service/covers_batch_test.go).
+        downloadedRows([
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+             "detail": "3 downloads", "openable": true, "note": "",
+             "coverUrl": "https://example.invalid/lantern.jpg"},
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/orphan/", "title": "An Orphan",
+             "detail": "1 download", "openable": true, "note": "",
+             "coverUrl": "https://example.invalid/orphan.jpg"}])
+        win.downloadedCoverAsks = 0
+        win.downloadedCovers = []
+        downloadedList.requestVisibleCovers()
+        win.want("the rows ask for their covers", win.downloadedCoverAsks, 1)
+        win.want("in one message, however many sources", win.downloadedCovers.length, 2)
+        win.want("each entry naming its own source",
+                 win.downloadedCovers[0].sourceId + "," + win.downloadedCovers[1].sourceId,
+                 "src-a,src-b")
+
+        // ---- what a screen's report is turned into (Covers.js) -------------
+        //
+        // The one place a cover request is built, driven here as the library
+        // it is. Its caller — Main.qml's requestCoversBySource, and the rule
+        // that a null request is not sent at all — is asserted against the
+        // real Main.qml in build/qmlcheck/MainHarness.qml.
+        //
+        // **An empty visible set sends nothing at all.** The screens report an
+        // empty batch rather than staying quiet -- that is how a page turned
+        // away from drops its fetches -- and the backend cancels the batch in
+        // flight *before* it notices the new one is empty. So a screen that
+        // simply has no rows yet, which is every screen at startup, would
+        // otherwise cancel the covers another screen is waiting for.
+        win.want("an empty visible set is not a message",
+                 Covers.request([], "src-a"), null)
+        win.want("nor is a screen that has no covers at all",
+                 Covers.request(null, "src-a"), null)
+        win.want("nor one whose rows all have their covers already",
+                 Covers.request([{"sourceId": "src-a", "seriesId": "s1", "url": ""}],
+                                "src-a"), null)
+        // And a set with something in it *is* one, so the line above is a
+        // decision and not a function that never sends.
+        win.want("a set with a cover in it is a message",
+                 Covers.request([{"sourceId": "src-a", "seriesId": "s1", "url": "u1"}],
+                                "src-a").covers.length, 1)
+
+        // One message, whatever the entries name. A batch that spans sources
+        // stays whole: splitting it per source made each message cancel the
+        // one before it (backend/service/covers_batch_test.go).
+        var spanning = Covers.batch([{"sourceId": "src-a", "seriesId": "s1", "url": "u1"},
+                                     {"sourceId": "src-b", "seriesId": "s2", "url": "u2"}], "")
+        win.want("a batch spanning sources stays one batch", spanning.length, 2)
+        win.want("with the first entry's own source", spanning[0].sourceId, "src-a")
+        win.want("and the second's own", spanning[1].sourceId, "src-b")
+
+        // The per-source search screen's rows carry no source: every row has
+        // the same one and Main.qml is what knows which. An entry that names
+        // its own keeps it.
+        var stamped = Covers.batch([{"seriesId": "s1", "url": "u1"},
+                                    {"sourceId": "src-b", "seriesId": "s2", "url": "u2"}],
+                                   "src-a")
+        win.want("a row with no source of its own is stamped with the screen's",
+                 stamped[0].sourceId, "src-a")
+        win.want("and a row that named one keeps it", stamped[1].sourceId, "src-b")
+
+        // Nothing to fetch with, nothing to fetch: a row with no URL, and a
+        // row nobody can name a source for, are both left out rather than
+        // sent for the backend to refuse.
+        win.want("a row with no cover URL is not asked about",
+                 Covers.batch([{"sourceId": "src-a", "seriesId": "s1", "url": ""}], "").length, 0)
+        win.want("nor is one with no source anywhere",
+                 Covers.batch([{"seriesId": "s1", "url": "u1"}], "").length, 0)
+
+        // The grid pages like everything else here, and the window moves a
+        // whole page at a time.
+        var lots = []
+        for (var g = 0; g < 40; ++g)
+            lots.push({"sourceId": "src-a", "sourceName": "Example Reader",
+                       "seriesId": "/manga/" + g + "/", "title": "Series " + g,
+                       "detail": "1 download", "openable": true, "note": "",
+                       "coverUrl": "https://example.invalid/" + g + ".jpg"})
+        downloadedList.view = "grid"
+        downloadedRows(lots)
+        downloadedList.page = 1
+        win.want("a library of forty needs more than one page of tiles",
+                 downloadedList.totalPages > 1, true)
+        win.downloadedCovers = []
+        downloadedList.page = 2
+        win.want("the second page starts where the first ended",
+                 dlTiles.firstIndex, downloadedList.pageSize)
+        win.want("and covers are asked for that page only",
+                 win.downloadedCovers.length, downloadedList.pageSize)
+        win.want("starting with its first series", win.downloadedCovers[0].seriesId,
+                 "/manga/" + downloadedList.pageSize + "/")
+
+        // ---- Watching as tiles: the badge comes with them ------------------
+        //
+        // The badge is the reason this screen exists, so a layout that lost it
+        // would answer the screen's own question with "open every one and see".
+
+        WatchJs.reconcile(watchedModel, [
+            {"sourceId": "src", "seriesId": "w-new", "sourceName": "Example Reader",
+             "title": "Watched With News", "newChapters": 3, "badge": "3 new chapters",
+             "state": "new", "status": "3 new chapters",
+             "coverUrl": "https://example.invalid/w.jpg"},
+            {"sourceId": "src", "seriesId": "w-quiet", "sourceName": "Example Reader",
+             "title": "Watched Quietly", "newChapters": 0, "badge": "",
+             "state": "ok", "status": "Up to date"}])
+
+        var wTiles = win.findChild(watchList, "watchTiles")
+        var wRows = win.findChild(watchList, "watchRows")
+        win.findChild(wTiles, "coverTiles").forceLayout()
+
+        win.want("Watching opens as tiles before any status", watchList.view, "grid")
+        win.want("the tiles are what is on screen", wTiles.visible, true)
+        win.want("and the rows are not", wRows.visible, false)
+
+        var wBadges = win.findChildren(wTiles, "coverBadge", [])
+        var wBadgeText = win.findChildren(wTiles, "coverBadgeText", [])
+        win.want("every tile has room for a badge", wBadges.length, 2)
+        win.want("the series with new chapters wears one", wBadges[0].visible, true)
+        win.want("in the backend's words", wBadgeText[0].text, "3 new chapters")
+        win.want("and a series with nothing new wears none", wBadges[1].visible, false)
+
+        // Search results have no badge role at all, and the same delegate draws
+        // them without one.
+        win.want("a model with no badges draws none",
+                 win.findChildren(searchTiles, "coverBadge", [])[0].visible, false)
+
+        win.watchOpens = 0
+        var wTileAreas = win.findChildren(wTiles, "coverTileArea", [])
+        wTileAreas[0].clicked(null)
+        win.want("a tile opens its series once", win.watchOpens, 1)
+        win.want("on its own source", win.watchOpenedSource, "src")
+        win.want("and its own series", win.watchOpenedSeries, "w-new")
+
+        // The switch swaps which layout is drawn, and swaps it back. Stop
+        // watching stays on the row's long-press strip for now, which is the
+        // other reason the rows have to survive the tiles.
+        watchList.view = "list"
+        win.want("the switch swaps Watching's layout", wRows.visible, true)
+        win.want("and puts the tiles away", wTiles.visible, false)
+
+        // The rows carry the cover too, and the badge keeps its end of the
+        // row: the badge is why this screen exists, so a thumbnail that
+        // crowded it out would be the wrong trade.
+        wRows.forceLayout()
+        var wThumbs = win.findChildren(wRows, "rowCover", [])
+        var wRowArt = win.findChildren(wRows, "coverPlaceholder", [])
+        win.want("every watched row carries a cover", wThumbs.length, 2)
+        win.want("sized from the row, not sizing it", wThumbs[0].height, Style.thumbHeight)
+        win.want("so the row is still one row high",
+                 win.findChildren(wRows, "watchRowArea", [])[0].height, Style.coverRowHeight)
+        win.want("and the badge is still on the row",
+                 win.findChildren(wRows, "watchBadge", [])[0].visible, true)
+        // No watch row ever arrives with a cover file -- coverPath is the
+        // frontend's own, filled when a fetch lands (Watch.js) -- so this is
+        // what the screen looks like until one does.
+        win.want("a watched series with no cover yet says which it is",
+                 wRowArt[0].text, "Watched With News")
+        win.want("and that is what is drawn", wRowArt[0].visible, true)
+
+        win.watchCoverAsks = 0
+        win.watchCovers = []
+        watchList.requestVisibleCovers()
+        win.want("the rows ask for the covers on the page", win.watchCoverAsks, 1)
+        win.want("only for the row that has one to fetch", win.watchCovers.length, 1)
+        win.want("named with that row's own source", win.watchCovers[0].sourceId, "src")
+
+        watchList.view = "grid"
+        win.want("and the tiles come back", wTiles.visible, true)
+
+        // A cover already on disk survives the list being pushed again --
+        // which is on attach, after every watch, and at the end of every check
+        // round. No watch row ever carries a coverPath, so copying the incoming
+        // empty over it would blank every tile on the screen.
+        watchedModel.setProperty(0, "coverPath", "file:///tmp/w.png")
+        WatchJs.reconcile(watchedModel, [
+            {"sourceId": "src", "seriesId": "w-new", "sourceName": "Example Reader",
+             "title": "Watched With News", "newChapters": 3, "badge": "3 new chapters",
+             "state": "new", "status": "3 new chapters",
+             "coverUrl": "https://example.invalid/w.jpg"},
+            {"sourceId": "src", "seriesId": "w-quiet", "sourceName": "Example Reader",
+             "title": "Watched Quietly", "newChapters": 0, "badge": "",
+             "state": "ok", "status": "Up to date"}])
+        win.want("a pushed list does not blank a cover already fetched",
+                 watchedModel.get(0).coverPath, "file:///tmp/w.png")
+        win.want("and the rest of the row is still written",
+                 watchedModel.get(0).badge, "3 new chapters")
+
+        // ---- one query across every source (Msg.SearchAll) -----------------
+        //
+        // A group is one series merged across sources by the backend, and the
+        // frontend's whole job here is to show *which* sources without ever
+        // pretending the difference has gone away: the list names them on the
+        // subtitle line, the grid marks the tile, and the series screen keeps
+        // the pair the user is acting on visible. Grouping.js is the part with
+        // behaviour, and it is driven directly here — the model is filled
+        // through the same function Main.qml fills it through, from a whole
+        // reply. Main.qml's own half of it, including the group's matches
+        // becoming the series screen's switcher, is asserted against the real
+        // Main.qml in build/qmlcheck/MainHarness.qml.
+
+        win.want("an empty query is not a search", Grouping.searchable(""), false)
+        // Whitespace is empty. A space is what a full stop's neighbour key
+        // produces by accident, and fanning out to every configured site for
+        // one is the expensive version of a typo (PLAN §7.4).
+        win.want("nor is a query of spaces", Grouping.searchable("   "), false)
+        win.want("a real query is", Grouping.searchable("lantern"), true)
+
+        var lanternGroup = {
+            "key": "the lantern keeper", "title": "The Lantern Keeper",
+            "coverUrl": "https://example.invalid/lantern.jpg",
+            "matches": [
+                {"sourceId": "src-a", "sourceName": "Example Reader",
+                 "seriesId": "/manga/lantern/", "coverUrl": "https://example.invalid/a.jpg"},
+                {"sourceId": "src-b", "sourceName": "Other Reader",
+                 "seriesId": "/series/lantern", "coverUrl": "https://example.invalid/b.jpg"}]}
+        var orphanGroup = {
+            "key": "an orphan", "title": "An Orphan", "coverUrl": "",
+            "matches": [
+                {"sourceId": "src-b", "sourceName": "Other Reader",
+                 "seriesId": "/series/orphan", "coverUrl": "https://example.invalid/o.jpg"}]}
+
+        // The two composed lines, and the pair a tap opens.
+        win.want("a group names every source it was found in",
+                 Grouping.sourceLine(lanternGroup), "Example Reader · Other Reader")
+        win.want("and a group from one source names that one",
+                 Grouping.sourceLine(orphanGroup), "Other Reader")
+        win.want("a group in several sources is marked",
+                 Grouping.badgeFor(lanternGroup), "2 sources")
+        win.want("a group in one is not", Grouping.badgeFor(orphanGroup), "")
+        win.want("opening a group opens the first match's source",
+                 Grouping.groupRow(lanternGroup).sourceId, "src-a")
+        win.want("and the first match's series",
+                 Grouping.groupRow(lanternGroup).seriesId, "/manga/lantern/")
+        // The series id differs per source, which is the whole reason the pair
+        // travels together rather than the source being remembered separately.
+        win.want("a group with no cover of its own borrows its first match's",
+                 Grouping.groupRow(orphanGroup).coverUrl, "https://example.invalid/o.jpg")
+
+        // A source that did not answer. Not an error: it contributed no rows
+        // while the others filled the screen.
+        win.want("every source answering says nothing", Grouping.failedLine([]), "")
+        win.want("a source that did not answer is named",
+                 Grouping.failedLine([{"sourceId": "src-c", "sourceName": "Third Reader",
+                                       "message": "the request timed out"}]),
+                 "No answer from Third Reader")
+
+        var searchAllIndex = Grouping.fill(searchAllModel, {
+            "query": "lantern", "page": 1, "pageSize": 6, "totalPages": 0, "hasMore": true,
+            "groups": [lanternGroup, orphanGroup],
+            "sourceErrors": [{"sourceId": "src-c", "sourceName": "Third Reader",
+                              "message": "the request timed out"}]})
+        win.want("the page holds one row per group", searchAllModel.count, 2)
+        win.want("the switcher's sources are kept beside it",
+                 Grouping.matchesFor(searchAllIndex, "the lantern keeper").length, 2)
+        // A key from a page that has been turned away from resolves to
+        // nothing, rather than to whatever the last page had under it.
+        win.want("a group nobody is showing has no sources",
+                 Grouping.matchesFor(searchAllIndex, "gone").length, 0)
+
+        // ---- the combined results as tiles ---------------------------------
+
+        searchAll.visible = true
+        searchAll.failedSources = Grouping.failedLine(
+            [{"sourceId": "src-c", "sourceName": "Third Reader", "message": "timed out"}])
+        var saTiles = win.findChild(searchAll, "searchAllTiles")
+        var saRows = win.findChild(searchAll, "searchAllRows")
+        win.findChild(saTiles, "coverTiles").forceLayout()
+
+        win.want("the combined search opens as tiles before any status",
+                 searchAll.view, "grid")
+        win.want("the tiles are what is on screen", saTiles.visible, true)
+        win.want("and the rows are not", saRows.visible, false)
+        win.want("a page of tiles is whole rows of three", searchAll.pageSize % 3, 0)
+
+        var saCaptions = win.findChildren(saTiles, "coverCaption", [])
+        win.want("every group is a tile", saCaptions.length, 2)
+        win.want("titled with the group's title", saCaptions[0].text, "The Lantern Keeper")
+
+        // The grid's mark. There is no room for a line of source names on a
+        // tile, so the count goes in CoverGrid's badge corner -- the slot
+        // Watching's "3 new chapters" already uses.
+        var saBadges = win.findChildren(saTiles, "coverBadge", [])
+        var saBadgeText = win.findChildren(saTiles, "coverBadgeText", [])
+        win.want("a group found in several sources is marked", saBadges[0].visible, true)
+        win.want("with how many have it", saBadgeText[0].text, "2 sources")
+        win.want("and a group found in one wears no mark", saBadges[1].visible, false)
+
+        // Covers: one batch, each entry naming its own source, because this
+        // screen draws series from several at once.
+        win.searchAllCoverAsks = 0
+        win.searchAllCovers = []
+        searchAll.requestVisibleCovers()
+        win.want("covers are asked for once", win.searchAllCoverAsks, 1)
+        win.want("for both groups", win.searchAllCovers.length, 2)
+        win.want("named with the source the group opens on",
+                 win.searchAllCovers[0].sourceId, "src-a")
+        win.want("and that source's own series id",
+                 win.searchAllCovers[0].seriesId, "/manga/lantern/")
+
+        win.searchAllOpens = 0
+        var saTileAreas = win.findChildren(saTiles, "coverTileArea", [])
+        saTileAreas[0].clicked(null)
+        win.want("tapping a tile opens once", win.searchAllOpens, 1)
+        win.want("naming the group", win.searchAllOpenedKey, "the lantern keeper")
+        win.want("on the first source", win.searchAllOpenedSource, "src-a")
+        win.want("with that source's series id", win.searchAllOpenedSeries, "/manga/lantern/")
+        win.want("and the group's title", win.searchAllOpenedTitle, "The Lantern Keeper")
+
+        // **No menu on a group.** Watch on a group would have to pick a source
+        // silently, and every record Quire keeps is per (source, series). A
+        // hold does nothing at all here -- including, and especially, not
+        // opening the series behind the user's back.
+        win.want("there is no menu on the combined results",
+                 win.findChildren(searchAll, "contextMenuItem", []).length, 0)
+        win.holdOn(saTileAreas[0])
+        win.want("and holding a tile opens nothing", win.searchAllOpens, 1)
+        win.want("nor a menu", win.menuActions(searchAll).length, 0)
+
+        // ---- the combined results as rows ----------------------------------
+
+        searchAll.view = "list"
+        // The rows are built on a layout pass, which has not run yet: the
+        // switch was thrown a statement ago.
+        saRows.forceLayout()
+        win.want("the switch swaps the layout", saRows.visible, true)
+        win.want("and puts the tiles away", saTiles.visible, false)
+        win.want("a page of rows is one column", searchAll.columns, 1)
+        win.want("and holds more groups than a page of tiles",
+                 searchAll.pageSize > saTiles.pageSize, true)
+
+        // The line SeriesGrid keeps for one source's name is where the sources
+        // go here. This is the whole of "do not blur which source it came
+        // from" in the list layout.
+        var saSources = win.findChildren(saRows, "searchAllRowSources", [])
+        win.want("a row names every source the group was found in",
+                 saSources[0].text, "Example Reader · Other Reader")
+        win.want("and a single-source group names its one",
+                 saSources[1].text, "Other Reader")
+
+        win.searchAllOpens = 0
+        var saRowAreas = win.findChildren(saRows, "searchAllRowArea", [])
+        win.want("every row on the page is a tap target", saRowAreas.length, 2)
+        saRowAreas[1].clicked(null)
+        win.want("tapping a row opens once", win.searchAllOpens, 1)
+        win.want("that row's group", win.searchAllOpenedKey, "an orphan")
+        win.want("on its own source", win.searchAllOpenedSource, "src-b")
+
+        // The rows draw covers too, so the batch holds them -- this used to
+        // assert the batch came back *empty*, which was the right intent while
+        // a row was two lines of text and is the wrong one now. Still one
+        // message, still one entry per row, each naming the source its group
+        // opens on: the backend cancels the batch before it, so a batch split
+        // per source would cancel itself (Main.qml requestCoversBySource).
+        win.searchAllCoverAsks = 0
+        win.searchAllCovers = []
+        searchAll.requestVisibleCovers()
+        win.want("rows ask for a batch too", win.searchAllCoverAsks, 1)
+        win.want("holding the covers the rows draw", win.searchAllCovers.length, 2)
+        win.want("each named with the source the group opens on",
+                 win.searchAllCovers[0].sourceId + "," + win.searchAllCovers[1].sourceId,
+                 "src-a,src-b")
+
+        // The thumbnail, and the placeholder for a group whose cover has not
+        // landed -- which is every group here, since nothing has fetched one.
+        var saThumbs = win.findChildren(saRows, "rowCover", [])
+        var saRowArt = win.findChildren(saRows, "coverPlaceholder", [])
+        win.want("every group's row carries a cover", saThumbs.length, 2)
+        win.want("sized from the row, not sizing it", saThumbs[0].height, Style.thumbHeight)
+        win.want("so the row is still one row high",
+                 saRowAreas[0].height, Style.coverRowHeight)
+        win.want("and the page still holds the rows that fit",
+                 saRows.height, searchAll.pageSize * Style.coverRowHeight)
+        win.want("a group with no cover yet says which book it is",
+                 saRowArt[0].text, "The Lantern Keeper")
+        win.want("and that is what is drawn", saRowArt[0].visible, true)
+
+        // ---- sources that did not answer -----------------------------------
+        //
+        // The line is under the results, not over them. A search where two
+        // sources answered and one did not is a search that worked.
+
+        var failedBar = win.findChild(searchAll, "searchAllFailedBar")
+        var failedText = win.findChild(searchAll, "searchAllFailed")
+        win.want("the sources that did not answer are named",
+                 failedText.text, "No answer from Third Reader")
+        win.want("on a line that is actually drawn", failedBar.visible, true)
+        win.want("the results are still there", searchAll.rowCount, 2)
+        win.want("and still on screen", saRows.visible, true)
+        // The empty-state text is what a blanked page would show. It must not
+        // be: nothing failed from the user's side, some sources are simply
+        // missing from the answer.
+        win.want("nothing reads as an empty search",
+                 win.findChild(searchAll, "searchAllStatus").visible, false)
+
+        // Every source answering takes the line away entirely, rather than
+        // leaving a reassuring one nobody needs to read.
+        searchAll.failedSources = ""
+        win.want("a search where every source answered says nothing",
+                 failedBar.visible, false)
+        win.want("and the line takes no room", failedBar.height, 0)
+
+        // ---- what an empty query costs -------------------------------------
+        //
+        // Nothing. An empty query here is not the browse it is on a single
+        // source: it would fan out to every configured site at once.
+        // Driven through the keyboard's own Search key, which is the only way
+        // a query is ever submitted.
+
+        var saKeys = win.findChild(searchAll, "searchAllKeyboard")
+        win.searchAllAsks = 0
+        searchAll.query = ""
+        searchAll.searching = true
+        saKeys.submit()
+        win.want("an empty query sends nothing", win.searchAllAsks, 0)
+        win.want("and the screen does not sit waiting for it", searchAll.busy, false)
+        // It still puts the keyboard away: the user pressed Search, and a
+        // keyboard that stays up reads as the key not having registered.
+        win.want("but the keyboard still goes", searchAll.searching, false)
+
+        searchAll.query = "   "
+        searchAll.searching = true
+        saKeys.submit()
+        win.want("nor does a query of spaces", win.searchAllAsks, 0)
+
+        searchAll.searching = true
+        saKeys.keyTyped("l")
+        saKeys.keyTyped("a")
+        win.want("the keys reach the query", searchAll.query, "   la")
+        searchAll.query = "lantern"
+        win.want("and the field shows it",
+                 win.findChild(searchAll, "searchField").text, "lantern")
+        saKeys.submit()
+        win.want("a real query is sent once", win.searchAllAsks, 1)
+        win.want("as typed", win.searchAllAsked, "lantern")
+        win.want("from the first page", searchAll.pendingPage, 1)
+        win.want("with the screen waiting for it", searchAll.busy, true)
+        win.want("and the keyboard down", searchAll.searching, false)
+
+        // Clear is the same control as the per-source search's, and behaves
+        // the same way: it empties the box, keeps the keyboard up, and leaves
+        // the results the user may be comparing against alone.
+        win.findChild(searchAll, "clearSearchArea").clicked(null)
+        win.want("Clear empties the combined search too", searchAll.query, "")
+        win.want("keeps its keyboard up", searchAll.searching, true)
+        win.want("and leaves the groups on screen", searchAll.rowCount, 2)
+        searchAll.dismissInput()
+
+        // ---- paging --------------------------------------------------------
+        //
+        // The backend pages; this asks for a page and renders what comes back.
+        // totalPages stays 0 until every source has run dry, and the label
+        // says only what is known (PLAN §12.1).
+
+        searchAll.busy = false
+        searchAll.query = "lantern"
+        searchAll.page = 1
+        searchAll.totalPages = 0
+        searchAll.hasMore = true
+        searchAll.pendingPage = 0
+        var saPager = win.findChild(searchAll, "searchAllPager")
+        win.want("a total nobody knows yet is not invented",
+                 win.findChild(saPager, "pagerLabel").text, "Page 1")
+        win.want("previous is dead on page 1", saPager.canGoBack, false)
+        win.want("next is alive while there is more", saPager.canGoOn, true)
+
+        win.searchAllPageAsks = 0
+        saPager.nextRequested()
+        win.want("turning the page asks the backend once", win.searchAllPageAsks, 1)
+        win.want("for the next page", win.searchAllPageAsked, 2)
+        win.want("and says which page is in flight", searchAll.pendingPage, 2)
+        // Both buttons go dead until it lands, so a second tap cannot queue a
+        // second request for the same page.
+        win.want("a page in flight stops another tap", saPager.canGoOn, false)
+
+        // The reply lands, with a total this time: every source has run dry.
+        Grouping.fill(searchAllModel, {"query": "lantern", "page": 2, "pageSize": 6,
+                                       "totalPages": 3, "hasMore": true,
+                                       "groups": [lanternGroup, orphanGroup],
+                                       "sourceErrors": []})
+        searchAll.busy = false
+        searchAll.page = 2
+        searchAll.totalPages = 3
+        searchAll.hasMore = true
+        searchAll.pendingPage = 0
+        win.want("a total that is known is shown",
+                 win.findChild(saPager, "pagerLabel").text, "Page 2 of 3")
+        win.want("and previous is alive now", saPager.canGoBack, true)
+        win.searchAllPageAsks = 0
+        saPager.previousRequested()
+        win.want("turning back asks for the page before", win.searchAllPageAsked, 1)
+
+        searchAll.busy = false
+        searchAll.pendingPage = 0
+        searchAll.visible = false
+
+        // ---- the series screen's source switcher ---------------------------
+        //
+        // Opening a group opens its first match. The other sources become
+        // chips, and tapping one re-requests the detail for *that* pair: the
+        // chapters, the downloads and the watch record it switches to are all
+        // that source's, and none of them are merged with the ones it left.
+
+        var strip = win.findChild(chapterList, "sourceStrip")
+
+        // A series reached the ordinary way -- browsing one source -- has no
+        // alternatives, and offers no switcher rather than one inert chip.
+        chapterList.sources = []
+        win.want("browsing one source offers no switcher", strip.visible, false)
+        win.want("and the strip takes no room", strip.height, 0)
+        var pageWithoutChips = chapterList.pageSize
+
+        chapterList.sources = [{"sourceId": "src-a", "sourceName": "Example Reader",
+                                "seriesId": "/manga/lantern/"}]
+        win.want("a group found in one source offers none either", strip.visible, false)
+
+        chapterList.sources = [{"sourceId": "src-a", "sourceName": "Example Reader",
+                                "seriesId": "/manga/lantern/"},
+                               {"sourceId": "src-b", "sourceName": "Other Reader",
+                                "seriesId": "/series/lantern"}]
+        chapterList.currentSourceId = "src-a"
+        win.want("a group found in several offers the switcher", strip.visible, true)
+        win.want("and it costs the page some rows",
+                 chapterList.pageSize < pageWithoutChips, true)
+
+        var chipA = win.findChild(chapterList, "sourceChip-src-a")
+        var chipB = win.findChild(chapterList, "sourceChip-src-b")
+        win.want("there is a chip per source", chipA !== null && chipB !== null, true)
+        win.want("named after the source",
+                 win.findChild(chapterList, "sourceChipLabel-src-b").text, "Other Reader")
+
+        // Which one you are reading is filled, not outlined: on e-ink a border
+        // alone does not answer that at a glance.
+        win.want("the source being read is marked", win.colorOf(chipA), Style.accent)
+        win.want("and the others are not", win.colorOf(chipB), Style.paper)
+
+        // `enabled` is the assertion, not a synthesised tap: emitting
+        // clicked() invokes the handler whatever enabled says, which is how a
+        // dead control passes a test written the other way.
+        win.want("the source already showing is inert",
+                 win.findChild(chapterList, "sourceChipArea-src-a").enabled, false)
+        win.want("and the other is live",
+                 win.findChild(chapterList, "sourceChipArea-src-b").enabled, true)
+
+        win.sourceSwitches = 0
+        win.findChild(chapterList, "sourceChipArea-src-b").clicked(null)
+        win.want("tapping another source asks once", win.sourceSwitches, 1)
+        win.want("for that source", win.switchedToSource, "src-b")
+        win.want("under its own name", win.switchedToName, "Other Reader")
+        // The other half of the pair, and the one a bug would drop: the series
+        // id is that source's, not the one the screen was just showing.
+        win.want("and that source's own series id", win.switchedToSeries, "/series/lantern")
+
+        // The mark follows the source being read, which Main.qml binds to the
+        // pair it is acting on -- so the chip cannot end up naming a source
+        // whose chapters are not the ones on screen.
+        chapterList.currentSourceId = "src-b"
+        win.want("the mark moves with the source", win.colorOf(chipB), Style.accent)
+        win.want("and off the one left behind", win.colorOf(chipA), Style.paper)
+        win.want("which is live again",
+                 win.findChild(chapterList, "sourceChipArea-src-a").enabled, true)
+        win.want("while the one being read is inert",
+                 win.findChild(chapterList, "sourceChipArea-src-b").enabled, false)
+
+        // The combined search is a search, so it draws in the layout the
+        // search screen is stored in -- the same switch, in the same place,
+        // writing the same setting (Views.js).
+        win.want("the combined search is a search on the wire",
+                 Views.wireName("searchall"), "search")
+        win.want("so the header offers it the switch", Views.remembers("searchall"), true)
+        win.want("and it reads the search screen's own setting",
+                 Views.fromStatus(stored, "searchall"), "list")
+
+        chapterList.sources = []
+        chapterList.currentSourceId = ""
+
+        // ---- the long-press menu (ui/ContextMenu.qml) ----------------------
+        //
+        // One menu, three screens, **both layouts of each**. The layout switch
+        // is allowed to change how a screen looks and nothing else, so every
+        // case below is run against the rows and against the tiles, and the
+        // comparison is the assertion: the same set of actions, in the same
+        // order, from the same hold.
+        //
+        // The hold itself is driven through the area's own `held`, so the
+        // delegate's handler, the coordinate mapping and the screen's item
+        // list are all in the path. *When* it fires is a different question
+        // and is asked at the foot of this file, against real timers.
+
+        // ---- search results ------------------------------------------------
+
+        seriesGrid.view = "list"
+        seriesGrid.busy = false
+        seriesGrid.pendingPage = 0
+        seriesModel.setProperty(0, "watched", false)
+        var seriesRows = win.findChildren(seriesGrid, "seriesRowArea", [])
+
+        win.want("no menu is showing to begin with", win.menuActions(seriesGrid).length, 0)
+        win.holdOn(seriesRows[0])
+        win.want("a held row opens the menu", win.menuActions(seriesGrid).join(","), "open,watch")
+        win.want("in words rather than glyphs",
+                 win.menuLabels(seriesGrid).join(","), "Open,Watch")
+
+        // Watch or Stop watching, never both and never the wrong one: the row
+        // reads the store's answer (Watch.js markWatched), it does not
+        // remember what was tapped.
+        seriesModel.setProperty(0, "watched", true)
+        win.holdOn(seriesRows[0])
+        win.want("a watched result offers to stop",
+                 win.menuActions(seriesGrid).join(","), "open,unwatch")
+        win.want("and says so", win.menuLabels(seriesGrid).join(","), "Open,Stop watching")
+
+        win.seriesUnwatches = 0
+        win.tapMenu(seriesGrid, "unwatch")
+        win.want("choosing it asks once", win.seriesUnwatches, 1)
+        win.want("about that row's series", win.seriesUnwatchedSeries, "x0")
+        win.want("and the menu is gone", win.menuActions(seriesGrid).length, 0)
+
+        seriesModel.setProperty(1, "watched", false)
+        win.seriesWatches = 0
+        win.seriesOpens = 0
+        win.holdOn(seriesRows[1])
+        win.tapMenu(seriesGrid, "watch")
+        win.want("Watch asks once", win.seriesWatches, 1)
+        win.want("about the row that was held", win.seriesWatchedSeries, "x1")
+        win.want("and opens nothing", win.seriesOpens, 0)
+
+        // Open is on the menu too, and goes exactly where a tap would.
+        win.holdOn(seriesRows[1])
+        win.tapMenu(seriesGrid, "open")
+        win.want("Open from the menu opens once", win.seriesOpens, 1)
+        win.want("the series that row names", win.seriesOpenedId, "x1")
+
+        // The same menu on the tiles. This is the equivalence, asserted
+        // directly rather than implied by two similar-looking lists.
+        seriesGrid.view = "grid"
+        seriesGrid.busy = false
+        seriesGrid.pendingPage = 0
+        win.findChild(searchTiles, "coverTiles").forceLayout()
+        var seriesTiles = win.findChildren(searchTiles, "coverTileArea", [])
+        var rowActions = "open,watch"
+        seriesModel.setProperty(1, "watched", false)
+        win.holdOn(seriesTiles[1])
+        win.want("a held tile opens the same menu",
+                 win.menuActions(seriesGrid).join(","), rowActions)
+        win.seriesWatches = 0
+        win.tapMenu(seriesGrid, "watch")
+        win.want("and it acts on the tile's own row", win.seriesWatchedSeries, "x1")
+        win.want("asking once", win.seriesWatches, 1)
+
+        // ---- Downloaded ----------------------------------------------------
+
+        downloadedRows([
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+             "detail": "3 downloads", "openable": true, "note": "",
+             "coverUrl": "", "latestUuid": "doc-1", "watched": false},
+            // Downloaded before the newest document was recorded — there is
+            // nothing this row could open.
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/orphan/", "title": "An Orphan",
+             "detail": "1 download", "openable": true, "note": "",
+             "coverUrl": "", "latestUuid": "", "watched": true},
+            // Two orphans: one whose newest download is still recorded, one
+            // from before the record existed. Both keep Delete; only the first
+            // has anything to read.
+            {"sourceId": "gone", "sourceName": "gone", "seriesId": "/manga/lost/",
+             "title": "Lost", "detail": "2 downloads", "openable": false,
+             "note": "The source this came from has been removed.",
+             "coverUrl": "", "latestUuid": "doc-orphan"},
+            {"sourceId": "gone", "sourceName": "gone", "seriesId": "/manga/older/",
+             "title": "Older Still", "detail": "1 download", "openable": false,
+             "note": "The source this came from has been removed.", "coverUrl": ""}])
+
+        downloadedList.view = "list"
+        var dlRowAreas = win.findChildren(downloadedList, "downloadedRowArea", [])
+        win.holdOn(dlRowAreas[0])
+        win.want("a held download row offers all four",
+                 win.menuActions(downloadedList).join(","), "open,read,watch,delete")
+        win.want("in the screen's own words",
+                 win.menuLabels(downloadedList).join(","),
+                 "Open,Read latest,Watch,Delete everything from this series")
+
+        // **Absent, not greyed out.** A row with nothing openable must not
+        // offer to open it.
+        win.holdOn(dlRowAreas[1])
+        win.want("a row with no newest document offers no Read",
+                 win.menuActions(downloadedList).join(","), "open,unwatch,delete")
+        win.want("and nothing on the menu claims otherwise",
+                 win.menuLabels(downloadedList).join(",").indexOf("Read latest"), -1)
+
+        win.downloadedReads = 0
+        win.holdOn(dlRowAreas[0])
+        win.tapMenu(downloadedList, "read")
+        win.want("Read latest opens once", win.downloadedReads, 1)
+        win.want("the document that row carries", win.downloadedReadUuid, "doc-1")
+
+        win.downloadedWatches = 0
+        win.holdOn(dlRowAreas[0])
+        win.tapMenu(downloadedList, "watch")
+        win.want("Watch asks once", win.downloadedWatches, 1)
+        win.want("about that row's series", win.downloadedWatchedSeries, "/manga/lantern/")
+
+        // **Delete routes into the question, and deletes nothing.** The hold
+        // made the choice deliberate; it did not make it safe, and the strip
+        // the backend's sentence lands in is unchanged.
+        win.downloadedDeleteAsks = 0
+        win.downloadedDeletes = 0
+        win.holdOn(dlRowAreas[0])
+        win.tapMenu(downloadedList, "delete")
+        win.want("Delete asks the backend for its question", win.downloadedDeleteAsks, 1)
+        win.want("about that series", win.downloadedAskedSeries, "/manga/lantern/")
+        win.want("and deletes nothing on the way", win.downloadedDeletes, 0)
+
+        // The row's own button and the menu end in the same place: one
+        // handler, reached two ways.
+        win.downloadedDeleteAsks = 0
+        win.findChildren(downloadedList, "deleteSeriesArea", [])[0].clicked(null)
+        win.want("the row's button asks for the same thing", win.downloadedDeleteAsks, 1)
+        win.want("about the same series", win.downloadedAskedSeries, "/manga/lantern/")
+
+        // The tiles, again identical.
+        downloadedList.view = "grid"
+        win.findChild(dlTiles, "coverTiles").forceLayout()
+        var dlHeldTiles = win.findChildren(dlTiles, "coverTileArea", [])
+        win.holdOn(dlHeldTiles[0])
+        win.want("a held tile offers the same four",
+                 win.menuActions(downloadedList).join(","), "open,read,watch,delete")
+        win.downloadedDeleteAsks = 0
+        win.downloadedDeletes = 0
+        win.tapMenu(downloadedList, "delete")
+        win.want("and Delete from a tile asks the same question",
+                 win.downloadedDeleteAsks, 1)
+        win.want("without deleting either", win.downloadedDeletes, 0)
+
+        // ---- a series whose source has been removed ------------------------
+        //
+        // The downloads are still on the tablet and still the user's to be rid
+        // of — that is the only reason these rows are listed. In the list
+        // layout Delete is the button on the row; in the grid there is no row
+        // and no button, so without a menu an orphaned series could be deleted
+        // in one layout and **not at all** in the other. The menu is shorter
+        // rather than absent: everything that needs the source is left out,
+        // because offering something that cannot work is worse than not
+        // offering it.
+        win.holdOn(dlHeldTiles[2])
+        win.want("an orphaned tile still offers a menu",
+                 win.menuActions(downloadedList).join(","), "read,delete")
+        win.want("in words", win.menuLabels(downloadedList).join(","),
+                 "Read latest,Delete everything from this series")
+        // The absences are asserted as absences, one action at a time: a menu
+        // that quietly grew an Open would otherwise pass every case above.
+        win.want("with no Open, which has nowhere to go",
+                 win.menuItemFor(downloadedList, "open"), null)
+        win.want("and nothing to watch for new chapters",
+                 win.menuItemFor(downloadedList, "watch"), null)
+        win.want("nor to stop watching",
+                 win.menuItemFor(downloadedList, "unwatch"), null)
+        win.want("and no label offering either",
+                 win.menuLabels(downloadedList).join(",").indexOf("Open"), -1)
+
+        // Delete from it goes into the same question as every other Delete,
+        // and deletes nothing by itself.
+        win.downloadedDeleteAsks = 0
+        win.downloadedDeletes = 0
+        win.tapMenu(downloadedList, "delete")
+        win.want("Delete on an orphan asks the question", win.downloadedDeleteAsks, 1)
+        win.want("about the orphaned series", win.downloadedAskedSeries, "/manga/lost/")
+        win.want("and deletes nothing on the way", win.downloadedDeletes, 0)
+
+        // Read latest survives losing the source: OpenInReader takes a
+        // document uuid and asks the source nothing.
+        win.downloadedReads = 0
+        win.holdOn(dlHeldTiles[2])
+        win.tapMenu(downloadedList, "read")
+        win.want("an orphan can still be read", win.downloadedReads, 1)
+        win.want("from the document it carries", win.downloadedReadUuid, "doc-orphan")
+
+        // An orphan from before the newest download was recorded has nothing
+        // to read, and says so by not offering it.
+        win.holdOn(dlHeldTiles[3])
+        win.want("an orphan with no document offers only Delete",
+                 win.menuActions(downloadedList).join(","), "delete")
+        win.want("and no Read latest", win.menuItemFor(downloadedList, "read"), null)
+
+        // The same menu in the list layout, which is the whole point: the tap
+        // target stays inert — there is still nothing to open — and the hold
+        // is what the second area on the row is for.
+        downloadedList.view = "list"
+        win.findChild(downloadedList, "downloadedRows").forceLayout()
+        var dlTapAreas = win.findChildren(downloadedList, "downloadedRowArea", [])
+        var dlOrphanAreas = win.findChildren(downloadedList, "downloadedOrphanArea", [])
+        win.want("an orphaned row still cannot be tapped open",
+                 dlTapAreas[2].enabled, false)
+        win.want("but it can be held", dlOrphanAreas[2].enabled, true)
+        // And the other way round on a row that opens: exactly one of the two
+        // is live, so neither is ever in the other's way.
+        win.want("a live row is tapped on its own area", dlTapAreas[0].enabled, true)
+        win.want("and holds on it too", dlOrphanAreas[0].enabled, false)
+
+        win.holdOn(dlOrphanAreas[2])
+        win.want("a held orphaned row offers the same menu as its tile",
+                 win.menuActions(downloadedList).join(","), "read,delete")
+        win.want("with no Open there either",
+                 win.menuItemFor(downloadedList, "open"), null)
+        win.downloadedDeleteAsks = 0
+        win.downloadedDeletes = 0
+        win.tapMenu(downloadedList, "delete")
+        win.want("and Delete from the row asks the same question",
+                 win.downloadedDeleteAsks, 1)
+        win.want("about the same series", win.downloadedAskedSeries, "/manga/lost/")
+        win.want("without deleting either", win.downloadedDeletes, 0)
+
+        // ---- Watching ------------------------------------------------------
+
+        WatchJs.reconcile(watchedModel, [
+            {"sourceId": "src", "seriesId": "w-new", "sourceName": "Example Reader",
+             "title": "Watched With News", "newChapters": 3, "badge": "3 new chapters",
+             "state": "new", "status": "3 new chapters"},
+            {"sourceId": "src", "seriesId": "w-quiet", "sourceName": "Example Reader",
+             "title": "Watched Quietly", "newChapters": 0, "badge": "",
+             "state": "ok", "status": "Up to date"}])
+
+        watchList.view = "list"
+        watchList.closeStrip()
+        win.findChild(watchList, "watchRows").forceLayout()
+        var wRowAreas = win.findChildren(watchList, "watchRowArea", [])
+        win.holdOn(wRowAreas[0])
+        win.want("a held watch row offers all four",
+                 win.menuActions(watchList).join(","), "open,download,seen,unwatch")
+        win.want("in the screen's own words", win.menuLabels(watchList).join(","),
+                 "Open,Download new chapters,Mark as seen,Stop watching")
+        win.want("and the two about new chapters are live",
+                 win.menuLive(watchList, "download") && win.menuLive(watchList, "seen"), true)
+
+        // **Disabled at zero, not hidden.** `enabled` is the assertion: a
+        // synthesised clicked() would run the handler whatever it says, which
+        // is exactly how a greyed-out item that is still live passes.
+        win.holdOn(wRowAreas[1])
+        win.want("a series with nothing new still lists both",
+                 win.menuActions(watchList).join(","), "open,download,seen,unwatch")
+        win.want("but Download new chapters cannot be used",
+                 win.menuLive(watchList, "download"), false)
+        win.want("nor Mark as seen", win.menuLive(watchList, "seen"), false)
+        win.want("while the rest of the menu is live",
+                 win.menuLive(watchList, "open") && win.menuLive(watchList, "unwatch"), true)
+
+        win.watchDownloadNews = 0
+        win.holdOn(wRowAreas[0])
+        win.tapMenu(watchList, "download")
+        win.want("Download new chapters asks once", win.watchDownloadNews, 1)
+        win.want("for the row that was held", win.watchDownloadNewSeries, "w-new")
+
+        // Mark as seen sends and waits. The badge is the backend's to clear —
+        // it answers with a watch update and then the whole list — so nothing
+        // here touches the row.
+        win.watchMarkSeens = 0
+        win.holdOn(wRowAreas[0])
+        win.tapMenu(watchList, "seen")
+        win.want("Mark as seen asks once", win.watchMarkSeens, 1)
+        win.want("for that row", win.watchMarkSeenSeries, "w-new")
+        win.want("and the badge is untouched until the backend answers",
+                 watchedModel.get(0).badge, "3 new chapters")
+
+        // Stop watching opens the strip this screen already had, and drops
+        // nothing by itself.
+        var wStrip = win.findChild(watchList, "watchStrip")
+        win.watchUnwatches = 0
+        win.holdOn(wRowAreas[0])
+        win.tapMenu(watchList, "unwatch")
+        win.want("Stop watching opens the question", wStrip.visible, true)
+        win.want("about the row that was held", watchList.stripSeriesId, "w-new")
+        win.want("and stops nothing yet", win.watchUnwatches, 0)
+        win.findChild(watchList, "unwatchButton").children[1].clicked(null)
+        win.want("answering it is what stops the watch", win.watchUnwatches, 1)
+        win.want("and the question closes behind it", wStrip.visible, false)
+
+        // The tiles, which had none of this before: the whole screen was
+        // navigation, so preferring covers meant giving up Stop watching.
+        watchList.view = "grid"
+        win.findChild(wTiles, "coverTiles").forceLayout()
+        var wHeldTiles = win.findChildren(wTiles, "coverTileArea", [])
+        win.holdOn(wHeldTiles[0])
+        win.want("a held tile offers the same four",
+                 win.menuActions(watchList).join(","), "open,download,seen,unwatch")
+        win.watchUnwatches = 0
+        win.tapMenu(watchList, "unwatch")
+        win.want("and Stop watching from a tile opens the same question",
+                 wStrip.visible, true)
+        win.want("without stopping anything", win.watchUnwatches, 0)
+        watchList.closeStrip()
+
+        // A tile with nothing new is as disabled as its row was.
+        win.holdOn(wHeldTiles[1])
+        win.want("a quiet tile cannot download new chapters",
+                 win.menuLive(watchList, "download"), false)
+        win.want("nor mark them seen", win.menuLive(watchList, "seen"), false)
+
+        // ---- dismissal, and where the panel lands --------------------------
+
+        var wMenu = win.findChild(watchList, "watchMenu")
+        var wPanel = win.findChild(wMenu, "contextMenuPanel")
+        var wScrim = win.findChild(wMenu, "contextMenuScrim")
+
+        wScrim.clicked(null)
+        win.want("a closed menu is not drawn", wMenu.visible, false)
+        // A dismiss target left live over a closed menu would swallow the next
+        // tap meant for the page.
+        win.want("and cannot swallow a tap", wScrim.enabled, false)
+
+        win.holdOn(wHeldTiles[0])
+        win.want("an open menu is drawn", wMenu.visible, true)
+        win.want("and its dismiss target is live", wScrim.enabled, true)
+        wScrim.clicked(null)
+        win.want("a tap outside puts it away", wMenu.visible, false)
+        win.want("with nothing left of it", win.menuActions(watchList).length, 0)
+        win.watchUnwatches = 0
+        win.want("and nothing was chosen on the way out", win.watchUnwatches, 0)
+
+        // Anchored near the press and clamped inside the screen. A menu held
+        // open past the edge would put items where no finger can reach them,
+        // and this screen has no scrolling to recover them with.
+        win.holdOn(wHeldTiles[0], wHeldTiles[0].width * 4, wHeldTiles[0].height * 40)
+        win.want("a menu held near the corner stays on screen",
+                 wPanel.x + wPanel.width <= wMenu.width - Style.margin, true)
+        win.want("and off neither edge", wPanel.x >= Style.margin, true)
+        win.want("with its last item still on the panel",
+                 wPanel.y + wPanel.height <= wMenu.height - Style.margin, true)
+        win.want("and its first still under the top", wPanel.y >= Style.margin, true)
+
+        // It never scrolls: four items at a full row each, and they fit.
+        win.want("the menu is as tall as its items and no taller",
+                 wPanel.height >= 4 * Style.rowHeight, true)
+        win.want("and still fits the screen", wPanel.height < wMenu.height, true)
+
+        // Held at the very top left: the panel is pushed in to the margin
+        // rather than drawn half off the screen.
+        win.holdOn(wHeldTiles[0], -500, -500)
+        win.want("a menu held past the top left is pushed in", wPanel.x, Style.margin)
+        win.want("on both axes", wPanel.y, Style.margin)
+        wScrim.clicked(null)
+
+        // ---- what the press feedback actually draws ------------------------
+        //
+        // `feedback` going true is half of it; the other half is the thing the
+        // user sees, which is a different object in each layout. A tile is
+        // covered by its own picture, so the fill it would darken is behind
+        // the cover — the border is what has to carry it there.
+        var searchTile = win.findChild(searchTiles, "coverTile")
+        var searchTileArea = win.findChild(searchTiles, "coverTileArea")
+        win.want("a tile at rest has a hairline border", searchTile.border.width, 1)
+        searchTileArea.feedback = true
+        win.want("a held tile draws a heavier border", searchTile.border.width > 1, true)
+        win.want("in ink, which is visible over a cover",
+                 win.colorOf(searchTile.border), Style.ink)
+        win.want("and darkens its fill too", win.colorOf(searchTile), Style.pressed)
+        searchTileArea.feedback = false
+        win.want("and goes back when the press ends", searchTile.border.width, 1)
+
+        // Every list layout has the same acknowledgement, because a row has no
+        // picture to darken and the whole row is it.
+        win.want("search rows can darken",
+                 win.findChildren(seriesGrid, "rowPressFeedback", []).length > 0, true)
+        win.want("watch rows can darken",
+                 win.findChildren(watchList, "rowPressFeedback", []).length > 0, true)
+        win.want("downloaded rows can darken",
+                 win.findChildren(downloadedList, "rowPressFeedback", []).length > 0, true)
+
+        // ---- which rows offer Watch, and which offer Stop watching ---------
+        //
+        // Neither screen owns the watch record, so neither may remember what
+        // was tapped: the flag is re-derived from the watched model, which is
+        // the only thing that knows whether the backend agreed (Watch.js).
+        var otherRows = Qt.createQmlObject(
+            'import QtQuick 2.5; ListModel {}', win, "markWatchedRows")
+        otherRows.append({"seriesId": "w-new", "watched": false})
+        otherRows.append({"seriesId": "nobody-watches-this", "watched": true})
+        win.want("the flag follows the store",
+                 WatchJs.markWatched(otherRows, watchedModel, "src"), 2)
+        win.want("a watched series says so", otherRows.get(0).watched, true)
+        win.want("and one nobody watches says that", otherRows.get(1).watched, false)
+        // The same list again writes nothing: this runs on every watch, every
+        // unwatch and at the end of every check round, and a round with no
+        // news must repaint nothing.
+        win.want("a second pass changes nothing",
+                 WatchJs.markWatched(otherRows, watchedModel, "src"), 0)
+        // A row that names its own source is answered for that source, not for
+        // whichever one is being browsed — the same series can be watched on
+        // one source and not on another.
+        var pairRows = Qt.createQmlObject(
+            'import QtQuick 2.5; ListModel {}', win, "markWatchedPairs")
+        pairRows.append({"sourceId": "elsewhere", "seriesId": "w-new", "watched": false})
+        win.want("a row's own source is what is asked about",
+                 WatchJs.markWatched(pairRows, watchedModel, "src"), 0)
+        win.want("so it is not watched", pairRows.get(0).watched, false)
+
+        // ---- the accent: one colour, and only ever a solid area ------------
+        //
+        // PLAN §6 M3 as amended twice. One colour (Style.accent), spent only
+        // on live state, on what is currently active, and on headings — and,
+        // since it was measured on hardware, spent only on *shapes*: a filled
+        // rule under a heading, a small solid square beside a line, or a fill
+        // behind black text. Coloured text read muddy on this panel, because
+        // black is drawn at the panel's full monochrome resolution while
+        // colour is composed through the colour filter array, and a letterform
+        // is almost entirely edge (ui/Style.js).
+        //
+        // Three kinds of assertion follow, and all three matter:
+        //
+        //   1. **The value itself**, pinned by what it has to do rather than
+        //      by its hex: it is a colour, it is deep, black clears 4.5:1 on
+        //      it and it clears 3:1 on paper. Every `=== Style.accent` below
+        //      passes with the token set to black; these are the ones that do
+        //      not.
+        //   2. **No text anywhere carries it.** The sweep at the end of this
+        //      section, over every screen at once and over every Text on them
+        //      rather than a named list. That is the regression this change
+        //      exists to prevent, and the heading somebody recolours later is
+        //      exactly the one that will not be in a list.
+        //   3. **Every case comes in pairs.** Asserting that something is
+        //      Style.accent is nearly worthless on its own: it passes on a
+        //      screen where the colour has become the *only* thing separating
+        //      two states. So each accented shape is checked together with the
+        //      signal that has to survive the colour being invisible — the
+        //      active half of the switch is still filled and still dead to
+        //      touch, the current chip is still filled, the badge is still
+        //      drawn only when there is news and still spells the count out,
+        //      the failed line still names its sources in words.
+
+        var acc = win.channels(Style.accent)
+        win.want("the accent is not the ordinary ink", Style.accent !== Style.ink, true)
+        win.want("nor the paper under it", Style.accent !== Style.paper, true)
+        win.want("nor either grey", Style.accent !== Style.muted
+                                    && Style.accent !== Style.rule, true)
+        // A grey has three equal channels, whatever its value. This is what
+        // "there is now a colour" means, stated without naming the colour.
+        win.want("it is a colour rather than another grey",
+                 acc[0] !== acc[1] || acc[1] !== acc[2], true)
+        win.want("and a warm one, which is what was chosen", acc[0] > acc[2], true)
+        // Deep, not pale: Gallery 3 renders every hue lighter than a monitor
+        // does, and a fill that washes toward cream stops reading as coloured
+        // at all. Stated as "darker than halfway to paper" rather than as a
+        // number, so it is the decision that is pinned and not the hex:
+        // #F97316, the pale candidate that was rejected, fails this.
+        win.want("and deep rather than pale",
+                 acc[0] + acc[1] + acc[2] < win.channels(Style.paper)[0] * 3 / 2, true)
+
+        // The contrast trap this change had to walk around, stated as the two
+        // numbers that decided the value. The accent carries no text, so it
+        // owes paper nothing more than the 3:1 a graphical object needs — but
+        // black text sits *on* it in three places, and that is the pair that
+        // is easy to get wrong, because it gets worse as the colour gets
+        // deeper. #C2410C, the previous accent, is the proof: it was chosen
+        // for 5.2:1 against paper and black on it is only 4.06:1, which is
+        // worse than the coloured text it would have replaced.
+        win.want("black text on an accent fill clears 4.5:1",
+                 win.contrast(Style.accent, Style.ink) >= 4.5, true)
+        win.want("which the deeper orange it replaced did not",
+                 win.contrast("#C2410C", Style.ink) >= 4.5, false)
+        win.want("and a shape drawn in the accent clears 3:1 on paper",
+                 win.contrast(Style.accent, Style.paper) >= 3.0, true)
+        // And it is still dark enough that a fill reads as the filled one with
+        // the hue taken away — which is what keeps "colour is never the only
+        // signal" true for the toggle and the chip, both of which now use the
+        // accent as their fill.
+        win.want("a fill in it is much darker than the paper around it",
+                 win.luminance(Style.accent) < win.luminance(Style.paper) / 3, true)
+
+        // The two shapes, pinned as shapes. A 1px coloured line is the same
+        // failure as a coloured glyph drawn sideways, so the rule has to be
+        // thick enough to be an area, and the mark has to be a real square
+        // rather than a decorative speck.
+        win.want("the accent rule is an area, not a hairline",
+                 Style.accentRule >= Style.hairline * 4, true)
+        win.want("and the mark is at least as tall as the type it sits beside",
+                 Style.accentMark >= Style.smallSize, true)
+        // But not so large that a page of rows is mostly orange: a mark is
+        // smaller than a touch target and a rule is thinner than a line of
+        // text.
+        win.want("while the mark is far smaller than a row",
+                 Style.accentMark < Style.rowHeight / 4, true)
+        win.want("and the rule far thinner than the heading over it",
+                 Style.accentRule < Style.headingSize / 2, true)
+
+        // ---- what is currently active: the layout switch -------------------
+
+        viewToggle.view = Views.GRID
+        var accGrid = win.findChild(viewToggle, "viewToggleGrid")
+        var accList = win.findChild(viewToggle, "viewToggleList")
+        // The fill is the accent now. It was a grey fill with an accent border
+        // and an accent word: a 2px coloured border is a thin stroke and the
+        // word was a coloured glyph, so both went and the colour moved onto
+        // the area that was already carrying the meaning.
+        win.want("the half you are in is filled with the accent",
+                 win.colorOf(accGrid), Style.accent)
+        win.want("and the half you are not in is paper",
+                 win.colorOf(accList), Style.paper)
+        win.want("its word is black on that fill",
+                 win.colorOf(win.findChild(viewToggle, "viewToggleLabelGrid")), Style.ink)
+        win.want("and the other half's word is the grey it always was",
+                 win.colorOf(win.findChild(viewToggle, "viewToggleLabelList")), Style.muted)
+        win.want("neither half has a coloured outline",
+                 win.colorOf(accGrid.border) === Style.rule
+                 && win.colorOf(accList.border) === Style.rule, true)
+        // The signals that were there before the colour and must still be:
+        // the fill, the deadness, and both words on screen either way.
+        win.want("the active half is still the filled one",
+                 win.colorOf(accGrid) !== win.colorOf(accList), true)
+        win.want("and still inert to a finger",
+                 win.findChild(viewToggle, "viewToggleGridArea").enabled, false)
+        win.want("with the other still live",
+                 win.findChild(viewToggle, "viewToggleListArea").enabled, true)
+        win.want("and both layouts still named",
+                 win.visibleKeyLabels(viewToggle).join(","), "Grid,List")
+
+        // The colour follows the layout rather than the position — a mark
+        // stuck on the left-hand half would pass every assertion above.
+        viewToggle.view = Views.LIST
+        win.want("the accent moves with the layout",
+                 win.colorOf(accList), Style.accent)
+        win.want("and leaves the half behind it", win.colorOf(accGrid), Style.paper)
+        win.want("as does the black label",
+                 win.colorOf(win.findChild(viewToggle, "viewToggleLabelList")), Style.ink)
+        win.want("and the deadness",
+                 win.findChild(viewToggle, "viewToggleListArea").enabled, false)
+        viewToggle.view = Views.GRID
+
+        // ---- what is currently active: the source chip ---------------------
+
+        chapterList.sources = [{"sourceId": "src-a", "sourceName": "Example Reader",
+                                "seriesId": "/manga/lantern/"},
+                               {"sourceId": "src-b", "sourceName": "Other Reader",
+                                "seriesId": "/series/lantern"}]
+        chapterList.currentSourceId = "src-a"
+        var accChipA = win.findChild(chapterList, "sourceChip-src-a")
+        var accChipB = win.findChild(chapterList, "sourceChip-src-b")
+        // The fill was already what marked this chip; it is the accent now
+        // instead of the grey, and the accent came off the border. That was
+        // only possible because the colour changed with it: black on the old
+        // deep orange was the one pairing worse than the grey it replaced,
+        // which is the assertion two sections up.
+        win.want("the chip for the source being read is filled with the accent",
+                 win.colorOf(accChipA), Style.accent)
+        win.want("and the others stay paper", win.colorOf(accChipB), Style.paper)
+        win.want("its label is black on the fill",
+                 win.colorOf(win.findChild(chapterList, "sourceChipLabel-src-a")), Style.ink)
+        win.want("and every chip keeps the same ink outline",
+                 win.colorOf(accChipA.border) === Style.ink
+                 && win.colorOf(accChipB.border) === Style.ink, true)
+        win.want("while the current chip is still the filled one",
+                 win.colorOf(accChipA) !== win.colorOf(accChipB), true)
+        win.want("and still inert",
+                 win.findChild(chapterList, "sourceChipArea-src-a").enabled, false)
+        win.want("and still named in words",
+                 win.findChild(chapterList, "sourceChipLabel-src-a").text, "Example Reader")
+
+        // ---- what is currently active: the page indicator ------------------
+
+        lonePager.busy = false
+        lonePager.hasMore = true
+        lonePager.page = 3
+        lonePager.totalPages = 12
+        var accPagerLabel = win.findChild(lonePager, "pagerLabel")
+        var accPagerMark = win.findChild(lonePager, "pagerMark")
+        // A solid square beside the words, both of them on paper. The words
+        // themselves used to be the accent and that is what read muddy.
+        win.want("the page indicator carries an accent mark",
+                 win.colorOf(accPagerMark), Style.accent)
+        win.want("which is a square area rather than a stroke",
+                 accPagerMark.width === Style.accentMark
+                 && accPagerMark.height === Style.accentMark, true)
+        win.want("and it sits beside the words, not behind them",
+                 accPagerMark.x + accPagerMark.width <= accPagerLabel.x
+                 + (accPagerLabel.width - accPagerLabel.contentWidth) / 2, true)
+        win.want("while the indicator itself is ink",
+                 win.colorOf(accPagerLabel), Style.ink)
+        win.want("and still says where you are in words",
+                 accPagerLabel.text, "Page 3 of 12")
+        // One marked thing in the bar, not three. Marking the buttons too
+        // would leave the accent meaning "pager" rather than "you are here".
+        win.want("the buttons either side stay ink",
+                 win.colorOf(win.findChild(lonePager, "pagerPrevious").border), Style.ink)
+        win.want("both of them",
+                 win.colorOf(win.findChild(lonePager, "pagerNext").border), Style.ink)
+
+        // ---- state: the new-chapters badge ---------------------------------
+
+        WatchJs.reconcile(watchedModel, [
+            {"sourceId": "src", "seriesId": "w-new", "sourceName": "Example Reader",
+             "title": "Watched With News", "newChapters": 3, "badge": "3 new chapters",
+             "state": "new", "status": "3 new chapters",
+             "coverUrl": "https://example.invalid/w.jpg"},
+            {"sourceId": "src", "seriesId": "w-quiet", "sourceName": "Example Reader",
+             "title": "Watched Quietly", "newChapters": 0, "badge": "",
+             "state": "ok", "status": "Up to date"}])
+
+        watchList.view = "list"
+        var accWRows = win.findChild(watchList, "watchRows")
+        accWRows.forceLayout()
+        var accBadges = win.findChildren(accWRows, "watchBadge", [])
+        var accBadgeTexts = win.findChildren(accWRows, "watchBadgeText", [])
+        // The whole badge is the accent — a filled block, not an outline round
+        // a coloured count, which was a thin stroke and a coloured glyph at
+        // once.
+        win.want("the badge on a row is a solid accent block",
+                 win.colorOf(accBadges[0]), Style.accent)
+        win.want("with no coloured hairline round it", accBadges[0].border.width, 0)
+        win.want("and its count in black on top", win.colorOf(accBadgeTexts[0]), Style.ink)
+        // The badge is drawn *only* when there is something to report, and the
+        // count is spelled out inside it: a reader who sees no colour at all
+        // still gets the whole answer.
+        win.want("and the count is still the backend's words",
+                 accBadgeTexts[0].text, "3 new chapters")
+        win.want("while a series with nothing new wears no badge at all",
+                 accBadges[1].visible, false)
+        win.want("and the row's own title stays ink",
+                 win.colorOf(win.findChildren(accWRows, "watchRowTitle", [])[0]), Style.ink)
+
+        // The same badge in the other layout. Two layouts, one badge: a tile
+        // whose badge were black would read as a different kind of thing.
+        watchList.view = "grid"
+        var accWTiles = win.findChild(watchList, "watchTiles")
+        win.findChild(accWTiles, "coverTiles").forceLayout()
+        var accTileBadges = win.findChildren(accWTiles, "coverBadge", [])
+        var accTileBadgeTexts = win.findChildren(accWTiles, "coverBadgeText", [])
+        win.want("a tile's badge is the same accent block",
+                 win.colorOf(accTileBadges[0]), Style.accent)
+        win.want("with its count black on it too",
+                 win.colorOf(accTileBadgeTexts[0]), Style.ink)
+        win.want("with the same words", accTileBadgeTexts[0].text, "3 new chapters")
+        win.want("and a tile with no news still wears nothing",
+                 accTileBadges[1].visible, false)
+        win.want("while the caption under it stays ink",
+                 win.colorOf(win.findChildren(accWTiles, "coverCaption", [])[0]), Style.ink)
+
+        // The entry point's half of the same badge. This one is a button, so
+        // the mark arrives *with* the extra words and never instead of them:
+        // with nothing to report it is an ordinary button.
+        var accWatching = win.findChild(sourceList, "watchingLabel")
+        var accWatchingMark = win.findChild(sourceList, "watchingMark")
+        sourceList.watchingLabel = ""
+        win.want("a Watching button with no news carries no mark",
+                 accWatchingMark.visible, false)
+        win.want("and its label is plain ink", win.colorOf(accWatching), Style.ink)
+        win.want("saying only Watching", accWatching.text, "Watching")
+        sourceList.watchingLabel = "3 new"
+        win.want("news puts a mark on it", accWatchingMark.visible, true)
+        win.want("in the accent", win.colorOf(accWatchingMark), Style.accent)
+        win.want("beside a label that is still black",
+                 win.colorOf(accWatching), Style.ink)
+        win.want("with the news in the label itself",
+                 accWatching.text, "Watching · 3 new")
+        win.want("while its neighbour stays an ordinary button",
+                 win.colorOf(win.findChild(sourceList, "downloadedButton").border), Style.ink)
+
+        // ---- state: a download in flight -----------------------------------
+        //
+        // The predicate first, because it is what the two row types share and
+        // the place a new backend phase would go wrong.
+        win.want("a queued download is in flight", chapterList.inFlight("queued", ""), true)
+        win.want("so is one fetching pages", chapterList.inFlight("downloading", ""), true)
+        win.want("a phase this Quire has never heard of is too",
+                 chapterList.inFlight("recompressing", ""), true)
+        win.want("but a finished one is not", chapterList.inFlight("done", ""), false)
+        win.want("nor a failed one", chapterList.inFlight("failed", ""), false)
+        win.want("nor a stopped one", chapterList.inFlight("cancelled", ""), false)
+        win.want("nor a row that has never been asked for",
+                 chapterList.inFlight("", ""), false)
+        win.want("nor one already in the library",
+                 chapterList.inFlight("downloading", "doc-1"), false)
+
+        chapterList.view = "chapters"
+        chaptersModel.setProperty(0, "downloadState", "downloading")
+        chaptersModel.setProperty(0, "downloadMessage", "Page 3 of 20.")
+        var accChapterRows = win.findChild(chapterList, "chapterRows")
+        accChapterRows.forceLayout()
+        var accSubs = win.findChildren(accChapterRows, "chapterSubtitle", [])
+        var accMarks = win.findChildren(accChapterRows, "chapterMark", [])
+        // A mark beside the sentence, and the sentence left grey. The line
+        // itself used to be drawn in the accent, which is the muddy text the
+        // measurement in ui/Style.js is about.
+        win.want("a downloading chapter carries a mark", accMarks[0].visible, true)
+        win.want("drawn in the accent", win.colorOf(accMarks[0]), Style.accent)
+        win.want("while the line under it stays grey",
+                 win.colorOf(accSubs[0]), Style.muted)
+        win.want("and says what is happening in the backend's words",
+                 accSubs[0].text, "Page 3 of 20.")
+        win.want("a row with nothing happening carries no mark",
+                 accMarks[1].visible, false)
+        win.want("and the chapter's own title stays ink",
+                 win.colorOf(win.findChildren(accChapterRows, "chapterTitle", [])[0]),
+                 Style.ink)
+
+        // A failure is not progress. It is a whole sentence and it is already
+        // the loudest thing on the row; marking it too would make the accent
+        // mean two different things on one line.
+        chaptersModel.setProperty(0, "downloadState", "failed")
+        chaptersModel.setProperty(0, "downloadMessage", "The source stopped answering.")
+        win.want("a failed download carries no mark", accMarks[0].visible, false)
+        win.want("and is not accented either", win.colorOf(accSubs[0]), Style.muted)
+        win.want("though it still says what happened",
+                 accSubs[0].text, "The source stopped answering.")
+        chaptersModel.setProperty(0, "downloadState", "")
+        chaptersModel.setProperty(0, "downloadMessage", "")
+        win.want("and a row back at rest is unmarked again", accMarks[0].visible, false)
+
+        // The volume rows, through the same predicate: a volume is the longer
+        // wait of the two, so if only one were marked it would be the wrong one.
+        chapterList.view = "volumes"
+        // A second volume, at rest: the case is that one row is marked and the
+        // other is not, and a single-row list cannot show that.
+        volumesModel.append({"chapterId": "c7", "title": "Volume 2",
+                             "detail": "7 chapters, Chapter 1 to Chapter 7",
+                             "chapterCount": 7, "downloadState": "",
+                             "downloadMessage": "", "documentUuid": ""})
+        volumesModel.setProperty(0, "downloadState", "downloading")
+        volumesModel.setProperty(0, "downloadMessage", "Page 3 of 200.")
+        var accVolumeRows = win.findChild(chapterList, "volumeRows")
+        accVolumeRows.forceLayout()
+        var accVolSubs = win.findChildren(accVolumeRows, "volumeSubtitle", [])
+        var accVolMarks = win.findChildren(accVolumeRows, "volumeMark", [])
+        win.want("a volume downloading is marked the same way",
+                 win.colorOf(accVolMarks[0]), Style.accent)
+        win.want("and the mark is there", accVolMarks[0].visible, true)
+        win.want("in the backend's words again", accVolSubs[0].text, "Page 3 of 200.")
+        win.want("with the sentence itself still grey",
+                 win.colorOf(accVolSubs[0]), Style.muted)
+        win.want("and a volume at rest carries no mark", accVolMarks[1].visible, false)
+        win.want("keeping its own grey sentence",
+                 win.colorOf(accVolSubs[1]), Style.muted)
+        win.want("which is what the volume holds",
+                 accVolSubs[1].text, "7 chapters, Chapter 1 to Chapter 7")
+        volumesModel.setProperty(0, "downloadState", "")
+        volumesModel.setProperty(0, "downloadMessage", "")
+        chapterList.view = "chapters"
+
+        // ---- state: a source that did not answer ---------------------------
+
+        // On screen for this: `visible` is the assertion below, and an item
+        // inside a hidden screen reports false whatever it asked for.
+        searchAll.visible = true
+        searchAll.failedSources = "No answer from Third Reader"
+        var accFailedBar = win.findChild(searchAll, "searchAllFailedBar")
+        var accFailed = win.findChild(searchAll, "searchAllFailed")
+        var accFailedMark = win.findChild(searchAll, "searchAllFailedMark")
+        win.want("the line naming a source that did not answer carries a mark",
+                 win.colorOf(accFailedMark), Style.accent)
+        win.want("with the words themselves in ink",
+                 win.colorOf(accFailed), Style.ink)
+        win.want("and the mark clear of them",
+                 accFailedMark.x + accFailedMark.width <= accFailed.x, true)
+        // The words are the whole signal. This line is the *list of sources*,
+        // not a mark standing for one.
+        win.want("and it names the source, rather than standing for it",
+                 accFailed.text, "No answer from Third Reader")
+        win.want("below the results, which are still there",
+                 accFailedBar.visible, true)
+        // Absent, not decoloured, when there is nothing to say: the accent
+        // never sits on screen meaning "all is well".
+        searchAll.failedSources = ""
+        win.want("and there is no line at all when every source answered",
+                 accFailedBar.visible, false)
+        win.want("taking no room with it", accFailedBar.height, 0)
+        win.want("so the mark is off the screen with it",
+                 accFailedMark.visible, false)
+        searchAll.visible = false
+
+        // ---- the section headings ------------------------------------------
+        //
+        // Settings is the one screen that is a list of unrelated sections, so
+        // its headings are what is actually navigated. The heading is black
+        // and the bar under it is the accent (ui/SectionHeading.qml) — it was
+        // the other way round, and on the device the coloured headings were
+        // the worst of the muddy text because they are the largest coloured
+        // type in the app.
+        var accHeadings = win.findChildren(settings, "sectionHeading", [])
+        var accHeadingRules = win.findChildren(settings, "sectionHeadingRule", [])
+        win.want("every section has a heading", accHeadings.length > 3, true)
+        win.want("and every heading a rule under it",
+                 accHeadingRules.length, accHeadings.length)
+        win.want("the first heading is ink", win.colorOf(accHeadings[0]), Style.ink)
+        win.want("and the last too",
+                 win.colorOf(accHeadings[accHeadings.length - 1]), Style.ink)
+        win.want("the first rule is the accent",
+                 win.colorOf(accHeadingRules[0]), Style.accent)
+        win.want("and the last as well",
+                 win.colorOf(accHeadingRules[accHeadingRules.length - 1]), Style.accent)
+        // A bar, not a hairline, and pointing at the words rather than lying
+        // across the page: it is as wide as the heading it belongs to and no
+        // wider.
+        win.want("a rule is drawn as an area",
+                 accHeadingRules[0].height, Style.accentRule)
+        win.want("as wide as the words above it",
+                 Math.round(accHeadingRules[0].width),
+                 Math.round(accHeadings[0].contentWidth))
+        win.want("which is narrower than the column",
+                 accHeadingRules[0].width < accHeadings[0].width, true)
+        // The signals underneath the colour: a heading is still the largest
+        // type in its section, and still says what the section is.
+        win.want("a heading is still larger than the body under it",
+                 Style.headingSize > Style.bodySize, true)
+        win.want("and still says what its section is", accHeadings[0].text, "Backend")
+
+        // ---- and the whole point: no word anywhere is coloured -------------
+        //
+        // Every case above names the element it is about, which means every
+        // case above can be satisfied by a screen that also colours something
+        // nobody thought to name. This is the sweep that cannot: it walks
+        // every screen the harness holds, collects everything that is a Text
+        // by construction rather than by objectName, and asserts that not one
+        // of them is drawn in the accent.
+        //
+        // The state is set up again first, because the cases above reset it —
+        // a sweep run over screens with nothing happening on them would pass
+        // without ever seeing a badge, a progress line or a failed source.
+        searchAll.visible = true
+        searchAll.failedSources = "No answer from Third Reader"
+        sourceList.watchingLabel = "3 new"
+        chaptersModel.setProperty(0, "downloadState", "downloading")
+        chaptersModel.setProperty(0, "downloadMessage", "Page 3 of 20.")
+        accChapterRows.forceLayout()
+
+        var accScreens = [sourceList, addSource, seriesGrid, chapterList, watchList,
+                          downloadedList, searchAll, settings, viewToggle, lonePager]
+        var accAllText = []
+        for (var accI = 0; accI < accScreens.length; ++accI)
+            win.textsUnder(accScreens[accI], accAllText)
+        // The sweep is worthless if it found nothing, and "nothing" is exactly
+        // what a broken walk returns.
+        win.want("there is a screenful of text to check", accAllText.length > 50, true)
+        win.want("including the lines these cases are about",
+                 accAllText.indexOf(accFailed) >= 0
+                 && accAllText.indexOf(accBadgeTexts[0]) >= 0
+                 && accAllText.indexOf(accSubs[0]) >= 0, true)
+
+        var accOffenders = []
+        for (var accJ = 0; accJ < accAllText.length; ++accJ)
+            if (win.colorOf(accAllText[accJ]) === Style.accent)
+                accOffenders.push(String(accAllText[accJ].objectName) + ": "
+                                  + String(accAllText[accJ].text))
+        // Named, not counted: when this fails it has to say which line, or the
+        // next person has to go looking for it by eye on a device.
+        win.want("and not one word of it is drawn in the accent",
+                 accOffenders.join(" | "), "")
+
+        searchAll.failedSources = ""
+        searchAll.visible = false
+        chaptersModel.setProperty(0, "downloadState", "")
+        chaptersModel.setProperty(0, "downloadMessage", "")
+        // ---- and now the timing, against real timers -----------------------
+        //
+        // Everything above drove `held` directly, which says nothing about
+        // when it fires. The rest of this file presses a row for real and
+        // watches the clock: the feedback at Style.pressFeedbackDelay, the
+        // menu at Style.holdDelay, and a held press that does **not** also
+        // count as a tap on the way up.
+        downloadedList.view = "list"
+        downloadedRows([{
+            "sourceId": "src-a", "sourceName": "Example Reader",
+            "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+            "detail": "3 downloads", "openable": true, "note": "",
+            "coverUrl": "", "latestUuid": "doc-1", "watched": false}])
+        win.pressArea = win.findChild(downloadedList, "downloadedRowArea")
+        win.pressMenu = win.findChild(downloadedList, "downloadedMenu")
+        win.startPressTimings()
+    }
+
+    // ---- the press, timed --------------------------------------------------
+    //
+    // A press is started with beginPress() and then left alone: the component's
+    // own timers are what move it on, so these cases fail if either delay
+    // changes. Nothing here calls held() or tapped(), which is the point —
+    // those are the handlers, and a test that invokes a handler proves only
+    // that the handler exists.
+    //
+    // The checkpoints sit well inside the gaps (60ms and 260ms around a 150ms
+    // feedback, 260ms and 620ms around a 500ms menu) because an offscreen Qt
+    // timer is allowed to be late. They are scheduled against the wall clock
+    // rather than one after another, so a step that overran does not push the
+    // ones behind it.
+    property var pressArea: null
+    property var pressMenu: null
+    property var pressSteps: []
+    property int pressStep: 0
+    property real pressStart: 0
+
+    Timer { id: pressTimer; repeat: false; onTriggered: win.runPressStep() }
+
+    function startPressTimings() {
+        win.pressSteps = [
+            {"at": 0, "run": function () {
+                win.downloadedOpens = 0
+                win.pressArea.beginPress()
+            }},
+            {"at": 60, "run": function () {
+                // Too early for either. A tap that flashed the row would be a
+                // row that flickers every time the list is used.
+                win.want("a press this short does not darken the row",
+                         win.pressArea.feedback, false)
+                win.want("and the row is still paper",
+                         win.colorOf(win.findChild(downloadedList, "rowPressFeedback")),
+                         Style.paper)
+                win.want("and opens no menu", win.pressMenu.opened, false)
+            }},
+            {"at": 260, "run": function () {
+                // Past the feedback, nowhere near the menu. This is the gap
+                // the feedback exists for: on e-ink the user cannot otherwise
+                // tell a registered hold from a dead screen, and lifts early.
+                win.want("a press held on darkens the row", win.pressArea.feedback, true)
+                win.want("and the row is drawn dark",
+                         win.colorOf(win.findChild(downloadedList, "rowPressFeedback")),
+                         Style.pressed)
+                win.want("but still opens no menu", win.pressMenu.opened, false)
+            }},
+            {"at": 620, "run": function () {
+                win.want("holding on opens the menu", win.pressMenu.opened, true)
+                win.want("for the row under the finger",
+                         win.menuActions(downloadedList).join(","),
+                         "open,read,watch,delete")
+
+                // The finger comes up. MouseArea emits clicked() on release
+                // whether or not the hold fired, so this is the case that
+                // stops a long press opening the series behind its own menu.
+                win.pressArea.endPress()
+                win.pressArea.clicked(null)
+                win.want("a held press is not also a tap", win.downloadedOpens, 0)
+                win.want("and the darkening ends with the press",
+                         win.pressArea.feedback, false)
+                win.want("while the menu stays up", win.pressMenu.opened, true)
+            }},
+            {"at": 700, "run": function () {
+                // A short tap, from the same machinery: down, up well before
+                // the menu, and the click that follows.
+                win.findChild(win.pressMenu, "contextMenuScrim").clicked(null)
+                win.pressArea.beginPress()
+            }},
+            {"at": 780, "run": function () {
+                win.pressArea.endPress()
+                win.pressArea.clicked(null)
+                win.want("a short tap opens the series", win.downloadedOpens, 1)
+                win.want("and no menu with it", win.pressMenu.opened, false)
+                win.want("having never darkened the row", win.pressArea.feedback, false)
+            }}
+        ]
+        win.pressStep = 0
+        win.pressStart = Date.now()
+        win.schedulePressStep()
+    }
+
+    function schedulePressStep() {
+        if (win.pressStep >= win.pressSteps.length) {
+            win.finish()
+            return
+        }
+        // Against the wall clock, so a late step does not drag the next one
+        // past the delay it is measuring.
+        var due = win.pressSteps[win.pressStep].at - (Date.now() - win.pressStart)
+        pressTimer.interval = due > 1 ? due : 1
+        pressTimer.start()
+    }
+
+    function runPressStep() {
+        var step = win.pressSteps[win.pressStep]
+        step.run()
+        win.pressStep++
+        win.schedulePressStep()
+    }
+
+    function finish() {
         console.log(win.failures === 0 ? "HARNESS OK" : "HARNESS FAILED: " + win.failures)
         Qt.exit(win.failures === 0 ? 0 : 1)
     }

@@ -1,0 +1,5 @@
+# Annex's lib/ is a plain local directory import, not a module — its own
+# qmldir says so. This file exists for the same reason Annex's does: to name
+# the types the directory offers, so `import "../../../lib"` from
+# apps/quire/ui/Main.qml resolves Backend.
+Backend 1.0 Backend.qml
