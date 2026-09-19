@@ -25,12 +25,35 @@ import (
 
 // Thumbnail size. The grid shows six columns at most on a 1620px panel, so a
 // 300px-wide thumbnail is already generous; the 2:3 ratio is the shape almost
-// every cover is published at. Greyscale because the panel is.
+// every cover is published at.
+//
+// **Covers are kept in colour.** They used to be flattened to grey here, with
+// the note "Greyscale because the panel is" — which is wrong on this hardware.
+// The device reports itself as "reMarkable Ferrari", the Paper Pro, whose panel
+// is colour; the stock UI ships colour pens and highlighters on it. So the old
+// setting was throwing away information the screen can actually show.
+//
+// Page images are a separate question and are deliberately untouched: a chapter
+// is mostly black-and-white line art, and colour there would cost size and
+// render time on every page for almost nothing.
 const (
 	ThumbWidth   = 300
 	ThumbHeight  = 450
 	ThumbQuality = 70
 )
+
+// renderVersion changes whenever the bytes this package writes for a given URL
+// would differ — the size, the quality, the colour handling.
+//
+// It is folded into the cache key, and that is the whole point. The key was the
+// URL alone, so a cover already on disk was reused for ever: turning colour on
+// would have left every cover the user had already seen grey, forever, and the
+// change would have looked like it simply did not work. Bump this with any
+// change to the options below.
+//
+//	1: 300x450, quality 70, greyscale
+//	2: 300x450, quality 70, colour
+const renderVersion = 2
 
 // MaxSourceBytes is how much of an original cover we will read. A cover that
 // wants more than this is not a cover.
@@ -135,7 +158,6 @@ func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string, from
 	opts := imageproc.DefaultOptions()
 	opts.MaxWidth, opts.MaxHeight = ThumbWidth, ThumbHeight
 	opts.Quality = ThumbQuality
-	opts.Grayscale = true
 	if _, err := imageproc.Normalise(&buf, bytes.NewReader(resp.Body), opts); err != nil {
 		return "", fmt.Errorf("covers: %w", err)
 	}
@@ -155,8 +177,12 @@ func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string, from
 
 // pathFor is deterministic, so a restart reuses what is already on disk, and
 // per-source, so removing a source can drop its covers in one directory.
+//
+// renderVersion is part of the hashed input rather than the filename: a bumped
+// version then simply misses, and the old file is left to the ordinary cache
+// eviction instead of needing a migration that walks the directory.
 func (c *Cache) pathFor(sourceID, rawurl string) string {
-	sum := sha256.Sum256([]byte(rawurl))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("v%d|%s", renderVersion, rawurl)))
 	return filepath.Join(c.dir, safe(sourceID), hex.EncodeToString(sum[:8])+".jpg")
 }
 

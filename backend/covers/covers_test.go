@@ -3,6 +3,8 @@ package covers_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -201,5 +203,78 @@ func TestNoCoverReferrerSendsNoHeader(t *testing.T) {
 	}
 	if !calls[0].Referrer.IsZero() {
 		t.Errorf("a cover with no page behind it was fetched with referrer %q", calls[0].Referrer.String())
+	}
+}
+
+// The panel on this device is colour (it reports "reMarkable Ferrari", the
+// Paper Pro), so a cover keeps its colour. It used to be flattened to grey.
+// The panel on this device is colour — it reports "reMarkable Ferrari", the
+// Paper Pro, and the stock UI ships colour pens on it — so a cover keeps its
+// colour. It used to be flattened to grey here.
+func TestACoverKeepsItsColour(t *testing.T) {
+	// A deep red source image. Red is chosen because greyscale conversion is
+	// luminance-weighted: a mid red collapses to a mid grey, so a flattened
+	// cover would still *look* plausible and only the channels give it away.
+	src := image.NewRGBA(image.Rect(0, 0, 600, 900))
+	for y := 0; y < 900; y++ {
+		for x := 0; x < 600; x++ {
+			src.Set(x, y, color.RGBA{R: 200, G: 30, B: 30, A: 255})
+		}
+	}
+	var raw bytes.Buffer
+	if err := png.Encode(&raw, src); err != nil {
+		t.Fatal(err)
+	}
+
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: raw.String()},
+	})
+	c := covers.New(t.TempDir(), f)
+
+	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fh.Close()
+	img, _, err := image.Decode(fh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	r, g, bl, _ := img.At(b.Dx()/2, b.Dy()/2).RGBA()
+	if r == g && g == bl {
+		t.Fatalf("the cover came back grey (%d,%d,%d); colour was flattened", r>>8, g>>8, bl>>8)
+	}
+	if r <= g || r <= bl {
+		t.Errorf("the red channel did not dominate: (%d,%d,%d)", r>>8, g>>8, bl>>8)
+	}
+}
+
+// Turning colour on must not leave every already-cached cover grey for ever.
+//
+// The cache key was the URL alone, so the bytes on disk were reused whatever
+// they had been rendered with. This pins that how a cover was rendered is part
+// of the key, by asserting the file is *not* at the path the bare URL gives.
+func TestTheRenderVersionIsPartOfTheKey(t *testing.T) {
+	original := bigPNG(t)
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: original},
+	})
+	dir := t.TempDir()
+	c := covers.New(dir, f)
+
+	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256([]byte(coverURL))
+	bare := hex.EncodeToString(sum[:8]) + ".jpg"
+	if filepath.Base(path) == bare {
+		t.Fatal("the cover is keyed by the bare URL, so a render change would reuse the old bytes for ever")
 	}
 }
