@@ -121,3 +121,76 @@ Gotchas found while proving the loop:
 - The re-emitted QML is reformatted (MainView goes 660 → 782 lines) even where
   nothing changed. Diff the *patched* tree against a *re-emitted unpatched*
   tree, not against the dump, or the noise will bury the change.
+
+## OS 3.28.0.172
+
+### `entry.id` is an object, and stringifying it is a silent no-op
+
+Measured on hardware 2026-09-18 by dumping an entry wrapper from inside an
+Annex app:
+
+```
+[quire] entry for 11fd53c9-... is QmlDocumentWrapper(0xdf4c410)
+[quire]   .id = 11fd53c9-ecbf-4fa4-bd51-75a09a2bb31f  (object)
+[quire]   .visibleName = I Fell for My Friend's Older Sister - Ch 0002.pdf  (string)
+```
+
+`Library.entryForId(uuid).id` is **not a string**. It is a wrapper whose
+`toString()` is the uuid, which is why the distinction stayed invisible for so
+long: on 3.25 and 3.27 the id and the uuid genuinely were the same string.
+
+Every `LibraryController` method that takes entries wants that object.  Hand it
+the stringified form and the call is **accepted, does nothing, and reports
+nothing**. The only evidence is in xochitl's own log, which the app cannot see:
+
+```
+rm.library.controller  moving "" to trash (moveEntryToTrash .../librarycontroller.cpp:453)
+```
+
+The empty string in that line is the entry the controller resolved our argument
+to. Affected, all through one shared helper:
+
+| Call | Argument that must stay an object |
+|---|---|
+| `LibraryController.moveEntriesToTrash(ids)` | each id |
+| `LibraryController.deleteEntries(ids)` | each id |
+| `LibraryController.moveEntries(ids, destination)` | each id **and** the destination |
+
+`Library.createCollectionWrapper(parentUuidString, name)` is the exception: it
+takes and returns plain uuid strings, and worked throughout.
+
+**The rule this leaves behind.** Resolve uuid to id at the call, in
+`ReaderHandoff.qml`, and let no wrapper object out of that file. Everything
+above it — `Sorting.js`, `Deleting.js`, the backend records — stays plain
+strings, so no upstream string handling can break an id it never holds.
+
+Note also that this is invisible to `make check`: the harness fakes the device
+API, and the bug lives in the real boundary. Two OS bumps have now broken this
+exact seam (`com.remarkable` disappearing on 3.28, and this), and it is the one
+part of the app no test reaches.
+
+### A trashed entry's parent is the literal `"trash"`
+
+`Library.parentIdForId(uuid)` returns `"trash"` — not a uuid — once the entry is
+in the Trash. Measured 2026-09-18:
+
+```
+[quire] parentOf(e3259d7b-...) = "trash"
+```
+
+That is the comparison `Deleting.js` makes to tell "it reached the Trash" from
+"the move silently did nothing", and it had never actually been exercised on
+this OS: every delete here was failing at the object-id problem above, well
+before anything got this far.
+
+### The resource dump is not always faithful
+
+`rccdump` extracted `NavigatorWindow.qml` and `GesturesWindow.qml` as
+byte-identical files. They are not. The same qmldiff selector matched one and
+failed on the other, which two identical files cannot both do — so the dump had
+misattributed one file's contents.
+
+Treat `qmlroot328/tree` as a strong hint about what xochitl runs, not as
+evidence. Where it matters, patch and read the device log: qmldiff names every
+file it processes and reports a selector that does not match, and an unmatched
+selector is a safe failure.

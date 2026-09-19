@@ -10,11 +10,11 @@
 // document and "Delete" reporting that it changed nothing, instead of taking
 // the whole frontend down with it.
 //
-// It needs no QMLDiff patch. An AppLoad application's QML runs inside
-// xochitl's own QML engine, so these singletons are simply importable — proven
-// on hardware 2026-09-15 against OS 3.25.1.1 (see PLAN §6 M6 and
-// docs/QMD-NOTES.md). If a future OS closes that door, this file fails to load
-// and nothing else does.
+// It needs no QMLDiff patch. An Annex app's QML runs inside xochitl's own QML
+// engine, so these singletons are simply importable — proven on hardware
+// 2026-09-15 against OS 3.25.1.1, and again under Annex on 3.28.0.172 (see
+// PLAN §6 M6 and docs/QMD-NOTES.md). If a future OS closes that door, this
+// file fails to load and nothing else does.
 //
 // **The page-offset trap.** MainView.qml:88 honours a `page` argument only when
 // a search-highlight object is also present, so passing {documentId, page}
@@ -22,16 +22,41 @@
 // LibraryController.setLastOpenedPage(id, page) first is how xochitl works
 // around its own bug (Navigator.qml:857-860), and it is why open() below is in
 // that order and must stay in it.
+//
+// **Two things moved on 3.28.0.172 and both are load-bearing here.**
+//
+// 1. `com.remarkable` is gone; `Library` now lives in `xofm.libs.library`.
+//    Measured, not guessed — the old import is what made this file fail to
+//    load on 3.28 at all.
+//
+// 2. `Global.documentViewLoader` no longer exists, so there is no named path
+//    to the reader. The loader is found by walking the object tree for
+//    `objectName === "DocumentView"` instead. That is deliberately structural:
+//    the objectName is what `MainView.qml` sets on the Loader
+//    (docs/QMD-NOTES.md), and a name survives the kind of reshuffle that has
+//    now broken a property reference twice.
 
 import QtQuick 2.5
-import device.global
-import com.remarkable
+// `device.global` is deliberately not imported any more. It was here only for
+// `Global.documentViewLoader`, which does not exist on 3.28 — so keeping it
+// would be one more module that has to resolve for this file to load, in
+// exchange for nothing. Every import in this file is a way for the reader
+// handoff to go missing, and the Loader around it is what turns that into a
+// degraded button instead of a dead app.
+import xofm.libs.library
 import "Sorting.js" as Sorting
 import "Reconcile.js" as Reconcile
 import "Deleting.js" as Deleting
 
 QtObject {
     id: handoff
+
+    // anchor is any Item in the live scene, set by Main.qml after this loads.
+    //
+    // It exists because this is a QtObject and therefore has no parent of its
+    // own: finding the reader means walking the object tree, and a QtObject
+    // is not in it. Main.qml hands over its root, which is.
+    property Item anchor: null
 
     // open asks the stock reader to show a document.
     //
@@ -47,15 +72,85 @@ QtObject {
             return false
 
         // Must come first. See the trap in the file comment.
-        if (page !== undefined && page !== null && page >= 0)
-            LibraryController.setLastOpenedPage(uuid, page)
+        //
+        // Guarded rather than called outright: LibraryController's module on
+        // 3.28 is not something this project has measured, and a page offset
+        // is worth strictly less than the handoff itself. If it is missing,
+        // the document opens on its last-opened page — which is where a plain
+        // openDocument lands anyway — instead of the file failing to load and
+        // "Read" reporting that it cannot open anything at all.
+        if (page !== undefined && page !== null && page >= 0) {
+            if (typeof LibraryController !== "undefined" && LibraryController.setLastOpenedPage)
+                LibraryController.setLastOpenedPage(uuid, page)
+            else
+                console.log("[quire] no LibraryController; opening on the last page instead of " + page)
+        }
 
-        var loader = Global.documentViewLoader
+        var loader = handoff.documentViewLoader()
         if (!loader || !loader.item)
             return false
 
         loader.item.openDocument(entry)
         return true
+    }
+
+    // documentViewLoader finds the Loader that holds the stock reader.
+    //
+    // `Global.documentViewLoader` was the named route and is gone on 3.28, so
+    // this walks the object tree for the Loader that MainView.qml marks with
+    // `objectName: "DocumentView"` — the same name docs/QMD-NOTES.md records
+    // and the same one the Annex host uses.
+    //
+    // The walk starts at the app's own root and climbs to the window, because
+    // an Annex app is parented *inside* the navigator and the reader is a
+    // sibling branch further up. It is breadth-first and depth-capped: the
+    // tree is large, and an unbounded recursive walk over a QML object graph
+    // is a good way to turn a tap into a visible pause on a 1.8 GHz device.
+    //
+    // The result is cached, because the Loader is part of MainView and lives
+    // as long as xochitl does — so the walk happens once per session rather
+    // than once per Read. The cache is validated before use rather than
+    // trusted: a destroyed QML object comes back as null through a `var`
+    // property, so a stale one costs one re-walk and not a crash.
+    property var _cachedLoader: null
+
+    function documentViewLoader() {
+        if (_cachedLoader && _cachedLoader.objectName === "DocumentView")
+            return _cachedLoader
+        _cachedLoader = handoff.findDocumentView()
+        return _cachedLoader
+    }
+
+    function findDocumentView() {
+        var root = handoff.anchor
+        if (!root) {
+            console.log("[quire] the reader handoff has no anchor into the scene")
+            return null
+        }
+        while (root.parent)
+            root = root.parent
+
+        var queue = [root]
+        var depth = 0
+        while (queue.length > 0 && depth < 32) {
+            var next = []
+            for (var i = 0; i < queue.length; ++i) {
+                var node = queue[i]
+                if (!node)
+                    continue
+                if (node.objectName === "DocumentView")
+                    return node
+                var kids = node.children
+                if (!kids)
+                    continue
+                for (var k = 0; k < kids.length; ++k)
+                    next.push(kids[k])
+            }
+            queue = next
+            depth += 1
+        }
+        console.log("[quire] no DocumentView in the object tree; the reader cannot be reached")
+        return null
     }
 
     // sort puts a finished download in its series folder, and answers with what
@@ -87,29 +182,59 @@ QtObject {
             createFolder: function (parent, name) {
                 return String(Library.createCollectionWrapper(parent, name))
             },
+            // Both sides resolved, for the same reason: the destination is an
+            // id the controller has to recognise too, and a folder uuid string
+            // is exactly as useless to it as a document uuid string.
             move: function (uuids, folderId) {
-                LibraryController.moveEntries(handoff.entryIds(uuids), folderId)
+                LibraryController.moveEntries(handoff.entryIds(uuids),
+                                              handoff.entryId(folderId))
             }
         }, req)
     }
 
     // entryIds maps document uuids to the ids the controller acts on.
     //
-    // On 3.25 and 3.27 these are the same string, so the mapping looks like
-    // superstition. It is the form rm-librarian had to adopt on 3.28, when the
-    // controller stopped accepting raw uuids, and it costs one call that is
-    // already being made. A uuid that no longer resolves is dropped rather than
-    // passed through: an id the controller does not recognise is ignored
-    // silently, and a silently ignored id in a list of five is four moves and a
-    // mystery.
+    // **`entry.id` is an object, and stringifying it is the bug.** Measured on
+    // 3.28.0.172 (2026-09-18):
+    //
+    //     [quire]   .id = 11fd53c9-ecbf-4fa4-bd51-75a09a2bb31f  (object)
+    //
+    // It is a wrapper whose toString() is the uuid. So `String(entry.id)`
+    // yields exactly the right-looking text, is truthy, passes every guard this
+    // code has — and is then worthless to the controller, which takes the
+    // string, finds no entry for it and does nothing. xochitl says so in its
+    // own log and nowhere the app can see:
+    //
+    //     rm.library.controller  moving "" to trash (moveEntryToTrash ...)
+    //
+    // That is what broke delete on 3.28, and the same line broke the move into
+    // series folders — one `String()` in one helper, two features.
+    //
+    // On 3.25 and 3.27 the id and the uuid really were the same string, which
+    // is why the stringify was invisible for as long as it was.
+    //
+    // A uuid that no longer resolves is dropped rather than passed through: an
+    // id the controller does not recognise is ignored silently, and a silently
+    // ignored id in a list of five is four moves and a mystery.
     function entryIds(uuids) {
         var out = []
         for (var i = 0; i < uuids.length; ++i) {
             var entry = Library.entryForId(uuids[i])
             if (entry)
-                out.push(String(entry.id))
+                out.push(entry.id)
         }
         return out
+    }
+
+    // entryId is entryIds for a single uuid, for the destination of a move.
+    //
+    // It falls back to the uuid rather than to nothing: a destination that does
+    // not resolve is a move that fails, and a move that fails is reported by
+    // Sorting.js reading the parent back. Substituting an empty id here would
+    // turn that into a move to the top of My Files.
+    function entryId(uuid) {
+        var ids = handoff.entryIds([uuid])
+        return ids.length ? ids[0] : uuid
     }
 
     // check reports which of these documents are still on the tablet.
@@ -162,23 +287,38 @@ QtObject {
             exists: function (id) {
                 return Library.entryForId(id) ? true : false
             },
+            // Measured on 3.28.0.172: a trashed entry's parent reads back as
+            // the literal "trash", which is what Deleting.js compares against.
+            // Worth having been checked rather than assumed — every delete on
+            // this OS was failing further upstream, so nothing had ever reached
+            // this comparison to prove it.
             parentOf: function (id) {
                 return String(Library.parentIdForId(id))
             },
-            // The id deleteEntries is given. Identical to the uuid on 3.25 and
-            // deliberately not written as the uuid; see Deleting.js idFor.
+            // **A check, not the id.** This answers "does this uuid still name
+            // something?" and deliberately answers in a plain string: it is
+            // compared, logged and carried around by Deleting.js, and the one
+            // thing it must never be is an id on its way back to the
+            // controller. The two calls below do that resolution themselves,
+            // at the moment of the call, so no wrapper object ever leaves this
+            // file — and no amount of string handling upstream can break one.
             idFor: function (id) {
                 var entry = Library.entryForId(id)
                 return entry ? String(entry.id) : ""
             },
-            moveToTrash: function (ids) {
-                LibraryController.moveEntriesToTrash(ids)
+            // Both take document uuids and resolve them here. See entryIds.
+            moveToTrash: function (uuids) {
+                LibraryController.moveEntriesToTrash(handoff.entryIds(uuids))
             },
-            deleteEntries: function (ids) {
-                LibraryController.deleteEntries(ids)
+            deleteEntries: function (uuids) {
+                LibraryController.deleteEntries(handoff.entryIds(uuids))
             }
         }
     }
+
+    // The probes that found the object-id bug and confirmed the "trash" parent
+    // have done their job and are gone. What they measured is in
+    // docs/QMD-NOTES.md and in the comments on entryIds and parentOf above.
 
     // trashMany deletes several documents, one at a time, and reports each.
     //
