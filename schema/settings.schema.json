@@ -10,6 +10,17 @@
       "type": "boolean",
       "description": "Whether robots.txt is fetched and honoured before a discovery request. DEFAULT false -- PLAN §7.4, superseded 2026-09-16: RFC 9309 scopes robots.txt to 'automatic clients known as crawlers', a person searching and tapping is driving every request, and no comparable reader consults it at all. This is the ONLY switch: it is global, never per-source, and there is deliberately no per-source equivalent. It narrows nothing else -- rate limits, the per-host minimum delay, the honest User-Agent, the response size cap, byte accounting and the SSRF guard all still apply in full, and PLAN §7.6 is untouched: no UA spoofing, no TLS impersonation, no CAPTCHA solving, no challenge bypass, and a blocked_challenge verdict stays terminal. Every suppressed check is logged at info level, naming the path and the request kind.",
       "default": false
+    },
+    "searchView": { "$ref": "#/$defs/view" },
+    "downloadedView": { "$ref": "#/$defs/view" },
+    "watchingView": { "$ref": "#/$defs/view" }
+  },
+  "$defs": {
+    "view": {
+      "type": "string",
+      "enum": ["grid", "list"],
+      "default": "grid",
+      "description": "Which of the two layouts a screen draws: 'grid' of covers or 'list' of rows (PLAN §7.1 type 75). DEFAULT grid for every screen. Stored per screen rather than once for the whole app: searching wants a list often enough -- a row carries the title and the sources it was found in, where a tile carries a cover -- while Downloaded and Watching are for recognising something already known, which is what covers are good at. Each screen is a declared key rather than a map of screen to view, so that additionalProperties:false still catches a key nobody declared in an envelope imported from another device. Absent means the screen was never set and the default applies; an absent value and an explicit 'grid' are kept distinguishable so a future change of default cannot silently rewrite what an existing file meant."
     }
   }
 }
