@@ -603,7 +603,53 @@ site to an existing theme requires only a config entry and no code.
   a screenful in memory.
 - Series detail: synopsis, chapter list, per-chapter download state.
 - **No animations.** E-ink ghosting.
-- Match the stock UI palette. Do not invent a brand.
+- Match the stock UI palette, and spend colour only where it carries meaning.
+  Do not invent a brand. **Amended 2026-09-19**, because the original line
+  ("do not invent a brand", full stop) rested on the panel being greyscale and
+  it is not: the device is a Paper Pro, its Gallery 3 display is colour, and the
+  stock UI itself ships colour pens and highlighters. So Quire has exactly one
+  accent, defined once in `ui/Style.js`, and it is rationed rather than free —
+  a colour region on Gallery 3 refreshes more slowly and ghosts harder than
+  black on white. It marks live state (the new-chapters badge, a download in
+  flight, a source that did not answer), what is currently active (the selected
+  half of the layout switch, the current source chip, the page indicator) and
+  screen titles and section headings. Everything else stays black on white.
+  **Colour is never the only carrier of meaning**: each of those already says
+  the same thing in shape, position or words, and the accent joins that signal
+  rather than replacing it.
+
+  **Amended again 2026-09-19, and this time from a measurement on the device:
+  the accent is only ever a solid area. Never a glyph, never a hairline, never
+  a thin stroke.** The first amendment spent the accent on *text* — the screen
+  titles and section headings above, the badge count, the progress line, the
+  active toggle's word, the page indicator. On hardware every one of them read
+  muddy: the strokes smeared at their edges and the coloured type looked a size
+  smaller than the black beside it. The cause is the panel and not the hue, so
+  a different orange would not have fixed it. Gallery 3 draws black at the
+  panel's full monochrome resolution but composes a coloured pixel through its
+  colour filter array at a fraction of that resolution, and a letterform is
+  almost entirely edge, so it loses the part of itself that carries the shape.
+  A large solid region has almost no edge in proportion to its area and keeps
+  its colour cleanly.
+
+  The ~5.2:1 measured for the old `#C2410C` against paper was correct and
+  beside the point: a contrast ratio describes a solid block, not a letterform
+  seen through a filter.
+
+  So every word in `ui/` is now `Style.ink`, and the accent became three
+  shapes: a filled bar under a heading (`ui/AccentRule.qml`), a small solid
+  square beside a live line (`ui/AccentMark.qml`), and a solid fill behind
+  black text on the controls that were already filled. **The value moved with
+  the rule**, because the contrast pair that matters changed: the accent no
+  longer has to carry text against paper (3.56:1, above the 3:1 a graphical
+  object needs), but black text now sits *on* it (5.90:1, above the 4.5:1 body
+  text needs). Black on the old deeper `#C2410C` is only 4.06:1 — worse than
+  the coloured text it would have replaced, which is the trap this change had
+  to walk around. Lightening the fill was taken over the two alternatives
+  (paper-coloured text on a deep fill, or the accent beside the text
+  everywhere) because it is the only one that keeps every glyph black, and a
+  black glyph is drawn in the panel's full-resolution channel whatever is
+  behind it. It is still one value; no second tint was needed.
 
 **Acceptance:** paste a URL for a site of a supported theme → added and
 browsable, no manual configuration. Paste a challenge-protected URL → clear
@@ -2405,8 +2451,16 @@ so the view can decide *whether* to show something without deciding *what* it
 says. Empty strings mean nothing to report: an entry point that always shows a
 badge teaches people to ignore it.
 
-Prefer text to a dot. The panel is greyscale, and "3 new" survives a partial
-refresh legibly in a way a small coloured marker does not.
+Prefer text to a dot. "3 new" survives a partial refresh legibly in a way a
+small coloured marker does not, and it is still an answer to a reader who
+cannot pick the colour out. (This used to say "the panel is greyscale", which
+was never true — see §6 M3. The badge did gain the accent when that was
+corrected, but it gained it *around the words*, not instead of them: the rule
+is unchanged and the reason for it never depended on the panel having no
+colour. The badge is now a solid accent block with the count in black on it —
+the accent came off the outline and off the count itself, because a 2px
+coloured border and a coloured numeral are both the thin-stroke shape §6 M3's
+second amendment rules out. The words are still the badge.)
 
 **Failure is not "new".** If a check fails — network, challenge, a theme that no
 longer matches — say so on the series rather than showing zero or, worse, a

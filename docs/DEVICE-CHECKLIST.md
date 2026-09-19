@@ -7,12 +7,19 @@ Work top to bottom. Record the date and the OS build (`cat /etc/version`) at the
 top of each run. A check that is skipped is written down as skipped, not left
 blank — an unticked box and an untested box look identical a week later.
 
-> **The M8 acceptance test has never been run end to end.** It needs a *second*,
-> clean Paper Pro; there is one tablet and it is in daily use. §1 below is the
-> documented path, and every individual step in it has been executed against the
-> live device — but "a device that has never had Quire on it goes from zero to
-> working via one command" is unverified. Say so in release notes until someone
-> runs it.
+> **Nothing below has been run since the port from AppLoad to Annex.** The
+> steps were executed individually against the live device under the old host;
+> under Annex they are documented intent. Annex's own host, sidebar entry and
+> app loading are proven on hardware (OS 3.28.0.172); Quire on Annex builds and
+> passes `make check` on the host and has not yet been run on a tablet. The
+> first pass through this file is therefore also the port's first device test —
+> expect to find things, and write down what you find.
+>
+> **The M8 acceptance test has never been run end to end**, separately from
+> that. It needs a *second*, clean Paper Pro; there is one tablet and it is in
+> daily use. So "a device that has never had Quire on it goes from zero to
+> working via one command" stays unverified. Say so in release notes until
+> someone runs it.
 
 ---
 
@@ -25,33 +32,41 @@ blank — an unticked box and an untested box look identical a week later.
       only an escape hatch if you have used it once.
 - [ ] An SSH session open and confirmed working, and left open, for the whole
       pass.
-- [ ] `cat /etc/version` matches `docs/DEVICE-NOTES.md` §1 verbatim.
+- [ ] `. /etc/os-release; echo $IMG_VERSION` reports **3.28.0.172**, the only
+      build Annex has been proven against. Record `cat /etc/version` alongside
+      it. (`docs/DEVICE-NOTES.md` §1 still records the pre-port 3.25.1.1
+      device; do not gate on it.)
 - [ ] Automatic OS updates are off.
 
 ## 1. Clean install
 
-- [ ] xovi, `qt-resource-rebuilder` and AppLoad present on the device.
-      **AppLoad must be v0.4.2, not v0.5.x.** v0.5.x aborts xochitl on 3.25.1.1
-      and the device reboots, which hides the evidence — `docs/DEVICE-NOTES.md`
-      §2. `remagic` pins v0.5.3, so a stock remagic bootstrap needs `appload.so`
-      replaced afterwards.
-- [ ] The AppLoad launcher itself opens, before Quire is involved at all.
-- [ ] On the host: a clone of this repository, and Go 1.25 or newer. Qt is
-      optional (see §8).
+- [ ] xovi, `qt-resource-rebuilder` and Annex present on the device: the tools
+      at `/home/root/annex/tools/` and the patch at
+      `/home/root/xovi/exthome/qt-resource-rebuilder/annex.qmd`. Annex installs
+      itself via its own `deploy.sh`, before Quire.
+- [ ] The Annex sidebar entry appears in xochitl, before Quire is involved at
+      all. A missing entry means Annex's selectors do not match this OS build;
+      stop here, because nothing Quire does can fix it.
+- [ ] On the host: a clone of this repository, and Go 1.25 or newer. Nothing
+      else (see §8).
 - [ ] `./install.sh` — one command, from the clone. It should report every check
       passing and finish with the first-run steps.
 - [ ] Run `./install.sh` a second time. Same result, no errors: it is idempotent.
-- [ ] The Quire tile appears in the AppLoad launcher.
-- [ ] `./install.sh --verify` reports `appload registered Quire`.
+- [ ] Quire appears in the Annex sidebar, after `systemctl restart xochitl`.
+- [ ] `./install.sh --verify` reports `files ... complete` and
+      `backend published /home/root/annex/run/quire.json`.
 - [ ] Quire opens and does not crash.
 
 ### Refusals worth provoking once per release
 
 - [ ] Point `./install.sh --host` at an unreachable address → a clear
       explanation, not an ssh error.
-- [ ] With AppLoad v0.5.x installed (on a device you are willing to break)
-      `./install.sh` refuses and explains why. If you will not risk that, at
-      minimum read the refusal text and confirm it still names v0.4.2.
+- [ ] Move `annex.qmd` aside → `./install.sh` refuses, names the missing file,
+      and points at Annex's `deploy.sh`. Put it back afterwards.
+- [ ] `systemctl stop annex-app@quire; rm -f /home/root/annex/run/quire.json`,
+      then `./install.sh --verify` → it fails on the endpoint file and prints
+      the `annex-service log quire` command. This is the check that catches a
+      crash-looping backend, so it is worth knowing it still fires.
 
 ## 2. First run — the two steps a user cannot guess
 
@@ -74,8 +89,10 @@ makes the later ones meaningless.
 
 **M1 — backend liveness.**
 
-- [ ] The tile opens and the UI shows real data from the Go process, not a
-      placeholder.
+- [ ] The sidebar entry opens Quire and the UI shows real data from the Go
+      process, not a placeholder.
+- [ ] `/home/root/annex/tools/annex-service status` shows `annex-app@quire`
+      active, with a port.
 
 **M2/M3 — sources and the probe.**
 
@@ -128,7 +145,9 @@ makes the later ones meaningless.
       `multi-user.target.wants/` is a *copy* rather than a symlink, and `/etc` is
       a tmpfs overlay so `systemctl enable` alone does not survive
       (`docs/DEVICE-NOTES.md` §3).
-- [ ] The Quire tile is still in the launcher.
+- [ ] Quire is still in the Annex sidebar.
+- [ ] The backend came back on its own: `/home/root/annex/run/quire.json`
+      exists again after the reboot, without anyone running `install.sh`.
 - [ ] Configured sources, downloaded volumes and the cover cache are all still
       there.
 - [ ] Downloaded volumes are still in `Comics` and still open in the stock
@@ -142,11 +161,16 @@ makes the later ones meaningless.
       `/home/root/.local/share/quire`, deliberately outside the app directory
       that the installer replaces wholesale — this check exists because an
       earlier layout ate a user's sources on a routine redeploy.
-- [ ] Nothing user-visible has appeared under
-      `/home/root/xovi/exthome/appload/quire`: it should contain only
-      `manifest.json`, `icon.png`, `resources.rcc` and `backend/entry`.
-- [ ] `find /home/root/xovi/exthome/appload/quire -name '._*'` is empty (macOS
-      AppleDouble files; `COPYFILE_DISABLE=1` prevents them).
+- [ ] Nothing user-visible has appeared under `/home/root/annex/apps/quire`: it
+      should contain only `manifest.json`, `icon.png`, `ui/` (with
+      `ui/Main.qml`) and `backend/run` (executable).
+- [ ] `/home/root/annex/run/quire.json` exists after the redeploy — the backend
+      was stopped to swap its binary, and this is the proof it came back rather
+      than crash-looping on the new one.
+- [ ] `find /home/root/annex/apps/quire -name '._*'` is empty (macOS
+      AppleDouble files; `COPYFILE_DISABLE=1` prevents them). This matters more
+      than it did under AppLoad: the QML is read from disk by path, so a
+      `._Main.qml` sits directly beside the file the host loads.
 - [ ] `./uninstall.sh` removes the app, **asks** about state, and defaults to
       keeping it. Answer no; confirm `/home/root/.local/share/quire` is intact.
 - [ ] Reinstall, and confirm the sources are all still configured.
@@ -157,13 +181,16 @@ makes the later ones meaningless.
 
 Only relevant if an update slipped through, or deliberately.
 
+- [ ] Check Annex first: after xochitl restarts, is the Annex entry still in
+      the sidebar? Annex matches xochitl's QML by element name, and an update
+      can move those. A selector that matches nothing logs an error and returns
+      the file unchanged, so the symptom is a missing entry, not a boot loop.
+- [ ] If the UI is wrong rather than merely missing the entry,
+      `/home/root/annex/tools/annex-disable` and start from a stock screen.
 - [ ] Reinstall Quire: `./install.sh`. Read its OS warning — Quire ships no QML
-      patch, so nothing of ours is version-locked, but AppLoad's hooks are, and
-      the installer checks them.
-- [ ] Re-check AppLoad's own hooks against the new build first;
-      `docs/DEVICE-NOTES.md` §2 has the script.
-- [ ] Re-run §1, §2 and §4 in full. An OS update invalidates every AppLoad hook
-      assumption.
+      patch, so nothing of ours is version-locked; the coupling is Annex's.
+- [ ] Re-run §1, §2 and §4 in full. An OS update invalidates every assumption
+      Annex's selectors make about the system UI.
 
 ## 7. Space and safety, every pass
 
@@ -175,9 +202,11 @@ Only relevant if an update slipped through, or deliberately.
 
 ## 8. Host-side, on a machine that is not the developer's
 
-- [ ] A clone plus **Go only, no Qt** installs successfully: `install.sh` falls
-      back to `prebuilt/resources.rcc` and says so.
-- [ ] A machine with Qt present builds `resources.rcc` from `ui/` and produces
-      byte-identical output (`build/prebuilt.sh check`).
+- [ ] A clone plus **Go only, no Qt** installs successfully: `install.sh` says
+      `qt not needed` and deploys `ui/` as loose files.
+- [ ] `make check` is green on that same Qt-less machine (`make qml` skips
+      itself rather than failing).
 - [ ] With no Go at all, `install.sh` names Go as the missing piece and links to
       the download page, rather than failing at a compiler error.
+- [ ] With a Go older than 1.25, `install.sh` says which version it found and
+      what `go.mod` needs.
