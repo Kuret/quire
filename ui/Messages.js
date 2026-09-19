@@ -32,6 +32,12 @@ var Browse = 22
 var RequestCover = 23
 var CoverReady = 24
 
+// One query across every enabled source (grouped by title; a source that
+// fails is a partial answer, not an error). Separate from Search because the
+// paging, the result shape and the failure handling are all different.
+var SearchAll = 26
+var SearchAllResults = 27
+
 // Per-source strip splitting (PLAN §12.3). It belongs with 17-19; it is 25
 // because 20-24 were already spent.
 var SetSourceSplitStrips = 25
@@ -47,6 +53,10 @@ var CancelDownload = 42
 // selection, and one answer about what fitted on the queue.
 var EnqueueDownloads = 43
 var QueueResult = 45
+
+// Queue exactly the chapters a watched series has gained. The backend picks
+// them, because the backend is what decided they were new.
+var DownloadNewChapters = 46
 
 var OpenInReader = 50
 
@@ -76,6 +86,10 @@ var CheckWatched = 62
 var WatchList = 63
 var WatchUpdate = 64
 
+// Clear the "new" badge without downloading: the stored new ids move into the
+// seen list, so it marks exactly what the badge was counting.
+var MarkSeen = 69
+
 // The downloaded overview (PLAN §12.5): one row per (source, series) with at
 // least one volume on the tablet. Fetched when the screen opens.
 var ListDownloaded = 65
@@ -86,6 +100,10 @@ var FolderDeleted = 68
 // The one global robots.txt switch (PLAN §7.4, off by default). The current
 // value comes back on the Pong status rather than in a reply of its own.
 var SetConsultRobots = 70
+
+// Which layout a screen uses, "grid" or "list", stored per screen. The current
+// values ride on the Pong status, like the robots switch.
+var SetView = 75
 
 // The download cache (PLAN §12.4): its size, and the two steps to clear it.
 var GetCacheSize = 71

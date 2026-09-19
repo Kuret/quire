@@ -66,6 +66,31 @@ const (
 	// proportion to the cost of allowing an edit.
 	MessageRenameSource MessageType = 19
 
+	// MessageSearchAll is UI→BE, JSON {query, page, pageSize}: one query put to
+	// every enabled source at once.
+	//
+	// It is a separate message rather than MessageSearch with the sourceId
+	// left out, because almost nothing about it is the same: the paging is
+	// across sources, the results are grouped rather than listed, and a single
+	// source failing is a partial answer rather than an error. Overloading
+	// MessageSearch would have meant a reply whose shape depended on a field
+	// being absent.
+	MessageSearchAll MessageType = 26
+	// MessageSearchAllResults is BE→UI, JSON {query, page, pageSize,
+	// totalPages, hasMore, groups, sourceErrors}.
+	//
+	// A group is one series as far as the user is concerned, with the sources
+	// that have it:
+	//
+	//	{"key", "title", "coverUrl",
+	//	 "matches": [{"sourceId", "sourceName", "seriesId", "coverUrl"}]}
+	//
+	// `sourceErrors` is [{sourceId, sourceName, message}] and is the reason
+	// this is not an error message: a source that did not answer must not
+	// empty a screen that four other sources filled, and must not be silently
+	// dropped either.
+	MessageSearchAllResults MessageType = 27
+
 	// MessageSearch is UI→BE, JSON {sourceId, query}.
 	MessageSearch MessageType = 20
 	// MessageSearchResults is BE→UI, JSON array.
@@ -121,6 +146,16 @@ const (
 	// sixteen would answer fourteen times with the same refusal, and a selection
 	// of volumes would ask about each of them in turn.
 	MessageEnqueueDownloads MessageType = 43
+
+	// MessageDownloadNewChapters is UI→BE, JSON {sourceId, seriesId}: queue
+	// exactly the chapters a watched series has gained since you last saw it.
+	//
+	// The backend picks the chapters, not the frontend, because the backend is
+	// what decided they were new: the watch check stores their ids beside the
+	// count it badges. Sending the list to the frontend so it could send it
+	// back would let the two disagree about what "new" meant, which is the one
+	// thing a badge and the action under it must never do.
+	MessageDownloadNewChapters MessageType = 46
 
 	// 44 was MessageQueueConfirm, the question asked before a selection was
 	// queued. The user asked for the selection path to queue instantly — "just
@@ -291,6 +326,13 @@ const (
 	// drawing is a shell that looks broken.
 	MessageWatchUpdate MessageType = 64
 
+	// MessageMarkSeen is UI→BE, JSON {sourceId, seriesId}: clear the "new"
+	// badge without downloading anything, for when you read it elsewhere.
+	//
+	// It moves the stored new ids into the seen list rather than refetching, so
+	// it marks exactly what the badge was counting and needs no network.
+	MessageMarkSeen MessageType = 69
+
 	// The downloaded overview (PLAN §12.5): every series with at least one
 	// volume on the tablet, so a download that was never watched is still
 	// findable.
@@ -342,6 +384,20 @@ const (
 	// the stored value back rather than trusting its own optimism.
 	MessageSetConsultRobots MessageType = 70
 
+	// MessageSetView is UI→BE, JSON {screen, view}: which of the two layouts a
+	// screen should use, "grid" (covers) or "list" (rows).
+	//
+	// It is stored per screen and not globally. Searching wants a list often
+	// enough — a row carries the title and the sources it was found in, where a
+	// tile carries a cover — while Downloaded and Watching are for recognising
+	// something you already know, which is what covers are good at. One
+	// setting would mean choosing a list to read search results and finding
+	// your library rearranged.
+	//
+	// Like the robots switch, there is no reply of its own: the current values
+	// ride on the Pong status, so what a screen draws is what the store says.
+	MessageSetView MessageType = 75
+
 	// MessageError is BE→UI, JSON {code, message}.
 	// The download cache (PLAN §12.4). Page images outlive the download that
 	// fetched them so a repeat can skip them, and a delete cannot always reach
@@ -386,6 +442,8 @@ var messageNames = map[MessageType]string{
 	MessageRenameSource:          "RenameSource",
 	MessageSearch:                "Search",
 	MessageSearchResults:         "SearchResults",
+	MessageSearchAll:             "SearchAll",
+	MessageSearchAllResults:      "SearchAllResults",
 	MessageBrowse:                "Browse",
 	MessageRequestCover:          "RequestCover",
 	MessageCoverReady:            "CoverReady",
@@ -396,6 +454,7 @@ var messageNames = map[MessageType]string{
 	MessageDownloadProgress:      "DownloadProgress",
 	MessageCancelDownload:        "CancelDownload",
 	MessageEnqueueDownloads:      "EnqueueDownloads",
+	MessageDownloadNewChapters:   "DownloadNewChapters",
 	MessageQueueResult:           "QueueResult",
 	MessageOpenInReader:          "OpenInReader",
 	MessageDeleteDownload:        "DeleteDownload",
@@ -412,11 +471,13 @@ var messageNames = map[MessageType]string{
 	MessageCheckWatched:          "CheckWatched",
 	MessageWatchList:             "WatchList",
 	MessageWatchUpdate:           "WatchUpdate",
+	MessageMarkSeen:              "MarkSeen",
 	MessageListDownloaded:        "ListDownloaded",
 	MessageDownloadedList:        "DownloadedList",
 	MessageDeleteFolder:          "DeleteFolder",
 	MessageFolderDeleted:         "FolderDeleted",
 	MessageSetConsultRobots:      "SetConsultRobots",
+	MessageSetView:               "SetView",
 	MessageGetCacheSize:          "GetCacheSize",
 	MessageCacheStatus:           "CacheStatus",
 	MessageClearCache:            "ClearCache",
