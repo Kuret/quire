@@ -23,9 +23,13 @@
 //
 // # Why these are here and not in Main.qml
 //
-// Main.qml cannot be instantiated off-device: it imports AppLoad. These can,
-// so the harness can hand each one a bridge that throws and assert that an
-// answer still comes out — which is the whole behaviour.
+// The behaviour is "whatever the bridge does, an answer comes out", and the
+// bridge is the one thing a harness cannot have: ReaderHandoff.qml imports
+// xochitl's own QML, which exists only on the tablet. As a library each of
+// these can be handed a bridge that throws, or none at all, and asserted —
+// which is the whole behaviour. Main.qml is loaded and driven too
+// (build/qmlcheck/MainHarness.qml), but only ever against the no-bridge
+// branch, because off the device there is no library to hand anything to.
 
 // noBridge is the detail for a frontend that cannot reach xochitl's QML at all.
 // It is a different situation from a call that threw, and the log should be
@@ -165,8 +169,9 @@ function manyFailure(uuids, detail) {
 // PLAN §6 M6's footnote for the version pairing, and note that this is an
 // AppLoad-version behaviour rather than an OS one.
 //
-// It is here rather than in Main.qml so the harness can drive it: Main.qml
-// imports AppLoad and cannot be instantiated off a device.
+// It is here rather than in Main.qml so the harness can drive both outcomes
+// against a bridge it controls. Only the no-bridge one is reachable through
+// Main.qml itself, for the reason at the top of this file.
 function handoff(bridge, uuid, page) {
     var opened = false
     var detail = NO_BRIDGE

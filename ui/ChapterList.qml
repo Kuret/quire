@@ -109,6 +109,34 @@ Item {
     signal watchRequested()
     signal unwatchRequested()
 
+    // ---- the sources this series was found in ------------------------------
+    //
+    // Only ever filled for a series opened from the combined search
+    // (ui/SearchAll.qml), where a group can stand for the same book on three
+    // sites. A series reached the ordinary way — browsing one source, a watch
+    // row, a download — has no alternatives at all, and then this is empty and
+    // the strip below is not drawn.
+    //
+    // **The chips do not merge anything.** Watch records, downloads and the
+    // downloaded overview are all keyed by (sourceId, seriesId), and tapping
+    // another chip switches *which pair this screen is acting on* — the
+    // chapters are re-fetched for it, and everything the screen then offers
+    // belongs to it. Showing the pair being acted on is the whole reason the
+    // chips are here rather than a silent fallback to another source.
+    //
+    // Each entry is {sourceId, sourceName, seriesId}, in the reply's order,
+    // which is the user's configured source order.
+    property var sources: []
+    property string currentSourceId: ""
+
+    // One source is not a choice. A single chip would be a control that can
+    // only tell you what you already know from the header.
+    readonly property bool hasAlternatives: screen.sources !== undefined
+                                            && screen.sources !== null
+                                            && screen.sources.length > 1
+
+    signal sourceSwitchRequested(string sourceId, string sourceName, string seriesId)
+
     // Where in the list we are. Everything is in hand, so the total is always
     // known and the label can always say "of".
     property int page: 1
@@ -290,6 +318,32 @@ Item {
         }
     }
 
+    // inFlight is true while a download is actually running for this row: the
+    // states the backend leaves a row in between the tap and the file. It is
+    // written as the same exclusion list buttonLabel() uses rather than a list
+    // of live phases, so that a phase the backend adds later is in flight here
+    // for the same reason its button already says "Stop" — the accent mark has
+    // to sit on exactly the rows that offer the way out, and two lists would
+    // drift.
+    //
+    // A finished or failed row is *not* in flight. "Failed" is a whole
+    // plain-language sentence and it is not progress; marking it would make
+    // the accent mean two different things on the same line.
+    function inFlight(state, documentUuid) {
+        if (documentUuid)
+            return false
+        switch (state) {
+        case "":
+        case "confirm":
+        case "done":
+        case "failed":
+        case "cancelled":
+            return false
+        default:
+            return true
+        }
+    }
+
     // canTap is true when the button does something. Every state now does.
     function canTap(state, documentUuid) {
         return true
@@ -453,6 +507,94 @@ Item {
         }
     }
 
+    // ---- the source switcher -----------------------------------------------
+    //
+    // A row of chips, one per source the combined search found this series in,
+    // with the one being read marked. It collapses to zero height when there
+    // is nothing to choose between, so a series reached by browsing gets
+    // exactly the screen it had before — including the same number of rows to
+    // a page, since the viewport is what decides that. The same shape as the
+    // Chapters/Volumes switch below, and for the same reason.
+    //
+    // Filled rather than outlined for the current one: on e-ink a border alone
+    // is too quiet to answer "which am I reading?" at a glance, which is the
+    // one question this strip exists to keep answered.
+    Item {
+        id: sourceStrip
+        objectName: "sourceStrip"
+        anchors { top: synopsisBand.bottom; left: parent.left; right: parent.right }
+        visible: screen.hasAlternatives
+        height: visible ? Style.buttonHeight + Style.margin : 0
+
+        Row {
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: Style.gap
+
+            Repeater {
+                // The list itself, not a count: each chip names its own source
+                // and carries its own seriesId, because the series id differs
+                // per source and is half of the pair every message on this
+                // screen is about.
+                model: screen.sources
+
+                Rectangle {
+                    objectName: "sourceChip-" + modelData.sourceId
+                    // Sized to the name it holds, with a floor: a source
+                    // called "Kai" must still be a finger-sized target.
+                    width: Math.max(180, chipLabel.width + Style.margin)
+                    height: Style.buttonHeight
+                    readonly property bool current: modelData.sourceId === screen.currentSourceId
+                    // The fill is still what marks the current chip; it is the
+                    // accent now rather than the grey. That was the wrong way
+                    // round before — the accent was on the 2px border, on the
+                    // grounds that ink on a deep orange read worse than ink on
+                    // grey. It did, at the *old* accent: black on #C2410C is
+                    // 4.06:1. The accent moved to a value black clears
+                    // comfortably on (5.90:1, ui/Style.js), which is what lets
+                    // the colour sit where it belongs — on an area rather than
+                    // on a hairline the panel renders badly.
+                    color: chipArea.pressed ? Style.pressed
+                                            : (current ? Style.accent : Style.paper)
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        id: chipLabel
+                        objectName: "sourceChipLabel-" + modelData.sourceId
+                        anchors.centerIn: parent
+                        text: modelData.sourceName
+                        font.pointSize: Style.smallSize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: chipArea
+                        objectName: "sourceChipArea-" + modelData.sourceId
+                        anchors.fill: parent
+                        // The source already showing is inert. Re-requesting
+                        // it would throw away a list that is already right and
+                        // put a fetch in front of the user for nothing —
+                        // and on a slow panel the blank while it lands reads
+                        // as the tap having broken something.
+                        enabled: !parent.current
+                        onClicked: screen.sourceSwitchRequested(
+                            modelData.sourceId, modelData.sourceName, modelData.seriesId)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     // ---- the view switch ---------------------------------------------------
     //
     // Two words, not a tab bar, and nothing at all when there is one view. It
@@ -462,7 +604,7 @@ Item {
     Item {
         id: viewSwitch
         objectName: "viewSwitch"
-        anchors { top: synopsisBand.bottom; left: parent.left; right: parent.right }
+        anchors { top: sourceStrip.bottom; left: parent.left; right: parent.right }
         visible: screen.hasVolumes
         height: visible ? Style.buttonHeight + Style.margin : 0
 
@@ -577,6 +719,7 @@ Item {
                         spacing: 4
 
                         Text {
+                            objectName: "chapterTitle"
                             width: parent.width
                             elide: Text.ElideRight
                             text: model.title
@@ -600,17 +743,50 @@ Item {
                         // stopped was the part that went missing. The row affords two
                         // small lines under the title, which is the rest of the
                         // sentence.
-                        Text {
+                        // A download in flight is the one thing on this screen
+                        // the user is waiting on, so it is the one line that
+                        // is marked. The mark sits *beside* the sentence and
+                        // the sentence stays grey: a solid square on paper
+                        // next to black-and-grey words, neither of them a
+                        // coloured letterform (ui/Style.js, ui/AccentMark.qml).
+                        // The line used to be drawn in the accent itself and
+                        // that is what read muddy on the device.
+                        //
+                        // The sentence is still the backend's and still says
+                        // what is happening in words, and the button beside it
+                        // still says "Stop": the mark is what finds the row on
+                        // a page of thirty, not what explains it.
+                        Row {
+                            id: subtitleLine
                             width: parent.width
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
-                                  ? model.downloadMessage
-                                  : (model.published.length > 0 ? model.published : "Date unknown") +
-                                    (model.scanlator.length > 0 ? " · " + model.scanlator : "")
-                            font.pointSize: Style.smallSize
-                            color: Style.muted
+                            spacing: Style.gap / 2
+
+                            AccentMark {
+                                objectName: "chapterMark"
+                                // On the first line of the sentence rather
+                                // than centred on both: a two-line failure
+                                // would otherwise drag the mark into the gap
+                                // between the rows.
+                                y: 2
+                                visible: screen.inFlight(model.downloadState,
+                                                         model.documentUuid)
+                            }
+
+                            Text {
+                                objectName: "chapterSubtitle"
+                                width: subtitleLine.width
+                                       - (screen.inFlight(model.downloadState, model.documentUuid)
+                                          ? Style.accentMark + subtitleLine.spacing : 0)
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
+                                      ? model.downloadMessage
+                                      : (model.published.length > 0 ? model.published : "Date unknown") +
+                                        (model.scanlator.length > 0 ? " · " + model.scanlator : "")
+                                font.pointSize: Style.smallSize
+                                color: Style.muted
+                            }
                         }
                     }
 
@@ -763,16 +939,36 @@ Item {
                         // backend's (PLAN §2); a download in flight replaces it
                         // with the backend's own progress line, exactly as a
                         // chapter row does.
-                        Text {
+                        // Exactly as a chapter row, through the same predicate
+                        // and the same shape: a volume is the longer wait of
+                        // the two, so if only one of these were marked it
+                        // would be the wrong one.
+                        Row {
+                            id: volumeSubtitleLine
                             width: parent.width
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
-                                  ? model.downloadMessage
-                                  : model.detail
-                            font.pointSize: Style.smallSize
-                            color: Style.muted
+                            spacing: Style.gap / 2
+
+                            AccentMark {
+                                objectName: "volumeMark"
+                                y: 2
+                                visible: screen.inFlight(model.downloadState,
+                                                         model.documentUuid)
+                            }
+
+                            Text {
+                                objectName: "volumeSubtitle"
+                                width: volumeSubtitleLine.width
+                                       - (screen.inFlight(model.downloadState, model.documentUuid)
+                                          ? Style.accentMark + volumeSubtitleLine.spacing : 0)
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
+                                      ? model.downloadMessage
+                                      : model.detail
+                                font.pointSize: Style.smallSize
+                                color: Style.muted
+                            }
                         }
                     }
 

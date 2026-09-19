@@ -61,9 +61,14 @@ Item {
         optionModel.clear()
     }
 
-    // dismissInput puts AppLoad's keyboard away. Called when this screen is
+    // dismissInput puts the keyboard away. Called when this screen is
     // navigated away from, and when the thing the keyboard was raised for
     // happens — never while the user is still in the field.
+    //
+    // Quire's keyboard is part of the layout and its visibility follows
+    // `phase`, so leaving the form is what lowers it; the focus drop in
+    // Screens.dismissKeyboard still comes first, and still comes first for a
+    // reason — see the note there.
     function dismissInput() {
         Screens.dismissKeyboard([urlField])
     }
@@ -185,14 +190,11 @@ Item {
                 verticalAlignment: TextInput.AlignVCenter
                 font.pointSize: Style.bodySize
                 color: Style.ink
-                // AppLoad's own keyboard serves this field (PLAN §11 Q5,
-                // settled 2026-09-19): it appears when a field takes focus and
-                // follows focus between fields, so Quire ships no keyboard of
-                // its own and this one behaves like an ordinary input.
-                //
-                // The keyboard's return key starts the check, so the field and
-                // the button under it do the same thing.
-                onAccepted: screen.start()
+                // The device has no system keyboard available to an embedded
+                // app (PLAN §11 Q5) — Annex supplies none, so text comes from
+                // ui/Keyboard.qml below and this field is never focused for
+                // input of its own.
+                activeFocusOnPress: false
                 text: screen.url
                 onTextChanged: screen.url = text
             }
@@ -231,6 +233,18 @@ Item {
                 onClicked: screen.start()
             }
         }
+    }
+
+    Keyboard {
+        id: keyboard
+        objectName: "addSourceKeyboard"
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        visible: screen.phase === "form"
+        layout: "url"
+        onKeyTyped: screen.url += text
+        onBackspace: screen.url = screen.url.substring(0, screen.url.length - 1)
+        onClearAll: screen.url = ""
+        onSubmit: screen.start()
     }
 
     // ---- progress ----------------------------------------------------------

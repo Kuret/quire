@@ -83,7 +83,16 @@ function row(w) {
         "state": w && w.state ? w.state : "",
         "status": w && w.status ? w.status : "",
         "detail": w && w.detail ? w.detail : "",
-        "checkedAt": w && w.checkedAt ? w.checkedAt : ""
+        "checkedAt": w && w.checkedAt ? w.checkedAt : "",
+        // The cover the source publishes, for the grid layout. Often empty —
+        // a series watched since before covers were stored has none — and an
+        // empty one is a titled placeholder tile, never a blank square.
+        "coverUrl": w && w.coverUrl ? w.coverUrl : "",
+        // Where the backend put the downscaled copy on disk. Never sent with a
+        // watch row: it arrives later, on its own MessageCoverReady, because
+        // nothing image-shaped crosses the socket (PLAN §7.1). The role has to
+        // exist from the first append or that later write would be dropped.
+        "coverPath": w && w.coverPath ? w.coverPath : ""
     }
 }
 
@@ -97,11 +106,49 @@ function indexOf(model, sourceId, seriesId) {
     return -1
 }
 
+// markWatched writes the `watched` flag onto another screen's rows, and
+// reports how many it changed.
+//
+// The search results and the downloaded overview both offer Watch or Stop
+// watching on a long press, and which of the two a row offers is not theirs to
+// decide: whether a series is watched is the store's answer, arriving here as
+// the watched model. So the flag is derived from that model rather than
+// toggled when the user taps — a watch that failed to save would otherwise
+// leave a row offering to stop something that never started.
+//
+// Rows that name their own source use it; the rest fall back to the one
+// passed in, which is the search screen, where every result belongs to the
+// source being browsed and the rows carry no sourceId at all.
+//
+// Only differences are written, like everywhere else in this file: this runs
+// on every watch, every unwatch and at the end of every check round, and a
+// round with no news must repaint nothing.
+function markWatched(rows, watched, sourceId) {
+    var wrote = 0
+    for (var i = 0; i < rows.count; ++i) {
+        var have = rows.get(i)
+        var src = have.sourceId ? have.sourceId : sourceId
+        var want = indexOf(watched, src, have.seriesId) >= 0
+        if (have.watched !== want) {
+            rows.setProperty(i, "watched", want)
+            wrote++
+        }
+    }
+    return wrote
+}
+
 // writeRow sets only what changed, so a series whose check came back identical
 // does not repaint at all.
 function writeRow(model, at, next) {
     var have = model.get(at)
     for (var k in next) {
+        // coverPath is the frontend's own and no watch row ever carries one:
+        // it is written when MessageCoverReady lands. Copying an incoming
+        // empty over it would blank every tile on the screen each time the
+        // list is pushed — which is on attach, after every watch and unwatch,
+        // and at the end of every check round.
+        if (k === "coverPath" && !next[k])
+            continue
         if (have[k] !== next[k])
             model.setProperty(at, k, next[k])
     }

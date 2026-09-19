@@ -46,12 +46,10 @@ function refreshOnShow(screen) {
 
 // ---- the on-screen keyboard --------------------------------------------
 //
-// AppLoad's keyboard raises itself when a field takes focus and **nothing
-// lowers it**. Quire's own keyboard was part of the layout and went away with
-// the screen that owned it; this one is an overlay that stays up, covering the
-// bottom 544 px — the pager and the last rows — until something dismisses it.
-// That is the cost of using a keyboard we do not own, and this is the code that
-// pays it.
+// The keyboard is Quire's own (ui/Keyboard.qml): Annex, like the AppLoad
+// version this device ran, supplies none, and a field that takes focus raises
+// nothing. So "put the keyboard away" is two moves, and their **order** is the
+// part that was a bug.
 //
 // # Both levers, in this order
 //
@@ -63,18 +61,23 @@ function refreshOnShow(screen) {
 //     anything by itself.
 //   * `hide()` does not clear focus either.
 //
-// So focus is dropped **first** and the panel hidden **second**. The other
-// order invites the fight the panel would win: hiding while a field is still
+// So focus is dropped **first** and the keyboard lowered **second**. The other
+// order invites the fight the keyboard would win: hiding while a field is still
 // focused is an invitation to be raised again by the next focus event, and
 // hiding harder produces a flicker rather than a dismissal.
 //
-// What cannot be checked without the device is whether the panel *obeys*
-// `hide()`. The probe measured `Qt.inputMethod.visible` going true when a field
-// took focus, so the panel is wired into Qt's input-method framework and should
-// hear it; dropping focus is the second lever precisely because "should" is not
-// "does".
+// `Qt.inputMethod.hide()` below is now largely vestigial — Quire's keyboard is
+// a plain QML element whose visibility is bound to screen state, and the caller
+// lowers it by assigning that state after this returns. It stays because a
+// field that has been focused may still have put Qt's input-method framework
+// into a raised state, and because leaving it out would make the order this
+// file exists to record look arbitrary. The `try` is not decoration: an
+// environment with no input method at all must not be an error, and the
+// offscreen harness is one.
 
-// dismissKeyboard drops focus from these fields and asks the panel to go.
+// dismissKeyboard drops focus from these fields, then asks any input method to
+// go. Callers lower Quire's own keyboard *after* this returns, which keeps the
+// drop-then-hide order above.
 //
 // Fields are passed in rather than found, because a helper that goes looking
 // for inputs would dismiss one the caller did not mean — including the one the

@@ -8,15 +8,12 @@
 //   - **Wrapping.** Next at the end is dead, not a jump back to page 1. A
 //     control that wraps lies about where the end is, and the end is the one
 //     thing a pager exists to make visible.
-//   - **A page-number field.** Typing a number would want a keyboard, and a
+//   - **A page-number field.** Typing a number would want the keyboard, and the
 //     keyboard is the thing that must not move this bar.
 //
-// It sits at the very bottom of every screen that has one and never moves.
-// Quire's own keyboard used to be anchored above it rather than over it, for
-// exactly that reason; AppLoad's keyboard (PLAN §11 Q5, settled 2026-09-19) is
-// an overlay and moves nothing at all — it draws over the bottom 544 px while
-// it is up, which is why every text field is checked against that height in the
-// harness rather than against where this bar happens to be.
+// It sits at the very bottom of every screen that has one and never moves:
+// ui/Keyboard.qml is anchored above it rather than over it, so opening the
+// keyboard cannot shift the control out from under a thumb.
 
 import QtQuick 2.5
 import "Style.js" as Style
@@ -86,7 +83,28 @@ Item {
         }
     }
 
+    // Where you are, on a screen with no scrollbar to tell you: a solid square
+    // to the left of the words, both of them on paper (ui/AccentMark.qml). The
+    // words used to be the accent themselves and read muddy on the device —
+    // the measurement in ui/Style.js.
+    //
+    // It is placed off the label's own contentWidth rather than anchored to
+    // its left edge, because the label is centred in the space between the two
+    // buttons and its box is much wider than its text: an anchor would leave
+    // the mark stranded halfway to Previous.
+    //
+    // The buttons stay black, deliberately. Marking them too would put three
+    // coloured things in one bar and leave the accent meaning "pager" rather
+    // than "this is where you are".
+    AccentMark {
+        objectName: "pagerMark"
+        anchors.verticalCenter: pagerLabel.verticalCenter
+        x: pagerLabel.x + (pagerLabel.width - pagerLabel.contentWidth) / 2
+           - Style.gap - width
+    }
+
     Text {
+        id: pagerLabel
         objectName: "pagerLabel"
         anchors {
             left: previousButton.right; leftMargin: Style.gap
@@ -98,7 +116,10 @@ Item {
         text: bar.busy ? ("Fetching page " + bar.pendingPage + "…")
                        : Paging.label(bar.page, bar.totalPages)
         font.pointSize: Style.bodySize
-        color: Style.muted
+        // It reads "Page 3 of 9" in words either way, so nothing here depends
+        // on the colour; the mark above is what makes it findable between two
+        // black buttons, which is the job the missing scrollbar left behind.
+        color: Style.ink
     }
 
     Rectangle {

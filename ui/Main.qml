@@ -4,39 +4,63 @@
 // messages and rendering the replies, because QML is the layer that breaks on
 // an OS update and every line here is a line to re-check after one.
 //
-// Concretely, this file holds the models the backend fills, the AppLoad element
-// that fills them, and the navigation between screens. Nothing in ui/ decides
-// what a verdict means, whether a source may be added, or what a row says: all
-// of that arrives as data (see backend/service).
+// Concretely, this file holds the models the backend fills, the Backend
+// element that fills them, and the navigation between screens. Nothing in ui/
+// decides what a verdict means, whether a source may be added, or what a row
+// says: all of that arrives as data (see backend/service).
 //
 // PLAN §6 M3 UI rules, which every file in ui/ follows:
 //   - No animations. E-ink ghosting.
-//   - Match the stock UI palette. Do not invent a brand. (ui/Style.js)
+//   - Match the stock UI palette, and spend colour only where it carries
+//     meaning. Do not invent a brand. (ui/Style.js)
 //
-// Verified against the installed appload.so: the QML type exposes
-// applicationID, messageReceived, sendMessage (one 's' in the middle — the
-// upstream README's "sendMesssage" is a typo) and terminate. The host calls
-// unloading() on the root element when the app is closed.
+//     This used to read "do not invent a brand" full stop, on the premise that
+//     the panel was greyscale. It is not: this is a Paper Pro and its Gallery 3
+//     display is colour, which is why there is now exactly one accent
+//     (Style.accent) and why it is rationed — colour regions refresh slower and
+//     ghost harder than black on white. It marks live state, what is currently
+//     active, and screen titles; it never carries a meaning on its own, because
+//     every place it appears already says the same thing in shape or words.
+//
+//   - **The accent is only ever a solid area — never a glyph, never a
+//     hairline, never a thin stroke.** Measured on the device: coloured text
+//     read muddy, because Gallery 3 draws black at the panel's full resolution
+//     and composes colour through its filter array at a fraction of it, and a
+//     letterform is almost entirely edge. So every word in ui/ is Style.ink
+//     and the accent is a bar, a square or a fill. The full measurement, and
+//     the contrast pairs that follow from it, are in ui/Style.js.
+//
+// **This runs under Annex, not AppLoad.** The host loads this file from disk
+// by path — there is no resource bundle — and calls unloading() on the root
+// element when the app is closed, which is the one part of AppLoad's contract
+// Annex kept verbatim. The message protocol is also unchanged; only the
+// transport underneath it moved, from a unix socket to loopback HTTP, for the
+// reasons in Annex's DESIGN.md §5.
 
 import QtQuick 2.5
-import net.asivery.AppLoad 1.0
+import "../../../lib"
 import "Messages.js" as Msg
 import "Style.js" as Style
 import "Watch.js" as WatchJs
 import "Screens.js" as Screens
 import "Answers.js" as Answers
+import "Views.js" as Views
+import "Grouping.js" as Grouping
+import "Covers.js" as Covers
 
 Rectangle {
     id: root
     anchors.fill: parent
     color: Style.paper
 
-    // The AppLoad host connects to this and closes the frontend.
+    // The host connects to this and closes the frontend. Annex kept AppLoad's
+    // contract here verbatim, so the signal is unchanged.
     signal close
 
-    // Which screen is showing: "sources", "add", "browse", "series" or
-    // "settings". A plain string rather than a stack, because the whole app is
-    // five screens and a StackView would be a dependency for nothing.
+    // Which screen is showing: "sources", "add", "browse", "searchall",
+    // "series" or "settings". A plain string rather than a stack, because the
+    // whole app is a handful of screens and a StackView would be a dependency
+    // for nothing.
     property string screen: "sources"
 
     // The source being browsed, carried between screens.
@@ -54,6 +78,48 @@ Rectangle {
     // Which screen the open series was reached from, so Back goes where the
     // user came from rather than always to the grid they may never have seen.
     property string seriesCameFrom: "browse"
+
+    // The layout each of the three screens is stored in (PLAN §7.1 type 75).
+    //
+    // Plain strings rather than the status object, for the reason the robots
+    // switch is a plain bool: the status is a fresh object on every Pong, so
+    // binding a screen to it would redraw the whole layout every time anything
+    // pings. Assigning a string a screen already holds emits no change signal
+    // and nothing is repainted.
+    //
+    // They start at "grid" and are never empty, which is what lets a screen be
+    // drawn before the first status arrives — the frontend pings on startup,
+    // but the user can be standing on Downloaded before the answer lands.
+    property string searchView: Views.GRID
+    property string downloadedView: Views.GRID
+    property string watchingView: Views.GRID
+
+    // viewFor is the stored layout of a screen, by the screen's own name.
+    function viewFor(name) {
+        switch (name) {
+        // One stored layout for both searches: a combined search is a search
+        // (Views.js wireName).
+        case "browse":
+        case "searchall": return root.searchView
+        case "downloaded": return root.downloadedView
+        case "watching": return root.watchingView
+        }
+        return Views.GRID
+    }
+
+    // setView asks for a layout, then asks for the status.
+    //
+    // Exactly the robots switch's shape (ui/Settings.qml): the value comes back
+    // on the Pong rather than in a reply of its own, so the screen draws what
+    // the store says rather than what the toggle hoped. A setting that failed
+    // to save cannot leave the switch and the layout disagreeing.
+    function setView(name, view) {
+        var screen = Views.wireName(name)
+        if (!screen)
+            return
+        root.send(Msg.SetView, {"screen": screen, "view": view})
+        root.send(Msg.Ping)
+    }
 
     // Backend status, shown on the settings screen.
     property string backendStatus: "Not yet asked."
@@ -75,6 +141,12 @@ Rectangle {
         id: readerHandoff
         source: "ReaderHandoff.qml"
         asynchronous: false
+
+        // The handoff is a QtObject and so is not in the scene. Finding the
+        // stock reader means walking the object tree — `Global.documentViewLoader`
+        // is gone on 3.28 — and it needs something that *is* in the tree to
+        // start from. This root is it.
+        onLoaded: if (item) item.anchor = root
     }
 
     // The documents the open question is about, straight from the backend's
@@ -137,6 +209,7 @@ Rectangle {
     function dismissInput() {
         addSourceScreen.dismissInput()
         seriesGridScreen.dismissInput()
+        searchAllScreen.dismissInput()
         sourceListScreen.dismissInput()
     }
 
@@ -161,10 +234,21 @@ Rectangle {
         if (answer.forget)
             root.forgetDocument(documentUuid)
 
-        // The frontend stays up. On AppLoad v0.5.0 the stock reader comes
-        // forward by itself and Quire is behind it, so leaving the comic puts
-        // the user back where they were — which is what closing had to be
-        // invented to imitate on v0.5.3. See PLAN §6 M6's footnote.
+        // The frontend stays up, and under Annex that is a guarantee rather
+        // than a happy accident.
+        //
+        // An Annex app is parented inside the navigator, so the document view
+        // — later in MainView — draws over it. Opening a comic brings the
+        // reader forward and leaves Quire exactly where it was underneath, so
+        // closing the comic returns the user to the chapter list they tapped
+        // Read from.
+        //
+        // This is the whole reason Annex exists. AppLoad v0.5.0 happened to
+        // behave this way; v0.5.1+ parents an app's window *above* the
+        // document, which is why closing the app had to be invented to
+        // imitate it, and why that imitation dropped the user at the library
+        // instead of back in Quire. See PLAN §6 M6's footnote and Annex's
+        // DESIGN.md §1.
     }
 
     // deleteDownload moves a document to xochitl's Trash and tells the backend
@@ -267,14 +351,48 @@ Rectangle {
                 "title": r.title ? r.title : "",
                 "detail": r.detail ? r.detail : "",
                 "openable": r.openable ? true : false,
-                "note": r.note ? r.note : ""})
+                "note": r.note ? r.note : "",
+                // The cover the source publishes, for the grid layout. Often
+                // empty: a series downloaded before covers were stored has
+                // none, and the tile is a titled placeholder rather than a
+                // blank square.
+                "coverUrl": r.coverUrl ? r.coverUrl : "",
+                // Filled in later, when MessageCoverReady lands. The role has
+                // to exist from the first append or that write is dropped.
+                "coverPath": "",
+                // The newest download of this series. Nothing on this screen
+                // uses it yet — the grid is navigation only for now — and it
+                // is carried because it is what a "Read the latest one" action
+                // needs and because a row is filled in one place. The
+                // long-press menu's "Read latest" is that action.
+                "latestUuid": r.latestUuid ? r.latestUuid : "",
+                // The menu's Watch / Stop watching line, from the store. A
+                // row here is a (source, series) pair, so it answers for
+                // itself rather than for the source being browsed.
+                "watched": WatchJs.indexOf(watchedModel, r.sourceId ? r.sourceId : "",
+                                           r.seriesId ? r.seriesId : "") >= 0})
         }
         root.downloadedEmpty = msg && msg.empty ? msg.empty : ""
         downloadedListScreen.page = 1
+        downloadedListScreen.requestVisibleCovers()
     }
 
     ListModel { id: sourcesModel }
     ListModel { id: seriesModel }
+
+    // One page of the combined search's groups (Msg.SearchAllResults). A row
+    // is a series as the user sees it, merged across sources by the backend.
+    ListModel { id: searchAllModel }
+
+    // Every group's matches on the page in hand, keyed by group. Kept beside
+    // the model rather than inside it: a nested list in a ListModel role is a
+    // second model to keep in step, and this one is read exactly twice — when
+    // a group is opened, and when the series screen's chips are built from it.
+    //
+    // It is replaced wholesale with each page, so a key from a page that has
+    // been turned away from resolves to nothing rather than to the wrong
+    // sources (Grouping.js matchesFor).
+    property var searchAllMatches: ({})
     ListModel { id: chaptersModel }
 
     // The volume view's rows (PLAN §6 M4, revised 2026-09-16). It is empty
@@ -291,19 +409,29 @@ Rectangle {
 
     // ---- transport ---------------------------------------------------------
 
-    AppLoad {
-        id: appload
-        // Must equal the "id" field in manifest.json.
-        applicationID: "quire"
+    Backend {
+        id: backend
+        // Must equal the "id" field in manifest.json, and the systemd
+        // instance name: it is what names the endpoint file this reads to
+        // find the backend's port.
+        appId: "quire"
 
-        onMessageReceived: (type, contents) => root.dispatch(type, contents)
+        onMessage: (type, data, b64) => root.dispatch(type, data)
+
+        // A send that did not reach the backend must not be silent. Under
+        // AppLoad the backend died with the app, so "not running" was not a
+        // state the user could be in; under Annex it is a service that can be
+        // stopped or crash-looping while the app is perfectly happy, and a UI
+        // that just sits there is the worst way to show that.
+        onFailed: (type, reason) => { root.lastError = reason }
     }
 
     // send is the only way anything in ui/ talks to the backend. Payloads are
-    // always JSON objects: PLAN §7.1 says all payloads are JSON, and a non-empty
-    // payload keeps AppLoad's empty-packet edge case off the wire entirely.
+    // always JSON objects: PLAN §7.1 says all payloads are JSON, and a
+    // non-empty payload costs nothing now that the wire is HTTP — it was
+    // load-bearing under AppLoad, whose empty-packet handling was asymmetric.
     function send(type, payload) {
-        appload.sendMessage(type, JSON.stringify(payload === undefined ? {} : payload))
+        backend.send(type, JSON.stringify(payload === undefined ? {} : payload))
     }
 
     function dispatch(type, contents) {
@@ -331,6 +459,13 @@ Rectangle {
             // time the settings screen pings. Assigning an identical bool emits
             // no change signal and nothing is repainted.
             settingsScreen.consultRobots = msg ? !!msg.consultRobots : false
+            // The stored layouts ride on the same status and for the same
+            // reason. Views.js applies the default of grid, so a backend too
+            // old to send them — or a status that arrived without them — leaves
+            // every screen drawable.
+            root.searchView = Views.fromStatus(msg, "browse")
+            root.downloadedView = Views.fromStatus(msg, "downloaded")
+            root.watchingView = Views.fromStatus(msg, "watching")
             return
 
         case Msg.Sources:
@@ -347,6 +482,10 @@ Rectangle {
 
         case Msg.SearchResults:
             root.fillSeries(msg)
+            return
+
+        case Msg.SearchAllResults:
+            root.fillSearchAll(msg)
             return
 
         case Msg.CoverReady:
@@ -456,6 +595,11 @@ Rectangle {
             // The turn did not happen. The pager goes back to naming the page
             // still on screen rather than one that never arrived.
             seriesGridScreen.pendingPage = 0
+            // The combined search says the same thing with the same two
+            // lines. A source that merely failed to answer never gets here —
+            // that is a partial result and arrives as one (fillSearchAll).
+            searchAllScreen.busy = false
+            searchAllScreen.pendingPage = 0
             chapterListScreen.busy = false
             return
         }
@@ -492,7 +636,18 @@ Rectangle {
                 "seriesId": list[i].id,
                 "title": list[i].title,
                 "coverUrl": list[i].coverUrl ? list[i].coverUrl : "",
-                "coverPath": ""
+                "coverPath": "",
+                // Whether this result is already watched, for the long-press
+                // menu's Watch / Stop watching line. Derived from the watched
+                // model rather than carried by the search reply: the store is
+                // the only thing that knows, and it is already here.
+                //
+                // The role is written on the first append or not at all — a
+                // ListModel fixes its roles then and drops keys added later —
+                // which is why it is filled in even for a source with no
+                // watches at all.
+                "watched": WatchJs.indexOf(watchedModel, root.currentSourceId,
+                                           list[i].id) >= 0
             })
         }
         // Where the backend says we are. It clamps a page that ran past the
@@ -510,23 +665,89 @@ Rectangle {
         seriesGridScreen.requestVisibleCovers()
     }
 
+    // fillSearchAll renders one page of the combined search.
+    //
+    // **A source that failed is not an error.** Its rows are missing and the
+    // others are not, so the page is drawn exactly as it arrived and the
+    // sources that did not answer go on one subdued line underneath
+    // (Grouping.js failedLine). Nothing here blanks the results, sets
+    // lastError, or lets "some sources failed" reach the user as "the search
+    // failed" — which is what a half-empty screen with an error over it would
+    // say.
+    function fillSearchAll(msg) {
+        searchAllScreen.busy = false
+        root.searchAllMatches = Grouping.fill(searchAllModel, msg)
+
+        // Where the backend says we are. It clamps a page that ran past the
+        // end, so this is the page actually served, and totalPages stays 0
+        // until every source has run dry rather than being guessed at (PLAN
+        // §12.1 — do not invent a total).
+        searchAllScreen.page = msg && msg.page > 0 ? msg.page : 1
+        searchAllScreen.totalPages = msg && msg.totalPages > 0 ? msg.totalPages : 0
+        searchAllScreen.hasMore = msg ? !!msg.hasMore : false
+        searchAllScreen.pendingPage = 0
+        searchAllScreen.failedSources = Grouping.failedLine(msg ? msg.sourceErrors : [])
+        searchAllScreen.emptyMessage = searchAllModel.count === 0
+            ? "Nothing came back for that." : ""
+        // One batch for the page that just landed, every entry naming its own
+        // source: this screen draws series from several at once.
+        searchAllScreen.requestVisibleCovers()
+    }
+
     // Covers never travel over the socket (PLAN §7.1): the backend writes a
     // downscaled copy to disk and sends its path, which is what lands here.
     function applyCover(msg) {
         if (!msg || !msg.seriesId) {
             return
         }
-        for (var i = 0; i < seriesModel.count; ++i) {
-            if (seriesModel.get(i).seriesId === msg.seriesId) {
-                seriesModel.setProperty(i, "coverPath", "file://" + msg.path)
-                return
-            }
-        }
-        // Fell through: a cover arrived for a series this grid is not showing.
+        // Four models can want the same cover now: the search grid, the
+        // combined search, the downloaded overview and the watched list all
+        // draw tiles — and the combined search is the case that makes this
+        // more than housekeeping, since the same series can be on it and on
+        // any of the others at the same time. It is
+        // written to every row that matches rather than to the first, because
+        // a series really can be in all three at once, and a second fetch for
+        // a file already on disk is work the politeness limiter would
+        // serialise in front of a cover nobody has yet (PLAN §7.4).
+        var wrote = root.writeCover(seriesModel, msg)
+                  + root.writeCover(searchAllModel, msg)
+                  + root.writeCover(downloadedModel, msg)
+                  + root.writeCover(watchedModel, msg)
+        if (wrote > 0)
+            return
+        // Fell through: a cover arrived for a series no screen is showing.
         // Silent otherwise, and indistinguishable from a cover that was never
         // fetched — so it says so, with the id, because the id is the thing
         // that would have to differ for a fetched cover to go nowhere.
-        console.log("[quire] cover for a series not in the grid: " + msg.seriesId)
+        console.log("[quire] cover for a series no screen is showing: " + msg.seriesId)
+    }
+
+    // writeCover puts the path on every row of one model that is the series,
+    // and reports how many it wrote.
+    function writeCover(rows, msg) {
+        var n = 0
+        for (var i = 0; i < rows.count; ++i) {
+            if (rows.get(i).seriesId !== msg.seriesId)
+                continue
+            rows.setProperty(i, "coverPath", "file://" + msg.path)
+            n++
+        }
+        return n
+    }
+
+    // requestCoversBySource asks for a batch of covers that may span sources.
+    // Every screen's covers go through here, the per-source search grid
+    // included: what the batch is made of, and the rule that an empty one is
+    // not sent at all, are in Covers.js with the reasoning and the tests.
+    //
+    // `fallbackSourceId` is the source a screen showing one site at a time is
+    // browsing. Its rows carry no source of their own — every row has the same
+    // one — and it is this file that knows which.
+    function requestCoversBySource(covers, fallbackSourceId) {
+        // Whatever Covers.js says to send, and nothing when it says nothing.
+        var msg = Covers.request(covers, fallbackSourceId)
+        if (msg)
+            root.send(Msg.RequestCover, msg)
     }
 
     function fillChapters(msg) {
@@ -580,17 +801,35 @@ Rectangle {
     // words (PLAN §2). The model bookkeeping is in Watch.js, which is where it
     // can be driven by the offscreen harness.
 
+    // markWatchedElsewhere re-derives the Watch / Stop watching line on the two
+    // screens that show series they do not own the watch record for.
+    //
+    // Called from both cues rather than from one: a single watch landing mid
+    // round is what a tap on the menu produces, and the whole list is what
+    // arrives after it and at the end of every check. Neither writes anything
+    // where the flag already agrees (Watch.js), so the common case — a check
+    // round with no news — repaints nothing.
+    function markWatchedElsewhere() {
+        WatchJs.markWatched(seriesModel, watchedModel, root.currentSourceId)
+        WatchJs.markWatched(downloadedModel, watchedModel, "")
+    }
+
     function reconcileWatched(msg) {
         WatchJs.reconcile(watchedModel, msg ? msg.watched : [])
+        root.markWatchedElsewhere()
         // Written only where the string differs, so a check round that ends
         // with the same summary it began with repaints nothing.
         WatchJs.applySummary(root, msg)
         root.refreshWatchedFlag()
+        // The list is pushed rather than fetched, so this is the only cue that
+        // a row the grid has no cover for has arrived.
+        watchListScreen.requestVisibleCovers()
     }
 
     function applyWatchUpdate(w) {
         WatchJs.applyUpdate(watchedModel, w)
         root.refreshWatchedFlag()
+        root.markWatchedElsewhere()
     }
 
     // The series screen's button follows the store, never a local toggle: PLAN
@@ -663,6 +902,42 @@ Rectangle {
         }
     }
 
+    // requestSearchAllPage asks every enabled source for one display page of
+    // the merged results. The backend does the fanning out, the merging and
+    // the paging; this only says how much fits.
+    //
+    // **An empty query sends nothing.** It is the second of the two guards —
+    // the screen has the first — and it is here because this is the one place
+    // the message is composed: a page turn, a relayout and the Search key all
+    // arrive through it, and only one of them has a keyboard in front of it.
+    function requestSearchAllPage(page) {
+        if (!Grouping.searchable(searchAllScreen.query))
+            return
+        root.send(Msg.SearchAll, {
+            "query": searchAllScreen.query,
+            "page": page,
+            "pageSize": searchAllScreen.pageSize})
+    }
+
+    // openSearchAll is the way in from the sources screen.
+    //
+    // It starts empty. A search is a question the user asks, and coming back
+    // to the screen later to find someone else's old answer — possibly from
+    // sources that have since been disabled — is worse than an empty box.
+    // Returning *from a series* is a different route and goes through
+    // showScreen, which keeps the page the user was on.
+    function openSearchAll() {
+        root.showScreen("searchall")
+        searchAllModel.clear()
+        root.searchAllMatches = ({})
+        searchAllScreen.reset()
+        searchAllScreen.busy = false
+        // The keyboard comes up with the screen: there is nothing else to do
+        // here, and the alternative is a tap on a box that is already the only
+        // thing on screen.
+        searchAllScreen.searching = true
+    }
+
     function openSource(sourceId, name) {
         root.currentSourceId = sourceId
         root.currentSourceName = name
@@ -673,10 +948,27 @@ Rectangle {
         root.requestSeriesPage(1)
     }
 
-    function openSeries(seriesId, title) {
+    // openSeries opens one (source, series) pair. `matches` is the combined
+    // search's group — every source the same series was found in — and is
+    // absent for every other route in, which is what decides that the source
+    // chips are drawn at all (ui/ChapterList.qml).
+    function openSeries(seriesId, title, matches) {
         root.currentSeriesId = seriesId
-        root.seriesCameFrom = root.screen === "watching" || root.screen === "downloaded"
-                              ? root.screen : "browse"
+        // Where Back goes. Not recomputed when this is re-entered from the
+        // series screen itself — which is what switching source does — because
+        // the answer is where the user came *from*, and by then that is no
+        // longer what `screen` says.
+        if (root.screen !== "series")
+            root.seriesCameFrom = root.screen === "watching"
+                               || root.screen === "downloaded"
+                               || root.screen === "searchall"
+                                  ? root.screen : "browse"
+        // The alternatives belong to the group, not to the source being read,
+        // so they survive a switch between them.
+        // (Which of them is being read is bound to root.currentSourceId below,
+        // not assigned here: an assignment would break that binding and leave
+        // the marked chip behind on the next switch.)
+        chapterListScreen.sources = matches ? matches : []
         root.showScreen("series")
         chaptersModel.clear()
         // Emptied before the new series' detail arrives, so the previous
@@ -693,6 +985,25 @@ Rectangle {
         root.send(Msg.SeriesDetail, {"sourceId": root.currentSourceId, "seriesId": seriesId})
     }
 
+    // switchSource re-opens the series being read on one of the other sources
+    // the combined search found it on.
+    //
+    // **It switches the pair, it does not merge anything.** Every message this
+    // screen sends — the detail, a download, a watch — names (sourceId,
+    // seriesId), and after this they all name the new one. The chapters are
+    // re-listed from that source because they are that source's chapters: a
+    // numbering, a scanlator and a set of downloads that have nothing to do
+    // with the ones just on screen.
+    //
+    // The title is kept rather than re-derived: it is the group's, the sources
+    // agreed on it closely enough to be merged, and it stops the header going
+    // blank while the detail is in flight.
+    function switchSource(sourceId, sourceName, seriesId) {
+        root.currentSourceId = sourceId
+        root.currentSourceName = sourceName
+        root.openSeries(seriesId, chapterListScreen.seriesTitle, chapterListScreen.sources)
+    }
+
     // showScreen is the one way a screen becomes the active one.
     //
     // Every route goes through it, including Back, because the bug it fixes was
@@ -703,9 +1014,11 @@ Rectangle {
     function showScreen(name) {
         // Every route into a screen comes through here, which makes it the one
         // place that can be sure the keyboard does not follow the user to the
-        // next screen. AppLoad's panel raises itself on focus and lowers itself
-        // for nothing (PLAN §11 Q5), and it covers the bottom 544 px — the
-        // pager and the last rows of whatever is now on screen.
+        // next screen (PLAN §11 Q5). Annex supplies no keyboard, so this is
+        // Quire's own again — but the rule is unchanged, because the reason
+        // for it never depended on whose keyboard it was: a keyboard left up
+        // covers the bottom of the screen, which is the pager and the last
+        // rows of whatever is now showing.
         root.dismissInput()
         root.screen = name
         if (Screens.refreshOnShow(name) === "listDownloaded")
@@ -722,6 +1035,7 @@ Rectangle {
             root.showScreen("sources")
             break
         case "browse":
+        case "searchall":
         case "add":
         case "settings":
             root.showScreen("sources")
@@ -735,6 +1049,10 @@ Rectangle {
         switch (root.screen) {
         case "add": return "Add a source"
         case "browse": return root.currentSourceName
+        // The scope, not the query: the query is in the field, two centimetres
+        // below, and repeating it in the header would be the only title on any
+        // screen that changes as the user types.
+        case "searchall": return "Every source"
         case "watching": return "Watching"
         case "downloaded": return "Downloaded"
         case "series": return chapterListScreen.seriesTitle
@@ -746,21 +1064,41 @@ Rectangle {
     Component.onCompleted: {
         // These are belt and braces, not the mechanism.
         //
-        // AppLoad discards messages aimed at a backend whose socket is not yet
-        // up ("No active socket for ID:quire"), and this runs at exactly the
-        // moment that race is live. The backend therefore *pushes* the source
-        // list and the status when it sees the frontend attach, which is the
-        // earliest point a send can work. Asking here as well costs two frames
-        // and covers the case where the backend was already attached before
-        // this QML loaded.
+        // AppLoad discarded messages aimed at a backend whose socket was not
+        // yet up ("No active socket for ID:quire"), and this ran at exactly
+        // the moment that race was live. The backend therefore *pushes* the
+        // source list and the status when it sees the frontend attach, which
+        // is the earliest point a send can work.
+        //
+        // Annex does not have that race — a message posted before the backend
+        // is reachable fails loudly rather than vanishing, and one posted
+        // after is queued — but the push is kept because it is the right
+        // shape regardless, and twice it was the thing standing between the
+        // user and an app claiming their sources were gone.
+        //
+        // These two run before the backend has been discovered — reading its
+        // endpoint file is asynchronous and cannot have finished yet — so
+        // Backend queues them and sends them the moment it connects. They are
+        // not lost and they do not report a failure.
         root.send(Msg.ListSources)
         root.send(Msg.Ping)
     }
 
-    // Called by the AppLoad host when the app is being unloaded. Terminating
-    // the backend here is what stops the quired process.
+    // Called by the host when the app is being unloaded.
+    //
+    // **It detaches; it does not terminate.** Under AppLoad this called
+    // terminate() and the quired process died with the app. Under Annex the
+    // backend is a systemd service that outlives the screen, so the right
+    // thing is a clean detach: the backend hears LostCoordinator immediately
+    // rather than waiting out its timeout, and whatever it does when the
+    // frontend leaves happens at once.
+    //
+    // What the backend then does is the backend's decision and is unchanged
+    // by this port — Quire pauses downloads on detach (PLAN §6 M7, no
+    // wakelock). The difference is that the *state* now survives: reopening
+    // resumes instead of starting the process over.
     function unloading() {
-        appload.terminate()
+        backend.stop()
     }
 
     // ---- chrome ------------------------------------------------------------
@@ -774,7 +1112,17 @@ Rectangle {
             id: backLabel
             objectName: "backButton"
             anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
-            text: root.screen === "sources" ? "" : "‹ Back"
+            // On every screen but the first this goes back one step. On the
+            // first it leaves Quire, and it says so rather than saying
+            // "Back" — the destination is the library, not a screen of ours.
+            //
+            // **It used to be blank here, and under Annex that would trap the
+            // user.** AppLoad drew its own chrome around an app and that
+            // chrome is what closed it; an Annex app fills the navigator and
+            // the host draws nothing, so if the app offers no way out there
+            // is none. goBack() has always called root.close() on this
+            // screen; until now nothing could reach it.
+            text: root.screen === "sources" ? "‹ Library" : "‹ Back"
             font.pointSize: Style.bodySize
             color: backArea.pressed ? Style.muted : Style.ink
         }
@@ -787,13 +1135,59 @@ Rectangle {
         }
 
         Text {
+            id: titleLabel
+            objectName: "screenTitle"
             anchors.centerIn: parent
+            // Room for Back on one side and Settings on the other, less the
+            // layout switch when the screen has one. The title stays centred
+            // on the header and gives up width rather than running under a
+            // control.
             width: parent.width - 360
+                   - (viewToggle.visible ? viewToggle.width + Style.gap * 2 : 0)
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
             text: root.screenTitle()
             font.pointSize: Style.headingSize
+            // Black, like every other word in the app. This used to be drawn
+            // in the accent and on the device it read muddy — the panel
+            // composes a coloured pixel through its colour filter array and a
+            // letterform is nearly all edge (ui/Style.js). The colour moved to
+            // the bar below.
             color: Style.ink
+        }
+
+        // The one piece of chrome that is the same shape on every screen, so
+        // it is the one worth making findable by colour. The bar is a solid
+        // area, which is the only thing this panel renders cleanly in colour,
+        // and it is as wide as the title's own words so it points at them.
+        //
+        // It is a fourth signal, not the first: the title is already the
+        // largest type in the header, already the only centred thing in it,
+        // and still says where you are in words.
+        AccentRule {
+            objectName: "screenTitleRule"
+            anchors {
+                top: titleLabel.bottom; topMargin: 4
+                horizontalCenter: titleLabel.horizontalCenter
+            }
+            width: Math.min(titleLabel.contentWidth, titleLabel.width)
+        }
+
+        // The layout switch, in the chrome rather than on each screen: it is
+        // the same control in the same place on all three, and a screen that
+        // drew its own would put it above its own search bar or check button,
+        // where it would read as part of that screen's work.
+        ViewToggle {
+            id: viewToggle
+            objectName: "viewToggle"
+            anchors {
+                right: settingsArea.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            // Only the three screens that remember one (Views.js).
+            visible: Views.remembers(root.screen)
+            view: root.viewFor(root.screen)
+            onViewRequested: root.setView(root.screen, view)
         }
 
         Text {
@@ -831,6 +1225,7 @@ Rectangle {
             model: sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.showScreen("add") }
             onWatchingRequested: root.showScreen("watching")
+            onSearchAllRequested: root.openSearchAll()
             // Fetched on the way in rather than pushed: a list that is right
             // when it is opened is enough, and much less machinery. "Opened"
             // includes being returned to — see showScreen.
@@ -866,9 +1261,21 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "watching"
             model: watchedModel
+            view: root.watchingView
             phrase: root.watchPhrase
             onCheckRequested: root.send(Msg.CheckWatched, {})
+            onCoversRequested: root.requestCoversBySource(covers)
             onUnwatchRequested: root.send(Msg.UnwatchSeries,
+                {"sourceId": sourceId, "seriesId": seriesId})
+            // The long-press menu's two. Both are answered by the backend and
+            // neither is echoed on the row first: DownloadNewChapters comes
+            // back as the same MessageQueueResult a multi-select download
+            // does — handled once, in dispatch — and MarkSeen comes back as a
+            // watch update and then the whole list, so the row redraws itself
+            // from the store (PLAN §12.2).
+            onDownloadNewRequested: root.send(Msg.DownloadNewChapters,
+                {"sourceId": sourceId, "seriesId": seriesId})
+            onMarkSeenRequested: root.send(Msg.MarkSeen,
                 {"sourceId": sourceId, "seriesId": seriesId})
             onOpenRequested: {
                 root.currentSourceId = sourceId
@@ -883,7 +1290,9 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "downloaded"
             model: downloadedModel
+            view: root.downloadedView
             emptyNote: root.downloadedEmpty
+            onCoversRequested: root.requestCoversBySource(covers)
             // The same route into a series the grid and the watched list use:
             // one series screen, one Back behaviour, one message.
             onOpenRequested: {
@@ -894,6 +1303,20 @@ Rectangle {
             onDeleteRequested: root.send(Msg.DeleteSeries,
                 {"sourceId": sourceId, "seriesId": seriesId})
             onDeleteConfirmed: root.deleteSeries(sourceId, seriesId)
+
+            // "Read latest" — the newest download of the series, opened
+            // through the one handoff every other Read goes through, so a
+            // missing document is reported the same way here as anywhere
+            // else (PLAN §6 M6).
+            onReadRequested: root.openInReader(documentUuid)
+
+            // Watching a series from the screen that lists what is already on
+            // the tablet. A row here is a (source, series) pair, so it names
+            // both rather than borrowing whatever source is being browsed.
+            onWatchRequested: root.send(Msg.WatchSeries,
+                {"sourceId": sourceId, "seriesId": seriesId, "title": title})
+            onUnwatchRequested: root.send(Msg.UnwatchSeries,
+                {"sourceId": sourceId, "seriesId": seriesId})
         }
 
         SeriesGrid {
@@ -902,6 +1325,10 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "browse"
             model: seriesModel
+            view: root.searchView
+            // The line under each title in the list layout. One source per
+            // listing today, so it is the screen's rather than the row's.
+            sourceName: root.currentSourceName
             onSearchRequested: {
                 seriesGridScreen.query = query
                 seriesGridScreen.busy = true
@@ -917,9 +1344,52 @@ Rectangle {
             // showing a search or the site's own listing, and the page size is
             // its geometry's answer, not a constant (PLAN §12.1).
             onPageRequested: root.requestSeriesPage(page)
-            onCoversRequested: root.send(Msg.RequestCover,
-                {"sourceId": root.currentSourceId, "covers": covers})
+            // Through the same builder every other screen uses. This used to
+            // send its own message with the source at the top level and none
+            // on the entries — which the backend accepts, falling back to the
+            // message's source, but it was a second implementation of the one
+            // thing and it sent an empty batch at startup, before any screen
+            // had a tile. An empty batch cancels whatever is in flight
+            // (Covers.js), so the second path was one screen away from
+            // cancelling another's covers.
+            onCoversRequested: root.requestCoversBySource(covers, root.currentSourceId)
             onOpenRequested: root.openSeries(seriesId, title)
+
+            // Watching straight from the results, without opening the series
+            // first. One source is being browsed, so it is this screen's
+            // rather than the row's — the same reason the rows' subtitle is.
+            onWatchRequested: root.send(Msg.WatchSeries,
+                {"sourceId": root.currentSourceId, "seriesId": seriesId, "title": title})
+            onUnwatchRequested: root.send(Msg.UnwatchSeries,
+                {"sourceId": root.currentSourceId, "seriesId": seriesId})
+        }
+
+        SearchAll {
+            id: searchAllScreen
+            objectName: "searchAll"
+            anchors.fill: parent
+            visible: root.screen === "searchall"
+            model: searchAllModel
+            // The same stored layout the per-source results use (Views.js).
+            view: root.searchView
+            onSearchRequested: root.requestSearchAllPage(1)
+            onPageRequested: root.requestSearchAllPage(page)
+            // The batch spans sources, so it goes through the one path that
+            // keeps it whole and lets each entry name its own source. Splitting
+            // it per source was a real bug on Downloaded: each message
+            // cancelled the one before it.
+            onCoversRequested: root.requestCoversBySource(covers)
+            // Opening a group opens its first match — the one the backend put
+            // first, which is first in the user's own source order. The rest
+            // go with it, and become the chips on the series screen; nothing
+            // is merged and nothing is chosen silently.
+            onOpenRequested: {
+                var matches = Grouping.matchesFor(root.searchAllMatches, key)
+                root.currentSourceId = sourceId
+                root.currentSourceName = matches.length > 0 && matches[0].sourceName
+                    ? matches[0].sourceName : ""
+                root.openSeries(seriesId, title, matches)
+            }
         }
 
         ChapterList {
@@ -929,6 +1399,11 @@ Rectangle {
             visible: root.screen === "series"
             model: chaptersModel
             volumeModel: volumesModel
+            // Which source this series is being read on, and which others the
+            // combined search found it on. Both are set by openSeries; the
+            // chips are absent for every other route in.
+            currentSourceId: root.currentSourceId
+            onSourceSwitchRequested: root.switchSource(sourceId, sourceName, seriesId)
             onWatchRequested: root.send(Msg.WatchSeries,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "title": chapterListScreen.seriesTitle})

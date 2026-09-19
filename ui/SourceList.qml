@@ -38,6 +38,12 @@ Item {
     signal watchingRequested()
     signal downloadedRequested()
 
+    // One query across every enabled source (Msg.SearchAll). It is offered
+    // here because this is the screen that *is* every source: searching one is
+    // reached by opening it, so searching all of them belongs where all of
+    // them are listed, not inside any one of them.
+    signal searchAllRequested()
+
     // PLAN §12.2's "short" summary, composed in the backend. Empty means there
     // is nothing to report, and the button says only "Watching" — a badge that
     // is always lit is a badge nobody reads.
@@ -122,9 +128,13 @@ Item {
         screen.renameText = name
     }
 
-    // dismissInput puts AppLoad's keyboard away (PLAN §11 Q5). Called when the
+    // dismissInput puts the keyboard away (PLAN §11 Q5). Called when the
     // rename panel closes, either way, and when this screen is navigated away
     // from — never while the user is still typing a name.
+    //
+    // Quire's keyboard lives inside the rename panel, so closing the panel is
+    // what lowers it; the focus drop still comes first, for the reason in
+    // Screens.js.
     function dismissInput() {
         Screens.dismissKeyboard([nameField])
     }
@@ -497,13 +507,48 @@ Item {
             anchors.centerIn: parent
             spacing: Style.gap
 
-            // Three buttons now: Watching, Downloaded and Add. Downloaded sits
-            // beside Watching because they answer the same question from
-            // opposite ends — what is new, and what is already here — and
-            // downloads happen without watching (PLAN §12.5).
+            // Four buttons now: Search, Watching, Downloaded and Add.
+            // Downloaded sits beside Watching because they answer the same
+            // question from opposite ends — what is new, and what is already
+            // here — and downloads happen without watching (PLAN §12.5).
+            // Search leads, because it is the only one of the four that is
+            // about finding something rather than about what is already found.
+            //
+            // The width is a quarter of the bar rather than a third, and the
+            // cap is what keeps the row from spreading across the panel: the
+            // arithmetic has to stay derived, because the AppLoad PC emulator
+            // is a window and a bar sized to the panel overflows it.
+            Rectangle {
+                objectName: "searchAllButton"
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
+                height: Style.buttonHeight
+                color: searchAllArea.pressed ? Style.pressed : Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                Text {
+                    anchors.centerIn: parent
+                    // "Search all", not "Search": the screen it opens asks
+                    // every source at once, and the per-source search lives
+                    // inside a source. A word each way, so neither reads as
+                    // the other.
+                    text: "Search all"
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                }
+
+                MouseArea {
+                    id: searchAllArea
+                    objectName: "searchAllArea"
+                    anchors.fill: parent
+                    onClicked: screen.searchAllRequested()
+                }
+            }
+
             Rectangle {
                 objectName: "downloadedButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: downloadedArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -527,18 +572,42 @@ Item {
 
             Rectangle {
                 objectName: "watchingButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: watchingArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
                 border.color: Style.ink
                 radius: 6
 
+                // The entry point's half of the badge: a solid square inside
+                // the button, left of its label, and only when there is
+                // something to report. The label itself was the coloured part
+                // until the device said otherwise (ui/Style.js); the mark
+                // carries the colour now and the words carry the news, which
+                // is the order those two were always meant to be in.
+                //
+                // Placed off the label's contentWidth for the same reason the
+                // pager's is (ui/PagerBar.qml): the label is centred in a
+                // fixed-width button, so an anchor to the button's edge would
+                // sit the mark a finger away from the word it belongs to.
+                AccentMark {
+                    objectName: "watchingMark"
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: watchingText.x + (watchingText.width - watchingText.contentWidth) / 2
+                       - Style.gap / 2 - width
+                    visible: screen.watchingLabel.length > 0
+                }
+
                 Text {
+                    id: watchingText
                     objectName: "watchingLabel"
                     anchors.centerIn: parent
                     // The backend's words after the view's own noun. Nothing
                     // here counts, pluralises or decides what "3 new" means.
+                    //
+                    // With nothing to report it says "Watching" in black,
+                    // exactly like its neighbours; the mark arrives with the
+                    // extra words, never instead of them.
                     text: screen.watchingLabel.length > 0
                           ? "Watching · " + screen.watchingLabel : "Watching"
                     font.pointSize: Style.bodySize
@@ -554,7 +623,7 @@ Item {
 
             Rectangle {
                 objectName: "addSourceButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 2) / 3, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: addArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -579,9 +648,10 @@ Item {
 
     // ---- rename ------------------------------------------------------------
     //
-    // A panel over the list rather than a screen of its own: it is one field.
-    // AppLoad's own keyboard serves it (PLAN §11 Q5, settled 2026-09-19), the
-    // same as the add-source form.
+    // A panel over the list rather than a screen of its own: it is one field,
+    // and the device has no system keyboard available to an embedded app
+    // (PLAN §11 Q5) — Annex supplies none — so the text comes from
+    // ui/Keyboard.qml exactly as the add-source form does.
     Rectangle {
         id: renamePanel
         objectName: "renamePanel"
@@ -630,9 +700,11 @@ Item {
                     color: Style.ink
                     // schema/source.schema.json: 1-120 characters.
                     maximumLength: 120
+                    // Fed by ui/Keyboard.qml below, never focused for input of
+                    // its own.
+                    activeFocusOnPress: false
                     text: screen.renameText
                     onTextChanged: screen.renameText = text
-                    onAccepted: screen.commitRename()
                 }
             }
 
@@ -691,6 +763,15 @@ Item {
             }
         }
 
+        Keyboard {
+            objectName: "renameKeyboard"
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            layout: "text"
+            onKeyTyped: screen.renameText += text
+            onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
+            onClearAll: screen.renameText = ""
+            onSubmit: screen.commitRename()
+        }
     }
 
     // ---- strip splitting ---------------------------------------------------

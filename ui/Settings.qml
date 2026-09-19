@@ -94,12 +94,14 @@ Item {
         }
         spacing: Style.gap
 
-        Text {
+        // Settings is the one screen that is a list of unrelated sections
+        // rather than a list of like things, so the headings are what is
+        // actually navigated. Black words with the accent as a filled bar
+        // under them — ui/SectionHeading.qml, which is where the reasoning
+        // for that shape lives.
+        SectionHeading {
             width: parent.width
-            wrapMode: Text.WordWrap
             text: "Backend"
-            font.pointSize: Style.headingSize
-            color: Style.ink
         }
 
         Text {
@@ -145,12 +147,9 @@ Item {
             color: Style.rule
         }
 
-        Text {
+        SectionHeading {
             width: parent.width
-            wrapMode: Text.WordWrap
             text: "Fetching"
-            font.pointSize: Style.headingSize
-            color: Style.ink
         }
 
         // The setting says what it does rather than hiding behind a label.
@@ -218,12 +217,9 @@ Item {
             color: Style.rule
         }
 
-        Text {
+        SectionHeading {
             width: parent.width
-            wrapMode: Text.WordWrap
             text: "Last problem"
-            font.pointSize: Style.headingSize
-            color: Style.ink
         }
 
         Text {
@@ -273,12 +269,9 @@ Item {
         // record existed: nothing names those again, so without this they stay
         // for good. One button, no schedule — a cache that empties itself is a
         // download that vanished the night before a flight.
-        Text {
+        SectionHeading {
             width: parent.width
-            wrapMode: Text.WordWrap
             text: "Downloads cache"
-            font.pointSize: Style.headingSize
-            color: Style.ink
         }
 
         // The size, in the backend's words. A button to clear something whose
@@ -403,12 +396,9 @@ Item {
         // Every bug found so far needed someone reading journalctl over SSH,
         // which the person holding the tablet cannot do. This turns "it stopped
         // working" into something they can read out.
-        Text {
+        SectionHeading {
             width: parent.width
-            wrapMode: Text.WordWrap
             text: "Log"
-            font.pointSize: Style.headingSize
-            color: Style.ink
         }
 
         Rectangle {
