@@ -406,11 +406,11 @@ quire/
 ├── LICENSE                     Apache-2.0 — first commit
 ├── PLAN.md                     this file — keep it current
 ├── README.md                   incl. the §1.3 responsibility statement
-├── manifest.json               AppLoad app manifest
-├── application.qrc             → resources.rcc (rcc --binary --format-version 3)
-├── icon.png                    launcher tile
+├── manifest.json               Annex app manifest (id, name, entry, icon)
+├── icon.svg                    sidebar icon, 48x48, solid black paths
+├── install.sh                  user-facing installer; sets Annex up if absent
 ├── backend/
-│   ├── cmd/quired/main.go      entrypoint; argv[1] = AppLoad socket
+│   ├── cmd/quired/main.go      entrypoint; argv[1] = AppLoad socket, else Annex
 │   ├── appload/                protocol framing, message types
 │   ├── theme/                  theme engine
 │   │   ├── theme.go            the Theme interface

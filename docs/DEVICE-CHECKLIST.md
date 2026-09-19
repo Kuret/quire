@@ -7,13 +7,17 @@ Work top to bottom. Record the date and the OS build (`cat /etc/version`) at the
 top of each run. A check that is skipped is written down as skipped, not left
 blank — an unticked box and an untested box look identical a week later.
 
-> **Nothing below has been run since the port from AppLoad to Annex.** The
-> steps were executed individually against the live device under the old host;
-> under Annex they are documented intent. Annex's own host, sidebar entry and
-> app loading are proven on hardware (OS 3.28.0.172); Quire on Annex builds and
-> passes `make check` on the host and has not yet been run on a tablet. The
-> first pass through this file is therefore also the port's first device test —
-> expect to find things, and write down what you find.
+> **Quire on Annex now runs on hardware, but this file has not been worked
+> through as a pass.** As of 2026-09-20, on OS 3.28.0.172: installing,
+> browsing, searching across sources, downloading, reading, deleting, the
+> watch list, the downloaded overview, the layout toggle, the hold menus and
+> both installers have all been exercised on the live device. What has *not*
+> happened is someone going down this list ticking boxes, so the individual
+> assertions below — particularly the negative ones, and anything about a
+> cold boot or a second device — remain documented intent.
+>
+> Treat an unticked box as unknown rather than broken, and write down what you
+> find.
 >
 > **The M8 acceptance test has never been run end to end**, separately from
 > that. It needs a *second*, clean Paper Pro; there is one tablet and it is in
@@ -163,7 +167,7 @@ makes the later ones meaningless.
       that the installer replaces wholesale — this check exists because an
       earlier layout ate a user's sources on a routine redeploy.
 - [ ] Nothing user-visible has appeared under `/home/root/annex/apps/quire`: it
-      should contain only `manifest.json`, `icon.png`, `ui/` (with
+      should contain only `manifest.json`, `icon.svg`, `ui/` (with
       `ui/Main.qml`) and `backend/run` (executable).
 - [ ] `/home/root/annex/run/quire.json` exists after the redeploy — the backend
       was stopped to swap its binary, and this is the proof it came back rather

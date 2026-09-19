@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Remove Quire from a reMarkable Paper Pro.
 #
-#   ./uninstall.sh [--host ADDR] [--user NAME] [--purge] [--keep-state] [--yes]
+#   ./uninstall.sh [ADDR] [--user NAME] [--purge] [--keep-state] [--yes]
+#
+# The host is positional, matching install.sh; --host ADDR is still accepted
+# so anything already scripted against it keeps working.
 #
 #   --purge       also delete Quire's state: configured sources, the library
 #                 records, the cover cache and any part-finished download.
@@ -30,8 +33,10 @@ while [[ $# -gt 0 ]]; do
     --purge) PURGE=1; shift ;;
     --keep-state) PURGE=0; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown argument: $1 (try --help)" ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # A bare address is the host, matching install.sh's positional form.
+    -*) die "unknown option: $1 (try --help)" ;;
+    *)  HOST="$1"; shift ;;
     esac
 done
 

@@ -2299,7 +2299,7 @@ Window {
         win.want("and that is what is drawn", searchRowArt[0].visible, true)
 
         // And the cover arriving puts it away, on a row exactly as on a tile.
-        seriesModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.png")))
+        seriesModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.svg")))
         win.want("a cover that arrived puts the row's placeholder away",
                  searchRowArt[0].visible, false)
         win.want("and the picture is what is drawn instead",
@@ -2377,7 +2377,7 @@ Window {
         // A cover that has arrived replaces the placeholder, and is not asked
         // for a second time: the politeness limiter serialises fetches (PLAN
         // §7.4), so a refetch stands in front of a cover nobody has yet.
-        downloadedModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.png")))
+        downloadedModel.setProperty(0, "coverPath", String(Qt.resolvedUrl("../../icon.svg")))
         win.want("a cover that arrived puts the placeholder away",
                  dlPlaceholders[0].visible, false)
         win.downloadedCoverAsks = 0

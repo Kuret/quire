@@ -22,7 +22,7 @@ find_go() {
 # build_bundle <outdir> <goos> <goarch>
 # Produces the Annex app directory layout:
 #   <outdir>/manifest.json
-#   <outdir>/icon.png
+#   <outdir>/icon.svg
 #   <outdir>/ui/...            <- loose QML, loaded from disk by path
 #   <outdir>/backend/run       <- executable; systemd starts it, no argv needed
 #
@@ -58,10 +58,9 @@ build_bundle() {
         -o "$outdir/backend/run" ./backend/cmd/quired
     chmod +x "$outdir/backend/run"
 
-    # icon.svg is the sidebar icon Annex reads from the manifest; icon.png is
-    # the AppLoad-era launcher tile and is still copied because install.sh
-    # checks for it.
-    cp manifest.json icon.png icon.svg "$outdir/"
+    # icon.svg is the sidebar icon Annex reads from the manifest. The
+    # AppLoad-era icon.png went with AppLoad: nothing reads it now.
+    cp manifest.json icon.svg "$outdir/"
 
     say "output  $outdir"
 }

@@ -57,7 +57,7 @@ say "deploy  $APP_DIR"
 # (see deviceDataDir in backend/cmd/quired/main.go) precisely because this line
 # once ate a user's configured sources on a routine redeploy.
 COPYFILE_DISABLE=1 tar -C "$BUNDLE" --no-xattrs --exclude='._*' --exclude='.DS_Store' \
-    -cf - manifest.json icon.png icon.svg ui backend \
+    -cf - manifest.json icon.svg ui backend \
     | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/run'"
 
 say "verify"

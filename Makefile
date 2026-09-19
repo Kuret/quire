@@ -44,9 +44,5 @@ pc:
 install: rmpp
 	build/install-device.sh $(DEVICE)
 
-## icon: regenerate icon.png
-icon:
-	$(GO) run ./build/icon -o icon.png
-
 clean:
 	rm -rf output output-rmpp
