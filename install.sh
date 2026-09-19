@@ -175,6 +175,22 @@ trap cleanup EXIT INT TERM
 # command in this script goes through it, so there is exactly one place where
 # the multiplexing options live.
 dev() {
+    # `-n` is load-bearing. Under the advertised `curl ... | sh` this script's
+    # stdin is the pipe carrying the script itself; ssh inherits it, reads the
+    # remainder as input, and the install stops after the first remote command
+    # and exits 0 having done nothing — 35 bytes of output, claiming success.
+    # Measured against the published one-liner on 2026-09-19.
+    ssh -n -o ControlPath="$CM" -o ControlMaster=no "$DEV_USER@$HOST" "$@"
+}
+
+# dev_stdin is dev for the calls that *want* stdin — streaming the bundle into
+# `tar x` on the device. It omits -n and must never be used for anything else.
+#
+# The split matters because -n redirects ssh's stdin from /dev/null, which
+# silently overrides a `< file` redirection or a pipe on the caller: in Annex's
+# installer that turned a `cat >` into a zero-byte write and left xochitl
+# running without LD_PRELOAD.
+dev_stdin() {
     ssh -o ControlPath="$CM" -o ControlMaster=no "$DEV_USER@$HOST" "$@"
 }
 
@@ -194,7 +210,7 @@ step "device: $DEV_USER@$HOST"
 
 probe_err="$WORK/probe.err"
 AUTH=""
-if ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
+if ssh -n -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
        "$DEV_USER@$HOST" true 2>"$probe_err"; then
     AUTH=key
 elif grep -qi 'permission denied\|no supported authentication\|too many authentication' "$probe_err"; then
@@ -612,7 +628,7 @@ dev "systemctl stop annex-app@quire >/dev/null 2>&1; true"
 # directly beside the file the host loads.
 export COPYFILE_DISABLE=1
 tar --exclude='._*' --exclude='.DS_Store' -cf - -C "$BUNDLE" manifest.json icon.svg ui backend \
-    | dev "rm -rf $APP_DIR && mkdir -p $APP_DIR && tar -xof - -C $APP_DIR &&
+    | dev_stdin "rm -rf $APP_DIR && mkdir -p $APP_DIR && tar -xof - -C $APP_DIR &&
            chmod 0755 $APP_DIR/backend/run" \
     || die "could not copy the bundle to $APP_DIR"
 
