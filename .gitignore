@@ -4,7 +4,12 @@ output-rmpp/
 # Extracted reMarkable resources: proprietary code pulled off the device for
 # local reference only (see tools/rccdump/README.md and docs/QMD-NOTES.md).
 # NEVER commit anything under here.
-/qmlroot/
+#
+# The glob covers the per-OS-version trees too (qmlroot328/ and any future
+# one). Each holds a copy of xochitl itself plus its whole QML tree — tens of
+# megabytes of somebody else's code, and the single worst thing that could be
+# pushed to a public repository from here.
+/qmlroot*/
 
 # go build output
 /rccdump
