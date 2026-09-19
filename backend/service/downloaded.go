@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
@@ -19,6 +20,22 @@ type downloadedRow struct {
 
 	// Detail is what the row says about the downloads themselves.
 	Detail string `json:"detail"`
+
+	// CoverURL is the cover the series was last listed with, or "" when Quire
+	// has never seen one — a series downloaded before the cache existed, or one
+	// whose entry has been evicted. Empty is a blank tile, never an error: the
+	// row's title, source and detail are the information, and the picture is
+	// the nicety.
+	CoverURL string `json:"coverUrl,omitempty"`
+
+	// LatestUUID is the document to hand MessageOpenInReader for "read the
+	// newest thing I downloaded of this". It is the uuid and nothing else,
+	// because that is the entire payload the reader handoff takes.
+	//
+	// Empty when there is nothing openable. Every record without one is already
+	// skipped when the rows are built, so in practice this is only empty for a
+	// row that should not exist.
+	LatestUUID string `json:"latestUuid,omitempty"`
 
 	// Openable is false when the source has been removed. The downloads are
 	// still there and the row is still listed — they are the user's files —
@@ -96,10 +113,12 @@ func (s *Service) downloadedRows() []downloadedRow {
 	for _, k := range order {
 		recs := group[k]
 		row := downloadedRow{
-			SourceID: k.source,
-			SeriesID: k.series,
-			Title:    downloadedTitle(recs),
-			Detail:   downloadCount(len(recs)),
+			SourceID:   k.source,
+			SeriesID:   k.series,
+			Title:      downloadedTitle(recs),
+			Detail:     downloadCount(len(recs)),
+			CoverURL:   s.store.CoverURL(k.source, k.series),
+			LatestUUID: latestUUID(recs),
 		}
 		if src, ok := s.store.Get(k.source); ok {
 			row.SourceName, row.Openable = src.Name, true
@@ -132,6 +151,44 @@ func downloadedTitle(recs []library.Record) string {
 		return recs[0].Series
 	}
 	return "Untitled series"
+}
+
+// latestUUID is the document behind the row's "Read" — the newest download of
+// this series.
+//
+// The records arrive newest first (library.Store sorts by StoredAt
+// descending), so the head of the group is the answer, with one correction: a
+// volume too big for xochitl's upload cap is stored as several part documents
+// written within seconds of each other, and opening part three of a volume the
+// user has not started is not "read the newest thing". Where the newest record
+// is a later part, the first part of that same volume is opened instead, which
+// is the same "first part wins" rule storedVolumes uses for the chapter list.
+func latestUUID(recs []library.Record) string {
+	if len(recs) == 0 {
+		return ""
+	}
+	best := recs[0]
+	if best.Part > 1 {
+		base := baseVolumeLabel(best)
+		for _, rec := range recs {
+			if baseVolumeLabel(rec) == base && rec.Part < best.Part {
+				best = rec
+			}
+		}
+	}
+	return best.DocumentUUID
+}
+
+// baseVolumeLabel is the volume a record's label names, with the part suffix
+// taken back off. A record that is not part of a split is its own label.
+//
+// The suffix is undone with the function that made it, so the two cannot drift
+// — see partLabel.
+func baseVolumeLabel(rec library.Record) string {
+	if rec.Parts < 2 || rec.Part < 1 {
+		return rec.Volume
+	}
+	return strings.TrimSuffix(rec.Volume, partLabel("", rec.Part, rec.Parts))
 }
 
 // downloadCount is what the row says about how much is downloaded.

@@ -16,7 +16,7 @@ func TestCoverBatchCancelsThePreviousOne(t *testing.T) {
 	// batches below are empty. What is under test is the handover.
 	s := &Service{covers: &covers.Cache{}}
 
-	s.runCoverBatch(context.Background(), nil, "src", nil)
+	s.runCoverBatch(context.Background(), nil, nil)
 	first := s.coverBatch
 	if first == nil {
 		t.Fatal("the first batch left no context to cancel")
@@ -27,7 +27,7 @@ func TestCoverBatchCancelsThePreviousOne(t *testing.T) {
 	default:
 	}
 
-	s.runCoverBatch(context.Background(), nil, "src", nil)
+	s.runCoverBatch(context.Background(), nil, nil)
 	select {
 	case <-first.Done():
 	default:
@@ -43,7 +43,7 @@ func TestCoverBatchCancelsThePreviousOne(t *testing.T) {
 // frontend that asks anyway must not be a nil dereference.
 func TestCoverBatchWithoutACacheDoesNothing(t *testing.T) {
 	s := &Service{}
-	s.runCoverBatch(context.Background(), nil, "src", []coverWant{{SeriesID: "a", URL: "https://example.invalid/a.jpg"}})
+	s.runCoverBatch(context.Background(), nil, []coverWant{{SourceID: "src", SeriesID: "a", URL: "https://example.invalid/a.jpg"}})
 	if s.coverBatch != nil {
 		t.Fatal("a service with no cover cache started a batch")
 	}
@@ -81,5 +81,61 @@ func TestNoReferrerIsRecordedForAThemeThatNamesNone(t *testing.T) {
 	s.rememberCoverReferrer("mangadex", "https://uploads.example.invalid/a.jpg", "")
 	if got := s.coverReferrerFor("mangadex", "https://uploads.example.invalid/a.jpg"); got != "" {
 		t.Errorf("referrer = %q, want none", got)
+	}
+}
+
+// A screen whose rows come from several sources asks for all of them in one
+// message, and each tile is fetched from its own source.
+//
+// This is the regression test for a real bug. The frontend first sent one
+// RequestCover per source, which looks harmless until you read runCoverBatch:
+// it cancels the batch before it, on the stated grounds that the new batch is
+// the complete visible set. Split across three messages, each one cancelled the
+// last, so a three-source Downloaded screen fetched one source's covers and
+// silently abandoned the other two — timing-dependent, so it would have read as
+// flaky rather than broken.
+func TestAVisibleSetMaySpanSources(t *testing.T) {
+	req := coverRequest{SourceID: "fallback"}
+	req.Covers = append(req.Covers,
+		struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+			URL      string `json:"url"`
+		}{SourceID: "mangadex", SeriesID: "a", URL: "https://a.invalid/a.jpg"},
+		struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+			URL      string `json:"url"`
+		}{SourceID: "comick", SeriesID: "b", URL: "https://b.invalid/b.jpg"},
+		struct {
+			SourceID string `json:"sourceId"`
+			SeriesID string `json:"seriesId"`
+			URL      string `json:"url"`
+		}{SeriesID: "c", URL: "https://c.invalid/c.jpg"},
+	)
+
+	got := coverWants(req)
+	if len(got) != 3 {
+		t.Fatalf("got %d wants, want 3", len(got))
+	}
+	if got[0].SourceID != "mangadex" || got[1].SourceID != "comick" {
+		t.Errorf("a tile was not attributed to its own source: %+v", got)
+	}
+	// An entry that names no source belongs to the request's, which is what the
+	// single-source screens rely on: they send sourceId once and nothing else.
+	if got[2].SourceID != "fallback" {
+		t.Errorf("an entry with no source of its own did not fall back: %+v", got[2])
+	}
+}
+
+// The single {seriesId,url} form still means a set of one, attributed to the
+// request's source.
+func TestASingleCoverIsStillASetOfOne(t *testing.T) {
+	got := coverWants(coverRequest{SourceID: "mangadex", SeriesID: "a", URL: "https://a.invalid/a.jpg"})
+	if len(got) != 1 {
+		t.Fatalf("got %d wants, want 1", len(got))
+	}
+	if got[0].SourceID != "mangadex" || got[0].SeriesID != "a" {
+		t.Errorf("the single form lost something: %+v", got[0])
 	}
 }

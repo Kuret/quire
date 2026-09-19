@@ -51,6 +51,13 @@ type watchView struct {
 	SourceName string `json:"sourceName"`
 	Title      string `json:"title"`
 
+	// CoverURL is the cover the series was last listed with, or "" when Quire
+	// has never seen one. The watched list is drawn without fetching anything
+	// (see Watch.Title), so this is remembered rather than looked up — and a
+	// row whose cover was never seen is a blank tile and a readable row, not an
+	// error. See state/covers.go.
+	CoverURL string `json:"coverUrl,omitempty"`
+
 	// NewChapters is the badge count, and Badge is the same thing in the plain
 	// language PLAN §12.2 asks for: "3 new chapters". Both are sent so the UI
 	// never has to pluralise, and never has to decide what a number means.
@@ -90,6 +97,7 @@ func (s *Service) viewOf(w *state.Watch, override string) watchView {
 	v := watchView{
 		SourceID: w.SourceID, SeriesID: w.SeriesID,
 		Title:       w.Title,
+		CoverURL:    s.store.CoverURL(w.SourceID, w.SeriesID),
 		NewChapters: w.NewCount,
 	}
 	if src, ok := s.store.Get(w.SourceID); ok {
@@ -284,6 +292,84 @@ func (s *Service) unwatchSeries(out Sender, sourceID, seriesID string) error {
 		return s.sendError(out, "not_unwatched", plain(err))
 	}
 	return s.sendWatchList(out)
+}
+
+// NothingNewToDownload is what the user is told when the action under the badge
+// is asked for and there is nothing behind it.
+//
+// Said rather than silently ignored: a button that does nothing is
+// indistinguishable from a button that failed, and this is reachable honestly —
+// the row was tapped from a list drawn before a series detail cleared it.
+const NothingNewToDownload = "There are no new chapters to download — Quire has already caught up with this series."
+
+// downloadNewChapters queues exactly the chapters the last check found new.
+//
+// The ids come from the store, not from the message. The backend is what
+// decided those chapters were new and what put the number on the badge, so
+// taking the list from anywhere else would let the two disagree — see
+// appload.MessageDownloadNewChapters, and state.Watch.NewCount.
+//
+// The queueing itself is enqueueMany's, unchanged: same queue, same depth, same
+// reply about what fitted. A selection the user made by hand and a selection
+// the badge made for them are the same work once the rows are chosen, and a
+// second queueing path would be a second set of rules about the sixteen-deep
+// ceiling.
+func (s *Service) downloadNewChapters(ctx context.Context, out Sender, sourceID, seriesID string) error {
+	if sourceID == "" || seriesID == "" {
+		return s.sendError(out, "bad_request", "Quire needs a source and a series to download from.")
+	}
+	w := s.watchOf(sourceID, seriesID)
+	if w == nil {
+		return s.sendError(out, "not_found", "Quire isn’t watching that series, so it has nothing new for it.")
+	}
+	if len(w.NewIDs) == 0 {
+		return s.sendError(out, "nothing_new", NothingNewToDownload)
+	}
+	s.log.Info("downloading a watched series' new chapters",
+		"source", sourceID, "series", seriesID, "chapters", len(w.NewIDs))
+	return s.enqueueMany(ctx, out, enqueueManyRequest{
+		SourceID: sourceID, SeriesID: seriesID,
+		// No grouping: these are chapter rows by definition — "new chapters" is
+		// a set the check assembled one chapter at a time, and there is no
+		// volume the user picked.
+		ChapterIDs: w.NewIDs,
+	})
+}
+
+// markSeenNow is PLAN §12.2's "I read it elsewhere": the badge goes, nothing is
+// downloaded and nothing is fetched.
+//
+// It marks exactly what the badge was counting, because that is what the store
+// holds — no chapter list is fetched to establish it, which is what makes this
+// work with the radio off and what makes it agree with the number the user
+// tapped.
+func (s *Service) markSeenNow(out Sender, sourceID, seriesID string) error {
+	if sourceID == "" || seriesID == "" {
+		return s.sendError(out, "bad_request", "Quire needs a source and a series to mark as seen.")
+	}
+	w, err := s.store.MarkNewSeen(sourceID, seriesID, s.now())
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			return s.sendError(out, "not_found", "Quire isn’t watching that series.")
+		}
+		return s.sendError(out, "not_marked", plain(err))
+	}
+	s.log.Info("marked a watched series as seen", "source", sourceID, "series", seriesID)
+	// The row first, so the badge it was tapped from clears immediately, then
+	// the list, which carries the summary the entry point draws. Both come from
+	// the store: see send1.
+	s.sendWatchUpdate(out, s.viewOf(w, ""))
+	return s.sendWatchList(out)
+}
+
+// watchOf reads one watch from the store, or nil.
+func (s *Service) watchOf(sourceID, seriesID string) *state.Watch {
+	for _, w := range s.store.Watches() {
+		if w.SourceID == sourceID && w.SeriesID == seriesID {
+			return w
+		}
+	}
+	return nil
 }
 
 // rememberServedChapters records the chapter list just sent to the UI, so that

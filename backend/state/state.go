@@ -61,10 +61,17 @@ type Store struct {
 	path string
 	reg  *theme.Registry
 
+	// coverPath is the cover URL cache, which is deliberately *not* part of the
+	// exported envelope. See covers.go.
+	coverPath string
+
 	mu       sync.RWMutex
 	sources  []*theme.Source
 	watched  []*Watch
 	settings Settings
+
+	// coverURLs is keyed by coverKey(sourceID, seriesID).
+	coverURLs map[string]coverEntry
 }
 
 // Open loads the store from dir, creating the directory if it is missing. A
@@ -84,7 +91,15 @@ func OpenWithLog(dir string, reg *theme.Registry, log *slog.Logger) (*Store, err
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	s := &Store{path: filepath.Join(dir, FileName), reg: reg}
+	s := &Store{
+		path:      filepath.Join(dir, FileName),
+		coverPath: filepath.Join(dir, CoverFileName),
+		reg:       reg,
+	}
+	// Before the store's own file is read, because a first run has no
+	// sources.json at all and returns early — and a first run after a
+	// re-install is still a device with covers already on disk.
+	s.loadCovers(log)
 
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -303,6 +318,20 @@ func (s *Store) Remove(id string) error {
 			// it. Leaving the watch behind would leave a row nothing can
 			// check and nothing can un-watch.
 			s.dropWatchesFor(id)
+			// The remembered cover URLs go too; see dropCoversFor. They live in
+			// their own file, so this is a second write, and only when there
+			// was something to forget.
+			//
+			// **Its error is deliberately dropped.** By this point the source is
+			// already out of s.sources, so returning here would save neither
+			// file and leave memory disagreeing with disk about whether the
+			// source exists — a far worse outcome than a stale cache. What
+			// survives a failure is a covers file naming a source that is gone,
+			// which nothing will ever look up (the lookups are by source id) and
+			// which the next cover write rewrites anyway.
+			if s.dropCoversFor(id) {
+				_ = s.saveCovers()
+			}
 			return s.save()
 		}
 	}

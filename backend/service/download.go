@@ -1229,11 +1229,23 @@ func splitToBudget(vol volumePlan, budget int64) ([]volumePlan, error) {
 		// needs its own. It is also what documentName turns into the name on
 		// the tablet, which is why it reads the way PLAN §6 M4 asks:
 		// "Vol 3 (part 1 of 2)".
-		part.Volume.Label = fmt.Sprintf("%s (part %d of %d)", vol.Label, i+1, len(groups))
-		part.Volume.Title = fmt.Sprintf("%s (part %d of %d)", vol.Title, i+1, len(groups))
+		part.Volume.Label = partLabel(vol.Label, i+1, len(groups))
+		part.Volume.Title = partLabel(vol.Title, i+1, len(groups))
 		parts = append(parts, part)
 	}
 	return parts, nil
+}
+
+// partLabel is how one part of a split volume names itself: "Vol 3 (part 1 of
+// 2)", as PLAN §6 M4 asks.
+//
+// It is one function rather than two format strings because the label is the
+// library key, and anything that wants to work back from a part to the volume
+// it came from has to undo exactly what was done here — see baseVolumeLabel.
+// Two copies of this format would be two copies that can drift apart, and the
+// symptom of the drift is a "Read" button opening the wrong document.
+func partLabel(base string, part, parts int) string {
+	return fmt.Sprintf("%s (part %d of %d)", base, part, parts)
 }
 
 // splitChapter cuts one over-budget chapter into runs of pages that fit.

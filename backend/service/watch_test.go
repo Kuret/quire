@@ -250,6 +250,7 @@ type watchRow struct {
 	SeriesID    string `json:"seriesId"`
 	SourceName  string `json:"sourceName"`
 	Title       string `json:"title"`
+	CoverURL    string `json:"coverUrl"`
 	NewChapters int    `json:"newChapters"`
 	Badge       string `json:"badge"`
 	State       string `json:"state"`

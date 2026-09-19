@@ -45,7 +45,23 @@ type Watch struct {
 	// source's current chapters are absent from Seen. It is stored rather than
 	// recomputed because the badge has to be right before any check has run in
 	// this session.
+	//
+	// It is always len(NewIDs) — the two are written together from one
+	// observation, never counted twice. A badge that says three over an action
+	// that downloads two is the failure this pairing exists to rule out.
 	NewCount int `json:"newCount,omitempty"`
+
+	// NewIDs are those chapters themselves, as the source's own chapter ids, in
+	// the order the source listed them.
+	//
+	// The **ids and not digests**, unlike Seen: a digest can answer "have I seen
+	// this?" and nothing else, and what the actions under the badge need is
+	// something to download. Seen is the set that grows without bound over a
+	// series' life and is worth compressing; this one is what appeared since the
+	// user last looked, which is a handful — and on the pathological source that
+	// reissues every URL at once it is still bounded by one series' chapter
+	// list, which the check has just held in memory in full anyway.
+	NewIDs []string `json:"newIds,omitempty"`
 
 	// CheckedAt is when a check last *completed*, successfully or not. It is
 	// what the per-source cooldown is measured from, so it has to be persisted:
@@ -115,7 +131,7 @@ func (s *Store) Watch(sourceID, seriesID, title string, seen []string, now time.
 	if seen != nil {
 		w.Seen = digests(seen)
 		w.SeenAt = now.UTC()
-		w.NewCount = 0
+		w.NewCount, w.NewIDs = 0, nil
 	}
 	s.sortWatches()
 	if err := s.save(); err != nil {
@@ -157,9 +173,41 @@ func (s *Store) MarkSeen(sourceID, seriesID string, chapterIDs []string, now tim
 	}
 	w.Seen = digests(chapterIDs)
 	w.SeenAt = now.UTC()
-	w.NewCount = 0
+	w.NewCount, w.NewIDs = 0, nil
 	w.Failure = ""
 	return s.save()
+}
+
+// MarkNewSeen is the same claim made with no chapter list to hand: the chapters
+// the last check called new have been dealt with, and nothing is new any more.
+//
+// It **merges** into Seen, where MarkSeen replaces it. That is not an
+// inconsistency: MarkSeen is given the series' current chapter list and can
+// therefore state the whole baseline, including which chapters have gone away.
+// This one is given nothing, so the only honest edit is to add what it does
+// know about — replacing the baseline with just the new ids would announce the
+// entire back catalogue as new on the very next check.
+//
+// Failure is deliberately left alone. The user saying they have read these
+// chapters is not evidence that the last check completed, and clearing it would
+// turn "Quire couldn't look" into "up to date" on no new information at all.
+//
+// It returns the updated watch so the caller can redraw the row from what was
+// stored rather than from what it hoped was stored.
+func (s *Store) MarkNewSeen(sourceID, seriesID string, now time.Time) (*Watch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := s.findWatch(sourceID, seriesID)
+	if w == nil {
+		return nil, fmt.Errorf("state: %q/%q is not watched: %w", sourceID, seriesID, ErrNotFound)
+	}
+	w.Seen = mergeDigests(w.Seen, w.NewIDs)
+	w.SeenAt = now.UTC()
+	w.NewCount, w.NewIDs = 0, nil
+	if err := s.save(); err != nil {
+		return nil, err
+	}
+	return copyWatch(w), nil
 }
 
 // RecordCheck stores the result of a successful check: how many of the current
@@ -181,10 +229,13 @@ func (s *Store) RecordCheck(sourceID, seriesID string, chapterIDs []string, now 
 	if w.SeenAt.IsZero() {
 		w.Seen = digests(chapterIDs)
 		w.SeenAt = now.UTC()
-		w.NewCount = 0
+		w.NewCount, w.NewIDs = 0, nil
 		return 0, s.save()
 	}
-	w.NewCount = countNew(w.Seen, chapterIDs)
+	// One observation, both fields. The count is the length of the list and is
+	// never arrived at separately — see NewCount.
+	w.NewIDs = newIDs(w.Seen, chapterIDs)
+	w.NewCount = len(w.NewIDs)
 	return w.NewCount, s.save()
 }
 
@@ -258,19 +309,28 @@ func ChapterDigest(chapterID string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:8])
 }
 
+// countNew is the size of that difference. It is defined as the length of the
+// list rather than as a second traversal, so the badge and the action under it
+// cannot disagree even in principle.
 func countNew(seen []string, chapterIDs []string) int {
+	return len(newIDs(seen, chapterIDs))
+}
+
+// newIDs is the chapters in the list that are not in the seen set, in the
+// source's own order.
+func newIDs(seen []string, chapterIDs []string) []string {
 	if len(chapterIDs) == 0 {
-		return 0
+		return nil
 	}
 	set := make(map[string]struct{}, len(seen))
 	for _, d := range seen {
 		set[d] = struct{}{}
 	}
-	// Counted over *distinct* chapters: a source that lists the same chapter
-	// twice — two scanlation groups under one entry, a duplicated row in a
-	// template — must not make the badge say two.
+	// Over *distinct* chapters: a source that lists the same chapter twice —
+	// two scanlation groups under one entry, a duplicated row in a template —
+	// must not make the badge say two, nor queue the same download twice.
 	counted := make(map[string]struct{}, len(chapterIDs))
-	n := 0
+	var out []string
 	for _, id := range chapterIDs {
 		if strings.TrimSpace(id) == "" {
 			continue
@@ -283,9 +343,37 @@ func countNew(seen []string, chapterIDs []string) int {
 			continue
 		}
 		counted[d] = struct{}{}
-		n++
+		out = append(out, id)
 	}
-	return n
+	return out
+}
+
+// mergeDigests adds chapter ids to an existing digest set, sorted and
+// de-duplicated, in the shape digests() produces.
+func mergeDigests(seen []string, chapterIDs []string) []string {
+	if len(chapterIDs) == 0 {
+		return seen
+	}
+	set := make(map[string]struct{}, len(seen)+len(chapterIDs))
+	out := make([]string, 0, len(seen)+len(chapterIDs))
+	add := func(d string) {
+		if _, ok := set[d]; ok {
+			return
+		}
+		set[d] = struct{}{}
+		out = append(out, d)
+	}
+	for _, d := range seen {
+		add(d)
+	}
+	for _, id := range chapterIDs {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		add(ChapterDigest(id))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // digests turns a chapter list into the stored, sorted, de-duplicated set.
@@ -366,5 +454,6 @@ func (s *Store) sortWatches() {
 func copyWatch(w *Watch) *Watch {
 	out := *w
 	out.Seen = append([]string(nil), w.Seen...)
+	out.NewIDs = append([]string(nil), w.NewIDs...)
 	return &out
 }

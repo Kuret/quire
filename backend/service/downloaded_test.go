@@ -32,6 +32,8 @@ type downloadedList struct {
 		SeriesID   string `json:"seriesId"`
 		Title      string `json:"title"`
 		Detail     string `json:"detail"`
+		CoverURL   string `json:"coverUrl"`
+		LatestUUID string `json:"latestUuid"`
 		Openable   bool   `json:"openable"`
 		Note       string `json:"note"`
 	} `json:"series"`

@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 )
 
@@ -42,6 +43,29 @@ func (s *Service) rememberCoverReferrer(sourceID, coverURL, referrer string) {
 	s.coverRefs[coverRefKey(sourceID, coverURL)] = referrer
 }
 
+// rememberCoverURLs records which series each cover URL belongs to, for the
+// screens that will never see this listing.
+//
+// It is called at exactly the points rememberCoverReferrer is, and for the same
+// underlying reason — this is the only moment anything knows the pairing — but
+// it answers a different question and outlives the session. The referrer memo
+// is "what page was this URL on", is needed for one fetch, and is in memory;
+// this is "which series is this a picture of", is needed by the Downloaded and
+// Watching screens days later, and is on disk (see state/covers.go).
+//
+// A failed write is logged and nothing else. The cost is a blank tile on a
+// screen that is otherwise complete, and refusing the user's search because a
+// cover cache could not be written would be the tail wagging the dog.
+func (s *Service) rememberCoverURLs(sourceID string, refs []state.CoverRef) {
+	if s.store == nil || len(refs) == 0 {
+		return
+	}
+	if err := s.store.RememberCovers(sourceID, refs); err != nil {
+		s.log.Warn("could not remember which series a cover belongs to",
+			"source", sourceID, "err", err)
+	}
+}
+
 func (s *Service) coverReferrerFor(sourceID, coverURL string) string {
 	s.coverRefMu.Lock()
 	defer s.coverRefMu.Unlock()
@@ -54,10 +78,49 @@ func coverRefKey(sourceID, coverURL string) string {
 	return sourceID + "\x00" + coverURL
 }
 
-// coverWant is one tile the frontend has on screen.
+// coverWant is one tile the frontend has on screen, and the source it belongs
+// to: a visible set can span sources (the Downloaded and Watching screens), so
+// the source is a property of the tile rather than of the batch.
 type coverWant struct {
+	SourceID string
 	SeriesID string
 	URL      string
+}
+
+// coverRequest is the RequestCover payload. It lives here rather than inline in
+// the message switch so that coverWants can be tested: which source each tile
+// is attributed to is exactly the kind of decision PLAN §2 wants out of a place
+// nothing can reach.
+type coverRequest struct {
+	SourceID string `json:"sourceId"`
+	SeriesID string `json:"seriesId"`
+	URL      string `json:"url"`
+	Covers   []struct {
+		SourceID string `json:"sourceId"`
+		SeriesID string `json:"seriesId"`
+		URL      string `json:"url"`
+	} `json:"covers"`
+}
+
+// coverWants turns one request into the visible set.
+//
+// An entry may name its own source and falls back to the request's when it does
+// not. That is what lets a single message carry a screen whose rows come from
+// several sources — which runCoverBatch requires, because it cancels everything
+// before it on the grounds that what it was handed is the *whole* visible set.
+func coverWants(req coverRequest) []coverWant {
+	want := make([]coverWant, 0, len(req.Covers)+1)
+	for _, c := range req.Covers {
+		src := c.SourceID
+		if src == "" {
+			src = req.SourceID
+		}
+		want = append(want, coverWant{SourceID: src, SeriesID: c.SeriesID, URL: c.URL})
+	}
+	if len(want) == 0 && req.SeriesID != "" {
+		want = append(want, coverWant{SourceID: req.SourceID, SeriesID: req.SeriesID, URL: req.URL})
+	}
+	return want
 }
 
 // runCoverBatch fetches the covers for the tiles now on screen and abandons the
@@ -69,7 +132,7 @@ type coverWant struct {
 // standing in front of the covers that *are* on screen. The new batch is the
 // complete visible set, so cancelling everything before it loses nothing: a
 // cover that survives the turn is in this batch too, and by then it is on disk.
-func (s *Service) runCoverBatch(ctx context.Context, out Sender, sourceID string, want []coverWant) {
+func (s *Service) runCoverBatch(ctx context.Context, out Sender, want []coverWant) {
 	if s.covers == nil {
 		return
 	}
@@ -86,10 +149,10 @@ func (s *Service) runCoverBatch(ctx context.Context, out Sender, sourceID string
 		return
 	}
 	for _, w := range want {
-		if w.SeriesID == "" || w.URL == "" {
+		if w.SourceID == "" || w.SeriesID == "" || w.URL == "" {
 			continue
 		}
-		s.goBackground(batchCtx, func(ctx context.Context) { s.runCover(ctx, out, sourceID, w.SeriesID, w.URL) })
+		s.goBackground(batchCtx, func(ctx context.Context) { s.runCover(ctx, out, w.SourceID, w.SeriesID, w.URL) })
 	}
 }
 
