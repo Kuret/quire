@@ -141,3 +141,89 @@ func TestConfirmSelfHostedViaProxyNeedsTheProxy(t *testing.T) {
 		t.Errorf("proxy = %q, want the refused change rolled back", still.Proxy)
 	}
 }
+
+// TestClearProxyAndRevokeTakesBothWithIt: a ViaProxy confirmation stands on
+// the proxy, so clearing the proxy has to take the confirmation with it in the
+// same call, and the result has to be one theme.Source.validate() accepts on
+// its own — which a reload proves, the way it does for every other confirmed
+// shape in this package.
+func TestClearProxyAndRevokeTakesBothWithIt(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Zima", "http://zima.example:8084"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetProxy(added.ID, "http://localhost:1055"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmSelfHostedViaProxy(added.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ClearProxyAndRevoke(added.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(added.ID)
+	if got.Proxy != "" {
+		t.Errorf("proxy after ClearProxyAndRevoke = %q, want empty", got.Proxy)
+	}
+	if got.SelfHosted != nil {
+		t.Errorf("SelfHosted after ClearProxyAndRevoke = %+v, want revoked", got.SelfHosted)
+	}
+
+	// Surviving a reload is what proves validate() accepts the shape that was
+	// written, not just that this process's in-memory copy looks right.
+	again, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatalf("a cleared proxy did not survive a reload: %v", err)
+	}
+	reloaded, _ := again.Get(added.ID)
+	if reloaded.Proxy != "" || reloaded.SelfHosted != nil {
+		t.Fatalf("after reload: proxy=%q selfHosted=%+v", reloaded.Proxy, reloaded.SelfHosted)
+	}
+}
+
+// TestClearProxyAndRevokeLeavesAnAddressConfirmationAlone: a source confirmed
+// by a resolved address does not lose that confirmation just because it also
+// happened to carry a proxy — its evidence is the address, not the proxy.
+func TestClearProxyAndRevokeLeavesAnAddressConfirmationAlone(t *testing.T) {
+	s, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Shelfmark", "http://shelfmark.internal.invalid:8084"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetProxy(added.ID, "http://localhost:1055"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmSelfHosted(added.ID, "100.100.0.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ClearProxyAndRevoke(added.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(added.ID)
+	if got.Proxy != "" {
+		t.Errorf("proxy after ClearProxyAndRevoke = %q, want empty", got.Proxy)
+	}
+	if got.SelfHosted == nil || got.SelfHosted.ConfirmedAddr != "100.100.0.1" {
+		t.Fatalf("an address confirmation was disturbed by clearing the proxy: %+v", got.SelfHosted)
+	}
+}
+
+func TestClearProxyAndRevokeOnAMissingSource(t *testing.T) {
+	s, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearProxyAndRevoke("nope"); !errors.Is(err, state.ErrNotFound) {
+		t.Errorf("ClearProxyAndRevoke on an unknown source = %v, want ErrNotFound", err)
+	}
+}

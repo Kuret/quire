@@ -440,6 +440,41 @@ func (s *Store) RevokeSelfHosted(id string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// ClearProxyAndRevoke clears a source's proxy and, if the source's self-hosted
+// confirmation stands on that proxy (SelfHosted.ViaProxy), revokes the
+// confirmation in the same locked operation.
+//
+// The two edits have to land together: a ViaProxy confirmation with no proxy
+// beneath it is exactly what theme.Source.validate() refuses, so doing this as
+// a clear then a separate revoke — two calls, each taking and releasing the
+// lock — would let another goroutine observe, or the store persist, the
+// in-between shape where the confirmation is orphaned. See SetProxy and
+// ConfirmSelfHostedViaProxy for the two assertions this reconciles.
+//
+// A source confirmed by address (ConfirmedAddr set, ViaProxy false) is left
+// alone: its evidence does not depend on the proxy being present.
+func (s *Store) ClearProxyAndRevoke(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			wasProxy := src.Proxy
+			wasSelfHosted := src.SelfHosted
+			src.Proxy = ""
+			if src.SelfHosted != nil && src.SelfHosted.ViaProxy {
+				src.SelfHosted = nil
+			}
+			if err := s.reg.Validate(src); err != nil {
+				src.Proxy = wasProxy
+				src.SelfHosted = wasSelfHosted
+				return fmt.Errorf("state: %w", err)
+			}
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // SetProbe records a new probe result against a source (PLAN §6 M7 re-probes an
 // existing source, and the UI shows the last result per source).
 func (s *Store) SetProbe(id string, r *theme.ProbeResult) error {
