@@ -47,6 +47,13 @@ type Request struct {
 	// able to check, not something to take a theme's word for.
 	Kind fetch.Kind
 
+	// Slow records that the caller asked for the long-timeout path
+	// (fetch.Client.GetSlow or GetFileRetrieval). It is recorded because the
+	// two calls that need it — a release search the server spends minutes on,
+	// and the transfer of a whole book — fail on a real instance without it,
+	// and "which client did this go through?" is otherwise invisible offline.
+	Slow bool
+
 	// Referrer is the fetch.Referrer the caller passed, zero when it passed
 	// none. It is recorded rather than flattened to a string because "no
 	// Referer header at all" and "an empty Referer" are different requests,
@@ -142,6 +149,25 @@ func (f *Fetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl stri
 // given. It is the call the download queue makes for a page image.
 func (f *Fetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
 	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil, from)
+}
+
+// GetSlow mirrors fetch.Client.GetSlow: the same routes, recorded as a slow
+// request so a test can assert that a call which really does take the server
+// minutes asked for the longer bound. It is not on theme.Fetcher — only
+// shelfmark's release search needs it, and it reaches for it by asserting a
+// one-method interface — but the fixture fetcher answers it so that theme can
+// be tested offline like every other.
+func (f *Fetcher) GetSlow(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: http.MethodGet, URL: rawurl, Kind: fetch.KindDiscovery, Slow: true})
+}
+
+// GetFileRetrieval mirrors fetch.Client.GetFileRetrieval: the fetch of one
+// finished document, with the long timeout and the file-sized response cap.
+// Recorded as Slow for the same reason — "did this go through the path that
+// can actually carry a book?" is a claim a test should be able to check.
+func (f *Fetcher) GetFileRetrieval(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: http.MethodGet, URL: rawurl, Kind: fetch.KindRetrieval,
+		Referrer: from, Slow: true})
 }
 
 // PostForm implements theme.Fetcher.

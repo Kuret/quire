@@ -50,6 +50,53 @@ const ProjectURL = "https://github.com/rickl/quire"
 // memory and no swap; a body larger than this is refused rather than buffered.
 const DefaultMaxResponseBytes int64 = 8 << 20
 
+// FileRetrievalMaxResponseBytes is the cap for the one request that fetches a
+// *finished document* — a theme.FileTheme's epub or pdf (GetFileRetrieval).
+//
+// 90,000,000, which is deliberately the same number as library.UploadBudgetBytes.
+// It is repeated rather than imported because fetch imports nothing of Quire's
+// and must not start with the library; service.TestTheFileRetrievalCapIsTheUploadBudget
+// holds the two to each other so they cannot drift.
+//
+// Three facts decide it, and none of them is "books are big":
+//
+//   - Quire **already** buffers a body of this size on this device. library.Upload
+//     builds the whole multipart body in a bytes.Buffer, and says why: a streamed
+//     body cannot be retried, and net/http would buffer it anyway once a
+//     Content-Length is needed. So a 90 MB download introduces no memory risk
+//     that uploading a manga volume has not carried since M5.
+//   - Anything larger cannot reach the device at all. library.MaxUploadBytes is a
+//     measured 100 MB hard limit, past which xochitl resets the connection
+//     *mid-upload*. A cap above the budget would only buy a longer download that
+//     is certain to fail at the end.
+//   - DefaultMaxResponseBytes stays 8 MiB for everything else — page images,
+//     HTML, JSON — where it is exactly right, and the 8 MiB default is not
+//     usually wrong for books either: the releases in the 2026-09-20 capture run
+//     0.2–2.2 MB, so ordinary epubs fit today. **Scanned PDFs are the exposure**,
+//     and they are the reason this exists.
+const FileRetrievalMaxResponseBytes int64 = 90_000_000
+
+// SlowRequestTimeout is the whole-request bound for a call a server is expected
+// to spend minutes on (GetSlow).
+//
+// Six minutes. The ordinary bound is 60 seconds, which is right for a page or a
+// JSON fragment and wrong for a request whose server is *working*: shelfmark's
+// /api/releases asks each of its sources in turn, was measured at 36 seconds
+// against an instance searching one source (2026-09-20), and the instance's own
+// `release_search_timeout` is 300 seconds. Anything under 300s therefore fires
+// while the far end is still legitimately working, and the user is shown a
+// failure for a search that would have succeeded.
+//
+// So: 300s, the server's own budget, plus the same 60s of margin an ordinary
+// request gets for connecting and transferring. It is a backstop rather than a
+// schedule — the caller's context governs, and a theme that waits across several
+// such calls bounds the whole wait itself (shelfmark's retrieveTimeout is 15
+// minutes).
+const SlowRequestTimeout = 6 * time.Minute
+
+// DefaultRequestTimeout is the whole-request bound for everything else.
+const DefaultRequestTimeout = 60 * time.Second
+
 // DefaultMaxAttempts is the total number of tries for one request, including
 // the first. Only 429 and 5xx are retried; a 404 is an answer, not a failure.
 const DefaultMaxAttempts = 3
@@ -162,7 +209,14 @@ type Options struct {
 	// DefaultCaps so a caller cannot widen the floor.
 	Caps Caps
 
-	// MaxResponseBytes overrides DefaultMaxResponseBytes downwards only.
+	// MaxResponseBytes overrides DefaultMaxResponseBytes **downwards only**.
+	//
+	// That constraint is deliberate and stays: a configuration value that could
+	// widen the memory ceiling on a 2 GB device is one a bad config file could
+	// use. The one request that legitimately needs a larger body asks for it by
+	// calling a differently named method — see GetFileRetrieval — so raising the
+	// cap is visible at the call site and in a diff, rather than a number
+	// somewhere in a struct literal.
 	MaxResponseBytes int64
 
 	// TotalByteBudget, when positive, is a hard ceiling on all bytes this
@@ -212,7 +266,16 @@ type Options struct {
 
 // Client is a polite, guarded HTTP client shared by every theme.
 type Client struct {
-	hc         *http.Client
+	hc *http.Client
+
+	// slowHC is hc with a longer whole-request bound, over the *same*
+	// transport — so it shares the connection pool, the per-host connection cap
+	// and every other setting. It is a second http.Client only because
+	// http.Client.Timeout is per client and cannot be raised per request: a
+	// context deadline can shorten it but never lengthen it. Nothing else about
+	// a slow request differs, and it reaches it only through GetSlow.
+	slowHC *http.Client
+
 	lim        *Limiter
 	guard      *Guard
 	robots     *RobotsCache
@@ -272,21 +335,36 @@ func NewClient(opts Options) *Client {
 	}
 
 	transport := opts.Transport
+	slowTransport := opts.Transport
 	if transport == nil {
-		transport = defaultTransport()
+		transport = defaultTransport(defaultResponseHeaderTimeout)
+		// A slow request needs its own transport, not only its own client. The
+		// default ResponseHeaderTimeout is 30 seconds and it measures exactly the
+		// wait this is about: /api/releases spends its 36 seconds (2026-09-20)
+		// *before* sending a header, because the server is searching. Raising
+		// http.Client.Timeout alone would have left that 30s cut-off in place and
+		// the fix would have been a comment.
+		slowTransport = defaultTransport(SlowRequestTimeout)
+	}
+	// Every redirect hop is re-guarded. A site that 302s to 127.0.0.1 or off its
+	// own registrable domain is stopped here, not after the fact. Both clients
+	// share it: a slow request is not a less guarded one.
+	checkRedirect := func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 8 {
+			return errors.New("too many redirects")
+		}
+		pol, _ := req.Context().Value(policyKey{}).(*Policy)
+		return guard.CheckURL(req.Context(), req.URL, pol)
 	}
 	c.hc = &http.Client{
-		Transport: transport,
-		Timeout:   60 * time.Second,
-		// Every redirect hop is re-guarded. A site that 302s to 127.0.0.1 or
-		// off its own registrable domain is stopped here, not after the fact.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 8 {
-				return errors.New("too many redirects")
-			}
-			pol, _ := req.Context().Value(policyKey{}).(*Policy)
-			return guard.CheckURL(req.Context(), req.URL, pol)
-		},
+		Transport:     transport,
+		Timeout:       DefaultRequestTimeout,
+		CheckRedirect: checkRedirect,
+	}
+	c.slowHC = &http.Client{
+		Transport:     slowTransport,
+		Timeout:       SlowRequestTimeout,
+		CheckRedirect: checkRedirect,
 	}
 	c.consultRobots.Store(opts.ConsultRobots)
 	c.robots = NewRobotsCache(c)
@@ -304,13 +382,18 @@ func (c *Client) SetConsultRobots(on bool) { c.consultRobots.Store(on) }
 // ConsultRobots reports whether robots.txt is currently consulted.
 func (c *Client) ConsultRobots() bool { return c.consultRobots.Load() }
 
-func defaultTransport() *http.Transport {
+// defaultResponseHeaderTimeout is how long an ordinary request waits for the
+// first byte of a response. A page that has not begun answering in half a
+// minute is a page that is not coming.
+const defaultResponseHeaderTimeout = 30 * time.Second
+
+func defaultTransport(responseHeader time.Duration) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	// The concurrency caps are enforced by the Limiter, but keeping the pool
 	// small stops a burst of goroutines holding sockets open on the device.
 	t.MaxIdleConnsPerHost = 2
 	t.MaxConnsPerHost = int(DefaultCaps.HostConcurrency)
-	t.ResponseHeaderTimeout = 30 * time.Second
+	t.ResponseHeaderTimeout = responseHeader
 	return t
 }
 
@@ -339,7 +422,7 @@ func (c *Client) Get(ctx context.Context, p *Policy, rawurl string) (*Response, 
 // from the URL being fetched. A Referer appears only because a caller had a
 // real page to name and said so.
 func (c *Client) GetFrom(ctx context.Context, p *Policy, rawurl string, from Referrer) (*Response, error) {
-	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, from.header())
+	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, from.header(), requestOptions{})
 }
 
 // GetRetrieval performs a GET for one thing the user explicitly asked for: a
@@ -361,7 +444,51 @@ func (c *Client) GetRetrieval(ctx context.Context, p *Policy, rawurl string) (*R
 //
 // A zero Referrer sends no header.
 func (c *Client) GetRetrievalFrom(ctx context.Context, p *Policy, rawurl string, from Referrer) (*Response, error) {
-	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, from.header())
+	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, from.header(), requestOptions{})
+}
+
+// GetSlow is Get for a request the server is expected to spend minutes on.
+//
+// Everything Get does, this does: the limiter, the per-host delay, robots (it is
+// discovery), the honest User-Agent, Retry-After, backoff, the size cap, byte
+// accounting and the SSRF guard on every hop. **The only difference is how long
+// Quire is prepared to wait** — SlowRequestTimeout instead of
+// DefaultRequestTimeout, and the matching wait for the first response byte,
+// which is the half that actually bit: a server that is searching sends no
+// header until it has finished.
+//
+// It exists for one measured case. shelfmark's /api/releases asks each of the
+// instance's sources in turn; it was measured at 36 seconds against an instance
+// searching one source, and the instance's own budget for that search is 300
+// seconds (2026-09-20). Under the ordinary bound that request dies at 30
+// seconds, in the middle of adding a source or starting a download, with nothing
+// useful to say.
+//
+// A caller should reach for it only where the wait is the *server working*, and
+// should say so at the call site. It is not a way to be patient with a site that
+// is simply slow: that is what the retry and the honest failure are for.
+func (c *Client) GetSlow(ctx context.Context, p *Policy, rawurl string) (*Response, error) {
+	return c.do(ctx, p, KindDiscovery, http.MethodGet, rawurl, nil, nil, requestOptions{slow: true})
+}
+
+// GetFileRetrieval fetches one *finished document* the user chose — a
+// theme.FileTheme's epub or pdf.
+//
+// It is GetRetrievalFrom with two deliberate widenings and nothing else: the
+// long timeout (a book is tens of megabytes over somebody's home network), and
+// FileRetrievalMaxResponseBytes instead of the 8 MiB default. Every other
+// invariant is identical, which is the whole reason theme.FileTheme hands back a
+// URL instead of bytes — the SSRF guard, the source's allowedHosts, the rate
+// limit, the honest User-Agent and the byte budget all apply to the transfer
+// exactly as they do to a page image.
+//
+// The cap is raised *here*, by name, rather than through Options.MaxResponseBytes,
+// because that field is documented downwards-only so no configuration can widen
+// the memory ceiling on a 2 GB device. This is the one exception, and it is
+// visible in a diff.
+func (c *Client) GetFileRetrieval(ctx context.Context, p *Policy, rawurl string, from Referrer) (*Response, error) {
+	return c.do(ctx, p, KindRetrieval, http.MethodGet, rawurl, nil, from.header(),
+		requestOptions{slow: true, maxBody: FileRetrievalMaxResponseBytes})
 }
 
 // PostForm performs a guarded POST of an application/x-www-form-urlencoded
@@ -377,7 +504,7 @@ func (c *Client) PostForm(ctx context.Context, p *Policy, rawurl string, form ur
 	// Quire working out what exists. There is deliberately no retrieval POST —
 	// nothing the user asks for by name is fetched with one, so the looser
 	// reading has no caller and is not offered.
-	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h)
+	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h, requestOptions{})
 }
 
 // PostJSON performs a guarded POST of an application/json body.
@@ -397,12 +524,33 @@ func (c *Client) PostJSON(ctx context.Context, p *Policy, rawurl string, body []
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
-	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h)
+	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h, requestOptions{})
 }
 
 type policyKey struct{}
 
-func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl string, body []byte, hdr http.Header) (*Response, error) {
+// requestOptions are the per-request deviations from the client's defaults.
+//
+// There are exactly two, both of them wider than the default, and both reachable
+// only from a method named after the one job that needs them — GetSlow and
+// GetFileRetrieval. A struct rather than two more parameters so that a future
+// third one does not re-open every call site, and unexported so that nothing
+// outside this package can assemble one.
+type requestOptions struct {
+	// slow sends the request on the long-timeout client. See SlowRequestTimeout.
+	slow bool
+
+	// maxBody, when positive, replaces the response cap for this request.
+	//
+	// It *replaces* rather than narrows, and that is the point: Options.
+	// MaxResponseBytes is downwards-only precisely so no configuration can widen
+	// the ceiling, and this is the deliberate, named exception. A client whose
+	// cap was lowered for some other reason still serves a file retrieval at the
+	// file cap — the alternative is a knob that silently disables a feature.
+	maxBody int64
+}
+
+func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl string, body []byte, hdr http.Header, ro requestOptions) (*Response, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %w: %v", ErrInvalidURL, err)
@@ -459,7 +607,7 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 		if err != nil {
 			return nil, err
 		}
-		resp, err := c.attempt(ctx, p, method, u, body, hdr)
+		resp, err := c.attempt(ctx, p, method, u, body, hdr, ro)
 		release()
 
 		if err != nil {
@@ -487,7 +635,7 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 	return last, nil
 }
 
-func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.URL, body []byte, hdr http.Header) (*Response, error) {
+func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.URL, body []byte, hdr http.Header, ro requestOptions) (*Response, error) {
 	ctx = context.WithValue(ctx, policyKey{}, p)
 	var rdr io.Reader
 	if body != nil {
@@ -508,7 +656,16 @@ func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.U
 		req.ContentLength = int64(len(body))
 	}
 
-	hres, err := c.hc.Do(req)
+	hc := c.hc
+	if ro.slow {
+		hc = c.slowHC
+	}
+	maxBody := c.maxBody
+	if ro.maxBody > 0 {
+		maxBody = ro.maxBody
+	}
+
+	hres, err := hc.Do(req)
 	if err != nil {
 		// Unwrap the guard's own errors so a redirect rejection is reported as
 		// a blocked address rather than as a generic url.Error.
@@ -520,21 +677,21 @@ func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.U
 	}
 	defer hres.Body.Close()
 
-	if hres.ContentLength > c.maxBody {
-		return nil, fmt.Errorf("fetch: %s: %w (declared %d > %d)", u.Redacted(), ErrTooLarge, hres.ContentLength, c.maxBody)
+	if hres.ContentLength > maxBody {
+		return nil, fmt.Errorf("fetch: %s: %w (declared %d > %d)", u.Redacted(), ErrTooLarge, hres.ContentLength, maxBody)
 	}
 	if c.budget > 0 && c.totalBytes.Load() >= c.budget {
 		return nil, fmt.Errorf("fetch: %w", ErrBudgetExhausted)
 	}
 
 	// Read one byte past the cap so an undeclared oversized body is caught.
-	buf, err := io.ReadAll(io.LimitReader(hres.Body, c.maxBody+1))
+	buf, err := io.ReadAll(io.LimitReader(hres.Body, maxBody+1))
 	c.totalBytes.Add(int64(len(buf)))
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %s: read body: %w", u.Redacted(), err)
 	}
-	if int64(len(buf)) > c.maxBody {
-		return nil, fmt.Errorf("fetch: %s: %w (> %d)", u.Redacted(), ErrTooLarge, c.maxBody)
+	if int64(len(buf)) > maxBody {
+		return nil, fmt.Errorf("fetch: %s: %w (> %d)", u.Redacted(), ErrTooLarge, maxBody)
 	}
 
 	final := hres.Request.URL

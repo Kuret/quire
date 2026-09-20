@@ -333,4 +333,8 @@ var (
 	_ theme.Theme               = (*Theme)(nil)
 	_ theme.FileTheme           = (*Theme)(nil)
 	_ theme.DiscoveryClassifier = (*Theme)(nil)
+	// Confirm is the strong check PLAN §7.5 stage 5 runs before it believes the
+	// fingerprint (2026-09-20). Asserted here so that renaming it would break
+	// the build rather than silently leave the instance unverified.
+	_ theme.Confirmer = (*Theme)(nil)
 )

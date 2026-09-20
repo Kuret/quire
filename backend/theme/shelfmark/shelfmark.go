@@ -53,6 +53,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
 )
@@ -589,16 +590,64 @@ func (t *Theme) ReleaseList(ctx context.Context, s *theme.Source, id string) (*R
 }
 
 // releases fetches /api/releases for a book.
+//
+// **This is the slow one, and it asks for the slow client.** The instance asks
+// each of its sources in turn before answering: measured at 36 seconds against
+// an instance searching one source, and its own `release_search_timeout` is 300
+// seconds (2026-09-20). The client's ordinary bound is 60 seconds overall and 30
+// seconds to the first response byte — and 30 is the one that matters, because a
+// server that is searching sends no header until it has finished. So this call
+// would have died at 30 seconds on a real instance, in the middle of adding a
+// source or starting a download. See fetch.Client.GetSlow.
 func (t *Theme) releases(ctx context.Context, s *theme.Source, ref bookRef) (*releasesResponse, error) {
 	v := url.Values{}
 	v.Set("provider", ref.Provider)
 	v.Set("book_id", ref.ProviderID)
 
 	var res releasesResponse
-	if err := t.getJSON(ctx, s, t.endpoint(s, pathReleases, v), &res); err != nil {
+	if err := t.getJSONSlow(ctx, s, t.endpoint(s, pathReleases, v), &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// slowGetter is the one capability the release search needs that theme.Fetcher
+// does not offer. fetch.Client implements it, and so does themetest.Fetcher.
+//
+// It is asserted rather than added to theme.Fetcher for the reason jsonPoster
+// gives: that interface is implemented by the real client and half a dozen test
+// doubles, and only this theme has a call a server spends minutes on.
+type slowGetter interface {
+	GetSlow(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error)
+}
+
+// getJSONSlow is getJSON with the longer bound, falling back to the ordinary
+// request for a fetcher that has none.
+//
+// The fallback is deliberate and is not a safety relaxation: it is exactly the
+// behaviour this call had until 2026-09-20, so the worst it can do is time out
+// where it used to. It is needed because theme.DiscoveryFetcher — what
+// DiscoveryOnly wraps this theme's fetcher in for PLAN §12.2's watch check —
+// exposes only theme.Fetcher's methods. Refusing there would break the watch
+// check on a source that works, which is a real failure traded for a
+// hypothetical one.
+func (t *Theme) getJSONSlow(ctx context.Context, s *theme.Source, rawurl string, out errorCarrier) error {
+	g, ok := t.f.(slowGetter)
+	if !ok {
+		return t.getJSON(ctx, s, rawurl, out)
+	}
+	p, err := s.Policy()
+	if err != nil {
+		return err
+	}
+	resp, err := g.GetSlow(ctx, p, rawurl)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("shelfmark: %s: HTTP %d", rawurl, resp.StatusCode)
+	}
+	return decodeInto(rawurl, resp.Body, out)
 }
 
 // Pages implements theme.Theme, and this theme has none.

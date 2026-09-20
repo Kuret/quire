@@ -176,7 +176,7 @@ func (rc *RobotsCache) fetch(ctx context.Context, p *Policy, rawurl string) (*ro
 		// Discovery, and isRobotsURL stops the recursion. Fetching robots.txt
 		// is Quire finding out what it may crawl, which is the definition of
 		// the discovery kind even though this particular URL is never gated.
-		resp, err := rc.client.do(ctx, p, KindDiscovery, "GET", rawurl, nil, nil)
+		resp, err := rc.client.do(ctx, p, KindDiscovery, "GET", rawurl, nil, nil, requestOptions{})
 		switch {
 		case err != nil:
 			// A guarded or malformed URL is not a transient fault; retrying it

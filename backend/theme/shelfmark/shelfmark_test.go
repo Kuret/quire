@@ -971,3 +971,91 @@ func TestTheDownloadAcknowledgementCarriesNoID(t *testing.T) {
 		t.Errorf("status = %q, want %q", ack.Status, "queued")
 	}
 }
+
+// --- how long Quire is prepared to wait ------------------------------------
+
+// The release search is the one call a Shelfmark instance spends minutes on:
+// it asks each of its sources in turn. Measured at 36 seconds against an
+// instance searching one source (2026-09-20), and its own
+// `release_search_timeout` is 300 seconds.
+//
+// The client's ordinary transport gives up after 30 seconds *waiting for the
+// first byte*, which is exactly the wait here — the server sends nothing while
+// it is searching. So this call has to ask for the long-timeout path, and the
+// fast ones must not: a source that is merely broken should fail in seconds,
+// not in six minutes.
+func TestOnlyTheReleaseSearchAsksForTheLongTimeout(t *testing.T) {
+	pending, complete := statusBodies(t, relSourceID)
+	fixtures := themetest.New(t, map[string]themetest.Route{
+		"GET /api/metadata/search":                     {File: "metadata-search-dune.json"},
+		"GET /api/metadata/book/openlibrary/OL893414W": {File: "metadata-book-dune.json"},
+		"GET /api/releases":                            {File: "releases-dune.json"},
+		"GET /api/config":                              {File: "config.json"},
+		"POST /api/releases/download":                  {Body: `{}`},
+	})
+	f := &pollingFetcher{Fetcher: fixtures, bodies: [][]byte{pending, complete}}
+	clock := &fakeClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+	th := shelfmark.NewWithClock(f, clock.Now, clock.Sleep)
+
+	ctx := context.Background()
+	if _, err := th.Search(ctx, source(), "dune", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.Series(ctx, source(), duneBookID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.Chapters(ctx, source(), duneBookID); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.Confirm(ctx, source()); err != nil {
+		t.Fatal(err)
+	}
+
+	slow := map[string]bool{}
+	for _, c := range fixtures.Calls() {
+		u, err := url.Parse(c.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Slow {
+			slow[u.EscapedPath()] = true
+		} else if _, seen := slow[u.EscapedPath()]; !seen {
+			slow[u.EscapedPath()] = false
+		}
+	}
+	if !slow["/api/releases"] {
+		t.Error("the release search used the ordinary timeout; on a real instance it dies at 30 seconds")
+	}
+	for path, isSlow := range slow {
+		if path == "/api/releases" || !isSlow {
+			continue
+		}
+		t.Errorf("%s asked for the six-minute bound; only the call the server is working on should",
+			path)
+	}
+}
+
+// The documented fallback. PLAN §12.2's watch check runs this theme through
+// theme.DiscoveryFetcher, which exposes only theme.Fetcher's methods — so the
+// long-timeout path is not available there. The release search must still work:
+// refusing would break the watch check on a source that works perfectly, which
+// is a real failure traded for a hypothetical one.
+func TestTheReleaseSearchStillWorksWithoutTheSlowPath(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/releases": {File: "releases-dune.json"},
+	})
+	th := shelfmark.New(theme.DiscoveryFetcher(f))
+
+	chs, err := th.Chapters(context.Background(), source(), duneBookID)
+	if err != nil {
+		t.Fatalf("Chapters() = %v", err)
+	}
+	if len(chs) != 34 {
+		t.Errorf("got %d releases, want the 34 the capture keeps", len(chs))
+	}
+	for _, c := range f.Calls() {
+		if c.Slow {
+			t.Error("a fetcher with no slow path reported making a slow request")
+		}
+	}
+}
