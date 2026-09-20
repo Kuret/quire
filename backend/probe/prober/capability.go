@@ -313,7 +313,16 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		// download, before the source is judged on what remains: routinely
 		// empty across all three tried, not obviously broken.
 		allEmptyNoError := true
-		for _, s := range candidates {
+		loopStart := r.p.now()
+		for i, s := range candidates {
+			// The first candidate is always tried in full. Before each subsequent
+			// candidate, check the wall-clock budget: if it has elapsed, stop
+			// trying further candidates and fall through to the existing
+			// "none of the candidates had anything" handling.
+			if i > 0 && r.p.now().Sub(loopStart) >= capabilityFileBudget {
+				break
+			}
+
 			series, err := th.Series(ctx, src, s.ID)
 			switch {
 			case err != nil:

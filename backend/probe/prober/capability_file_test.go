@@ -3,12 +3,17 @@ package prober_test
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/probe"
+	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/shelfmark"
 	"github.com/rickl/quire/backend/theme/themetest"
@@ -89,6 +94,14 @@ func TestStageFiveAcceptsAShelfmarkInstance(t *testing.T) {
 	}
 }
 
+// The false negative reported against a real instance (2026-09-20), pinned
+// end to end. The device log for that instance showed the empty-query listing
+// answering HTTP 400 — Shelfmark's search requires a query, correctly — and
+// the package's old fallback query, "one", coming back with zero results from
+// that instance's metadata provider. The probe then had nothing to search
+// with at all. shelfmark.Theme.ProbeQuery fixes this by naming a query its own
+// backend actually answers; this test reproduces the exact request shape and
+// checks the source is accepted rather than refused.
 func TestStageFiveWorksAroundAListingThatRequiresAQuery(t *testing.T) {
 	routes := shelfmarkRoutes(t)
 	delete(routes, "GET /api/metadata/search")
@@ -198,22 +211,13 @@ func TestStageFiveRefusesAFileThemeWhoseReleaseHasNoAddress(t *testing.T) {
 	}
 }
 
-// A theme with no strong check is unaffected: eight of the nine themes drive
-// families of independently hosted sites with no endpoint that could identify
-// them, and refusing them for not answering a question nobody asked would
-// refuse every source Quire can already read.
-func TestAThemeWithNoStrongCheckIsStillAccepted(t *testing.T) {
-	f := themetest.New(t, map[string]themetest.Route{
-		"GET /":        {File: "home-unrecognised.html"},
-		"GET /p/1.jpg": imageRoute(),
-	})
-	res := runWithFetcher(t, f, stubTheme{id: "alpha", score: 90})
-
-	if res.Verdict != theme.VerdictOK || !res.Addable {
-		t.Fatalf("verdict = %q (%s), want an addable ok", res.Verdict, res.Detail)
-	}
-}
-
+// The false negative this file exists to fix (2026-09-20): a book service's
+// first search hit having no releases is routine, not a broken source. Stage
+// 5 must try more than one book before giving up, and — once it has tried up
+// to three and every one came back genuinely empty — offer to add the source
+// anyway, because the strong check already proved this is the real
+// application and release availability is a property of the books and of the
+// user's own configured indexers, not of the connection to the site.
 func TestStageFiveAddsAFileThemeInDegradedStateWhenNoBookHasReleases(t *testing.T) {
 	stubs := []theme.SeriesStub{
 		{ID: "/book/one", Title: "One"},
@@ -304,6 +308,22 @@ func TestStageFiveRefusesEvenWithEmptyReleasesWhenStrongCheckFails(t *testing.T)
 	}
 }
 
+// A theme with no strong check is unaffected: eight of the nine themes drive
+// families of independently hosted sites with no endpoint that could identify
+// them, and refusing them for not answering a question nobody asked would
+// refuse every source Quire can already read.
+func TestAThemeWithNoStrongCheckIsStillAccepted(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /":        {File: "home-unrecognised.html"},
+		"GET /p/1.jpg": imageRoute(),
+	})
+	res := runWithFetcher(t, f, stubTheme{id: "alpha", score: 90})
+
+	if res.Verdict != theme.VerdictOK || !res.Addable {
+		t.Fatalf("verdict = %q (%s), want an addable ok", res.Verdict, res.Detail)
+	}
+}
+
 // fileStub is a theme.FileTheme with nothing to offer: a book, and no releases
 // for it. It stands in for an instance whose sources were all unreachable.
 type fileStub struct {
@@ -380,3 +400,146 @@ type confirmingFileStub struct {
 }
 
 func (f confirmingFileStub) Confirm(context.Context, *theme.Source) error { return f.confirmErr }
+
+// The budget that stops a file-based probe from stacking up three 6-minute
+// timeouts is enforced: the first candidate is always tried, but after a
+// pathological delay (measured from the loop start), further candidates are
+// not attempted.
+func TestStageFiveStopsAfterBudgetWhenMultipleBooksAreEmpty(t *testing.T) {
+	stubs := []theme.SeriesStub{
+		{ID: "/book/one", Title: "One"},
+		{ID: "/book/two", Title: "Two"},
+		{ID: "/book/three", Title: "Three"},
+	}
+	stubWithTracking := &trackingFileStub{
+		fileStub: fileStub{id: "books", score: 90, stubs: stubs, chaptersByID: map[string][]theme.Chapter{
+			"/book/one":   nil,
+			"/book/two":   nil,
+			"/book/three": nil,
+		}},
+	}
+
+	// A fake clock that switches behavior when stageCapability's file-based
+	// candidate loop starts. We detect this by observing when the stub's
+	// Chapters method is called for the first time, then transition the clock
+	// to return advanced time (exceeding the budget) on subsequent calls.
+	baseTime := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	loopStarted := false
+	fakeClock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		if loopStarted {
+			// We're in the candidate loop. Return advanced time to trigger budget.
+			return baseTime.Add(100 * time.Second)
+		}
+		return baseTime
+	}
+
+	// Wrap the stub to detect when the loop starts.
+	wrappedStub := &loopDetectingFileStub{
+		delegate: stubWithTracking,
+		onFirstChapters: func() {
+			mu.Lock()
+			loopStarted = true
+			mu.Unlock()
+		},
+	}
+
+	// Use custom probe creation to inject the fake clock and custom theme.
+	f := themetest.New(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}})
+	reg := theme.NewRegistry()
+	reg.MustRegister(wrappedStub)
+	res, err := prober.New(prober.Options{
+		Fetcher:  f,
+		Registry: reg,
+		Guard:    &testAllowGuard{},
+		Now:      fakeClock,
+		NewID:    func() string { return "src-test" },
+	}).Run(context.Background(), "https://example.invalid", &testRecordUI{})
+	if err != nil {
+		t.Fatalf("probe returned an error: %v", err)
+	}
+
+	// The first candidate should have been tried (Chapters called for /book/one).
+	if !stubWithTracking.chapersCalled["/book/one"] {
+		t.Error("Chapters was not called for the first candidate (/book/one)")
+	}
+
+	// The third candidate should NOT have been tried (Chapters not called for /book/three)
+	// due to budget exhaustion.
+	if stubWithTracking.chapersCalled["/book/three"] {
+		t.Error("Chapters was called for the third candidate (/book/three), but budget should have stopped further attempts")
+	}
+
+	// The source should be offered in degraded state since all attempts were
+	// empty (fileEmpty=true) and no errors occurred.
+	if !res.Addable || res.Verdict != theme.VerdictPartial {
+		t.Errorf("verdict = %q, addable = %v; expected partial and addable due to empty books", res.Verdict, res.Addable)
+	}
+}
+
+// trackingFileStub wraps fileStub to track which book IDs had Chapters called.
+type trackingFileStub struct {
+	fileStub
+	chapersCalled map[string]bool
+}
+
+func (f *trackingFileStub) Chapters(ctx context.Context, src *theme.Source, id string) ([]theme.Chapter, error) {
+	if f.chapersCalled == nil {
+		f.chapersCalled = make(map[string]bool)
+	}
+	f.chapersCalled[id] = true
+	return f.fileStub.Chapters(ctx, src, id)
+}
+
+// testAllowGuard permits all addresses (for testing only).
+type testAllowGuard struct{}
+
+func (testAllowGuard) CheckURL(context.Context, *url.URL, *fetch.Policy) error { return nil }
+
+// testRecordUI collects progress without blocking on questions.
+type testRecordUI struct{}
+
+func (testRecordUI) Progress(prober.Progress) {}
+
+func (testRecordUI) Ask(context.Context, prober.Question) (prober.Answer, error) {
+	return prober.Answer{ID: "continue"}, nil
+}
+
+// loopDetectingFileStub wraps a file stub and detects when the candidate loop
+// in stageCapability begins (by observing the first Chapters call).
+type loopDetectingFileStub struct {
+	delegate        *trackingFileStub
+	onFirstChapters func()
+	once            sync.Once
+}
+
+func (l *loopDetectingFileStub) ID() string { return l.delegate.ID() }
+func (l *loopDetectingFileStub) Fingerprint(p *probe.Page) int {
+	return l.delegate.Fingerprint(p)
+}
+func (l *loopDetectingFileStub) AllowedHosts() []string { return l.delegate.AllowedHosts() }
+func (l *loopDetectingFileStub) SuggestedName() string  { return l.delegate.SuggestedName() }
+func (l *loopDetectingFileStub) ValidateOverrides(m map[string]interface{}) error {
+	return l.delegate.ValidateOverrides(m)
+}
+func (l *loopDetectingFileStub) OverrideKeys() []theme.OverrideDoc {
+	return l.delegate.OverrideKeys()
+}
+func (l *loopDetectingFileStub) Search(ctx context.Context, src *theme.Source, q string, n int) ([]theme.SeriesStub, error) {
+	return l.delegate.Search(ctx, src, q, n)
+}
+func (l *loopDetectingFileStub) Series(ctx context.Context, src *theme.Source, id string) (*theme.Series, error) {
+	return l.delegate.Series(ctx, src, id)
+}
+func (l *loopDetectingFileStub) Chapters(ctx context.Context, src *theme.Source, id string) ([]theme.Chapter, error) {
+	l.once.Do(l.onFirstChapters)
+	return l.delegate.Chapters(ctx, src, id)
+}
+func (l *loopDetectingFileStub) Pages(ctx context.Context, src *theme.Source, id string) ([]string, error) {
+	return l.delegate.Pages(ctx, src, id)
+}
+func (l *loopDetectingFileStub) Retrieve(ctx context.Context, src *theme.Source, id string, f func(string)) (string, string, error) {
+	return l.delegate.Retrieve(ctx, src, id, f)
+}

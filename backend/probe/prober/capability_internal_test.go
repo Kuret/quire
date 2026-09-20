@@ -187,6 +187,12 @@ func TestFileCapabilityIgnoresThePageSteps(t *testing.T) {
 	}
 }
 
+// addableEmptyReleases (Part B, 2026-09-20) is the predicate stageCapability's
+// candidate loop feeds: every book tried was genuinely empty, not broken. It
+// is asked directly for the same reason the tests above ask ok() and
+// addableDegraded() directly — the guard is only reachable from outside
+// through a specific, narrow combination of live outcomes, and unreachable is
+// exactly the state a guard rots in unnoticed.
 func TestAddableEmptyReleasesRequiresTheStrongCheck(t *testing.T) {
 	base := capability{
 		fileBased: true,
