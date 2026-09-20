@@ -225,11 +225,11 @@ func TestStageFiveAddsAFileThemeInDegradedStateWhenNoBookHasReleases(t *testing.
 		{ID: "/book/three", Title: "Three"},
 	}
 	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
-		fileStub{id: "books", score: 90, stubs: stubs, chaptersByID: map[string][]theme.Chapter{
+		confirmingFileStub{fileStub: fileStub{id: "books", score: 90, stubs: stubs, chaptersByID: map[string][]theme.Chapter{
 			"/book/one":   nil,
 			"/book/two":   nil,
 			"/book/three": nil,
-		}})
+		}}})
 
 	if !res.Addable || res.Draft == nil {
 		t.Fatalf("a confirmed instance with three empty books was refused instead of offered in degraded state: %s", res.Detail)
@@ -485,6 +485,12 @@ type trackingFileStub struct {
 	chapersCalled map[string]bool
 }
 
+// Confirm makes trackingFileStub a theme.Confirmer that always passes: this
+// test is about the candidate-loop budget, not about the strong check, and it
+// needs a genuine strongConfirmed=true for addableEmptyReleases to be
+// reachable at all (2026-09-20 precision fix — see confirmTheme).
+func (f *trackingFileStub) Confirm(context.Context, *theme.Source) error { return nil }
+
 func (f *trackingFileStub) Chapters(ctx context.Context, src *theme.Source, id string) ([]theme.Chapter, error) {
 	if f.chapersCalled == nil {
 		f.chapersCalled = make(map[string]bool)
@@ -542,4 +548,7 @@ func (l *loopDetectingFileStub) Pages(ctx context.Context, src *theme.Source, id
 }
 func (l *loopDetectingFileStub) Retrieve(ctx context.Context, src *theme.Source, id string, f func(string)) (string, string, error) {
 	return l.delegate.Retrieve(ctx, src, id, f)
+}
+func (l *loopDetectingFileStub) Confirm(ctx context.Context, src *theme.Source) error {
+	return l.delegate.Confirm(ctx, src)
 }

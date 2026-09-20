@@ -74,6 +74,17 @@ type capability struct {
 	// serialised: it describes the check, not the site.
 	fileBased bool
 
+	// strongConfirmed records whether theme.Confirmer's check actually *ran and
+	// passed* — not merely whether Confirm.OK is true, which is also true when
+	// the theme has no such check at all (see confirmTheme). Confirm.OK keeps
+	// meaning "nothing here refuses the site" for ok(), addableDegraded() and
+	// failure(); strongConfirmed is the narrower fact those cannot answer —
+	// "a request only the real application could have answered came back
+	// right" — which is what addableEmptyReleases and the empty-search
+	// allowance below both actually need: positive evidence strong enough to
+	// excuse a step that found nothing, not merely the absence of a failure.
+	strongConfirmed bool
+
 	// fileEmpty records that every book candidate stageCapability tried (up to
 	// three) came back with a genuinely empty release list — no error, just
 	// nothing to download — rather than that fetching one of them failed. See
@@ -147,14 +158,16 @@ func (c capability) addableDegraded() bool {
 // routine for a self-hosted instance with few or no indexers configured, and
 // it is a fact about those books, not about whether the source works.
 //
-// It requires exactly what addableDegraded requires of Confirm — the strong
-// check is not degradable, here either — plus fileBased and the recorded
-// fileEmpty, and is deliberately its own function rather than a relaxation of
+// It requires the strong check to have actually run and passed —
+// strongConfirmed, not merely Confirm.OK, which is also true when the theme
+// has no such check at all and so has offered no positive evidence to weigh
+// against three empty books — plus fileBased and the recorded fileEmpty, and
+// is deliberately its own function rather than a relaxation of
 // addableDegraded: that one is PLAN §7.5's specific allowance for a
 // page-based source missing only page extraction, and loosening it to also
 // mean this would make it stop saying what its name says.
 func (c capability) addableEmptyReleases() bool {
-	return c.fileBased && c.fileEmpty && c.Challenge == nil && c.Confirm.OK && c.Search.OK
+	return c.fileBased && c.fileEmpty && c.Challenge == nil && c.strongConfirmed && c.Search.OK
 }
 
 // failure names the first failing step, in plain language and as a sentence
@@ -271,7 +284,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	// here is weak evidence on its own; this is the request only the real
 	// application can answer. Everything below asks the site to behave like the
 	// theme, which is a question worth nothing until this one says yes.
-	cap.Confirm = r.confirmTheme(ctx, th, src)
+	cap.Confirm, cap.strongConfirmed = r.confirmTheme(ctx, th, src)
 	if !cap.Confirm.OK {
 		return cap
 	}
@@ -446,17 +459,22 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 // could identify them; for those the fingerprint plus the four behavioural steps
 // *is* the evidence, and inventing a failing step for "did not answer a question
 // nobody asked" would refuse every source Quire can already read.
-func (r *run) confirmTheme(ctx context.Context, th theme.Theme, src *theme.Source) stepResult {
+// The bool return is strongConfirmed: true exactly when a theme.Confirmer
+// existed and its check passed, false both when the theme has none (Confirm.OK
+// is still true there — see the doc above) and when the check ran but failed.
+// Callers that need "positive evidence the site is the application", rather
+// than merely "nothing here refuses the site", must use this, not Confirm.OK.
+func (r *run) confirmTheme(ctx context.Context, th theme.Theme, src *theme.Source) (stepResult, bool) {
 	c, ok := th.(theme.Confirmer)
 	if !ok {
-		return stepResult{OK: true}
+		return stepResult{OK: true}, false
 	}
 	if err := c.Confirm(ctx, src); err != nil {
 		// The theme's own sentence, trimmed the way every other step's is: it
 		// names which keys were missing, which is the actionable part.
-		return stepResult{Note: plainError(err)}
+		return stepResult{Note: plainError(err)}, false
 	}
-	return stepResult{OK: true}
+	return stepResult{OK: true}, true
 }
 
 // fileSteps is stage 5's last step for a theme.FileTheme: is there something

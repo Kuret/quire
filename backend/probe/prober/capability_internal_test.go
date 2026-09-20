@@ -195,10 +195,11 @@ func TestFileCapabilityIgnoresThePageSteps(t *testing.T) {
 // exactly the state a guard rots in unnoticed.
 func TestAddableEmptyReleasesRequiresTheStrongCheck(t *testing.T) {
 	base := capability{
-		fileBased: true,
-		fileEmpty: true,
-		Confirm:   stepResult{OK: true},
-		Search:    stepResult{OK: true, Count: 3},
+		fileBased:       true,
+		fileEmpty:       true,
+		Confirm:         stepResult{OK: true},
+		strongConfirmed: true,
+		Search:          stepResult{OK: true, Count: 3},
 	}
 	if !base.addableEmptyReleases() {
 		t.Error("a confirmed instance with three genuinely empty books was not offered in degraded state")
@@ -206,8 +207,19 @@ func TestAddableEmptyReleasesRequiresTheStrongCheck(t *testing.T) {
 
 	failedConfirm := base
 	failedConfirm.Confirm = stepResult{Note: "it is missing books_output_mode."}
+	failedConfirm.strongConfirmed = false
 	if failedConfirm.addableEmptyReleases() {
 		t.Error("addableEmptyReleases ignored a failed strong check")
+	}
+
+	// The precision bug this guards against: Confirm.OK is also true when the
+	// theme simply has no Confirmer at all (see confirmTheme), which is not
+	// positive evidence of anything. Gating on Confirm.OK instead of
+	// strongConfirmed would wrongly offer this case.
+	noStrongCheck := base
+	noStrongCheck.strongConfirmed = false
+	if noStrongCheck.addableEmptyReleases() {
+		t.Error("addableEmptyReleases fired for a theme with no strong check at all")
 	}
 
 	notEmpty := base
