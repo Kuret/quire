@@ -172,15 +172,16 @@ func TestDecliningTheOfferAddsNothing(t *testing.T) {
 	handle(t, svc, rec, appload.MessageProbeAnswer, `{"id":"cancel"}`)
 
 	var verdict struct {
-		Cancelled bool `json:"cancelled"`
-		Addable   bool `json:"addable"`
-		Detail    string
+		Verdict string `json:"verdict"`
+		Addable bool   `json:"addable"`
+		Detail  string `json:"detail"`
 	}
 	if err := json.Unmarshal(rec.wait(t, appload.MessageProbeVerdict), &verdict); err != nil {
 		t.Fatal(err)
 	}
-	if !verdict.Cancelled || verdict.Addable {
-		t.Errorf("verdict = %+v, want a cancelled probe with nothing to add", verdict)
+	// The refusal that was already in force stays in force, as itself.
+	if verdict.Verdict != theme.VerdictBlockedAddress || verdict.Addable {
+		t.Errorf("verdict = %+v, want the refusal it started as and nothing to add", verdict)
 	}
 	if len(store.List()) != 0 {
 		t.Fatal("a private address the user declined was added anyway")

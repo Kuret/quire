@@ -123,9 +123,12 @@ func TestPrivateAddressIsOfferedRatherThanRefused(t *testing.T) {
 		t.Fatalf("the question offers no field for a proxy: %+v", q.Input)
 	}
 
-	// Declining leaves the refusal standing, and nothing is addable.
-	if !res.Cancelled {
-		t.Errorf("declining did not stop the probe: %+v", res)
+	// Declining leaves the refusal standing *as itself*: the same verdict and
+	// the same sentence the probe ended with before the offer existed, so a
+	// user who simply mistyped still gets the wizard's "Edit the address".
+	if res.Verdict != theme.VerdictBlockedAddress {
+		t.Errorf("declining gave verdict %q, want the refusal that was already in force (%q)",
+			res.Verdict, theme.VerdictBlockedAddress)
 	}
 	if res.Addable || res.Draft != nil {
 		t.Fatalf("a declined offer produced an addable source: %+v", res)
@@ -141,7 +144,7 @@ func TestAnUnansweredOfferIsANo(t *testing.T) {
 		if id == "continue" {
 			continue
 		}
-		if !res.Cancelled || res.Addable {
+		if res.Verdict != theme.VerdictBlockedAddress || res.Addable {
 			t.Errorf("answer %q was taken as a yes: %+v", id, res)
 		}
 	}
@@ -295,5 +298,137 @@ func TestARedirectOffTheHostDropsWhatWasConfirmed(t *testing.T) {
 	}
 	if res.Draft.Proxy != "" {
 		t.Errorf("the proxy followed the redirect to another host: %q", res.Draft.Proxy)
+	}
+}
+
+// unresolvableGuard is the device, as measured on 2026-09-20: the host does not
+// resolve here and never will, because the name lives inside a mesh the kernel
+// has no route into. It relents once the confirmation is on the policy — which
+// for the real guard is the point at which it stops resolving the name at all
+// and hands it to the proxy.
+type unresolvableGuard struct {
+	calls int
+	// proxied records whether the policy carried a proxy when the guard finally
+	// said yes. Without one the real guard would still be trying to resolve.
+	proxied bool
+}
+
+func (g *unresolvableGuard) CheckURL(_ context.Context, u *url.URL, p *fetch.Policy) error {
+	g.calls++
+	if p != nil && p.SelfHostedHost == u.Hostname() && p.Proxy != nil {
+		g.proxied = true
+		return nil
+	}
+	return &fetch.GuardError{
+		URL:        u.Redacted(),
+		Reason:     `cannot resolve "example.invalid": no such host`,
+		Kind:       fetch.ErrInvalidURL,
+		Unresolved: true,
+	}
+}
+
+// TestALookupFailureIsOfferedToo. The refusal that actually happens on the
+// device is not "that address is private" but "that name does not resolve": the
+// source is a mesh name, the tablet's resolver is public DNS, and the userspace
+// VPN installs no resolver because there is no TUN device to install one for.
+// Offering the question only for a private address meant the probe died with a
+// lookup error and the proxy that makes it work was never asked for.
+func TestALookupFailureIsOfferedToo(t *testing.T) {
+	ui := &answerUI{id: "cancel"}
+	res := run(t, madaraRoutes(), ui, withGuard(&unresolvableGuard{}))
+
+	// Declining leaves the lookup failure standing, exactly as before the offer
+	// existed — a mistyped domain lands here too, and "Edit the address" is
+	// what that user needs.
+	if res.Verdict != theme.VerdictInvalidURL || res.Addable {
+		t.Errorf("declining gave %+v, want the lookup failure it started as", res)
+	}
+
+	if len(ui.questions) != 1 {
+		t.Fatalf("a lookup failure asked %d questions, want one: %+v", len(ui.questions), ui.questions)
+	}
+	q := ui.questions[0]
+	if q.Kind != "selfhosted" {
+		t.Errorf("question kind = %q, want selfhosted", q.Kind)
+	}
+	// It says what happened, and does not claim an address nobody resolved.
+	if !strings.Contains(q.Text, "look up") || !strings.Contains(q.Text, "example.invalid") {
+		t.Errorf("the question does not say the name could not be looked up: %q", q.Text)
+	}
+	if strings.Contains(q.Text, "resolves to") {
+		t.Errorf("the question claims an address for a name that resolved to nothing: %q", q.Text)
+	}
+	if q.Input == nil || !strings.Contains(q.Input.Label, "proxy") {
+		t.Fatalf("no proxy was asked for, which is the only way through here: %+v", q.Input)
+	}
+}
+
+// TestALookupFailureAcceptedWithAProxyProceeds, and records the confirmation
+// that names no address because there was none to name.
+func TestALookupFailureAcceptedWithAProxyProceeds(t *testing.T) {
+	ui := &answerUI{id: "continue", text: "http://localhost:1055"}
+	g := &unresolvableGuard{}
+	res := run(t, madaraRoutes(), ui, withGuard(g))
+
+	if res.Verdict != theme.VerdictOK || !res.Addable || res.Draft == nil {
+		t.Fatalf("the probe did not finish: verdict=%q detail=%q", res.Verdict, res.Detail)
+	}
+	if !g.proxied {
+		t.Error("the guard was re-asked without the proxy on the policy")
+	}
+	sh := res.Draft.SelfHosted
+	if sh == nil || !sh.ViaProxy {
+		t.Fatalf("the draft's confirmation = %+v, want one recorded as reached through a proxy", sh)
+	}
+	if sh.ConfirmedAddr != "" {
+		t.Errorf("ConfirmedAddr = %q; nothing resolved, so nothing may be recorded", sh.ConfirmedAddr)
+	}
+	if !sh.ConfirmedAt.Equal(fixedNow) {
+		t.Errorf("ConfirmedAt = %v, want the probe clock", sh.ConfirmedAt)
+	}
+	if res.Draft.Proxy != "http://localhost:1055" {
+		t.Errorf("draft proxy = %q", res.Draft.Proxy)
+	}
+	if err := registry(nil).Validate(res.Draft); err != nil {
+		t.Errorf("the draft does not validate: %v", err)
+	}
+}
+
+// TestALookupFailureAcceptedWithoutAProxyStops. Saying yes does not make a name
+// resolvable. The honest answer is the lookup failure, with the one thing that
+// would fix it named — and nothing is recorded, because nothing was established.
+func TestALookupFailureAcceptedWithoutAProxyStops(t *testing.T) {
+	ui := &answerUI{id: "continue"} // yes, but no proxy typed
+	res := run(t, madaraRoutes(), ui, withGuard(&unresolvableGuard{}))
+
+	if res.Verdict != theme.VerdictInvalidURL {
+		t.Fatalf("verdict = %q, want %q (%s)", res.Verdict, theme.VerdictInvalidURL, res.Detail)
+	}
+	if res.Addable || res.Draft != nil {
+		t.Fatalf("a source was offered with no way to reach it: %+v", res)
+	}
+	if !strings.Contains(res.Detail, "proxy") {
+		t.Errorf("the detail does not name what would fix it: %q", res.Detail)
+	}
+}
+
+// TestAPrivateAddressAcceptedWithoutAProxyStillWorks: the case that already
+// worked must keep working on its own terms — a resolvable, private address
+// needs no proxy, and the confirmation records the address as before.
+func TestAPrivateAddressAcceptedWithoutAProxyStillWorks(t *testing.T) {
+	ui := &answerUI{id: "continue"}
+	res := run(t, madaraRoutes(), ui, withGuard(newHomeGuard()))
+
+	if !res.Addable || res.Draft == nil || res.Draft.SelfHosted == nil {
+		t.Fatalf("a confirmed private address no longer adds: %+v", res)
+	}
+	if res.Draft.SelfHosted.ConfirmedAddr != resolvedAddr {
+		t.Errorf("ConfirmedAddr = %q, want %q", res.Draft.SelfHosted.ConfirmedAddr, resolvedAddr)
+	}
+	if res.Draft.SelfHosted.ViaProxy {
+		t.Error("an address was resolved, so the record must not claim it was reached through a proxy")
+	}
+	if res.Draft.Proxy != "" {
+		t.Errorf("draft proxy = %q, want none", res.Draft.Proxy)
 	}
 }

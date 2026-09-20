@@ -490,11 +490,12 @@ func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, 
 	u = &url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/"}
 
 	if err := r.p.guard.CheckURL(ctx, u, r.policy(u)); err != nil {
-		// An address the guard refuses is usually the end of the probe. There is
-		// one case where it is a *question* instead, and it is the only way a
+		// A refusal here is usually the end of the probe. There are two cases
+		// where it is a *question* instead, and they are the only way a
 		// self-hosted source has ever been addable: a host that resolves into a
-		// private or CGNAT range may be a service on the user's own network,
-		// which is a fact only they can supply.
+		// private or CGNAT range, and a host that does not resolve here at all.
+		// Both may be a service on the user's own network, which is a fact only
+		// they can supply.
 		res, offered, askErr := r.offerSelfHosted(ctx, u, err)
 		if askErr != nil {
 			return nil, Result{}, false, askErr
@@ -525,6 +526,16 @@ func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, 
 // from the user typing their own NAS, and this is the one place where the user
 // can.
 //
+// **Two refusals reach this, not one.** The address one above, and a host that
+// could not be looked up at all — which on the device is the commoner of the
+// two and was found by trying it (2026-09-20): the owner's source is a MagicDNS
+// name on their mesh, the tablet resolves against public DNS, the kernel has no
+// TUN device so the userspace VPN installs no resolver, and the name simply
+// does not resolve here. Offering the question only on `blocked_address` meant
+// the probe died with a lookup error and the user was never offered the proxy
+// that makes it work. A proxy is needed *before* resolution, and for that
+// source resolution will never succeed at all.
+//
 // So the refusal becomes an offer, on three conditions that keep it from being
 // a way in:
 //
@@ -540,24 +551,28 @@ func (r *run) offerSelfHosted(ctx context.Context, u *url.URL, refusal error) (R
 	verdict, detail := guardVerdict(refusal)
 	refused := r.result(verdict, detail)
 
-	if verdict != theme.VerdictBlockedAddress {
-		return refused, false, nil
-	}
-	g, ok := r.p.guard.(SelfHostableGuard)
-	if !ok {
-		return refused, false, nil
-	}
-	addr, ok := g.SelfHostableTarget(ctx, u)
-	if !ok {
+	host := u.Hostname()
+	addr, known := r.offerableAddr(ctx, u, refusal)
+	if !known && !unresolvedHost(refusal) {
+		// Neither of the two refusals this question is for.
 		return refused, false, nil
 	}
 
-	host := u.Hostname()
+	// One question, two situations, and the wording says which it is rather
+	// than flattening them. Claiming an address for a name that resolved to
+	// nothing would be inventing the very fact the user is being asked about.
+	text := fmt.Sprintf("Quire can't look up %s on this network, so it can't tell where it would be connecting. "+
+		"Is this a service on your own network that you run? If it is, Quire can reach it through a proxy "+
+		"— the proxy looks the name up instead.", host)
+	if known {
+		text = fmt.Sprintf("%s resolves to %s, which is a private address. Quire doesn't connect to addresses like that, "+
+			"because a site it scrapes could use one to reach something on your network. "+
+			"Is this a service on your own network that you run?", host, addr)
+	}
+
 	ans, err := r.ui.Ask(ctx, Question{
 		Kind: "selfhosted",
-		Text: fmt.Sprintf("%s resolves to %s, which is a private address. Quire doesn't connect to addresses like that, "+
-			"because a site it scrapes could use one to reach something on your network. "+
-			"Is this a service on your own network that you run?", host, addr),
+		Text: text,
 		// "No" first, and it is the answer an empty reply means: the safe
 		// direction here is the refusal that was already in force.
 		Options: []Option{
@@ -566,19 +581,26 @@ func (r *run) offerSelfHosted(ctx context.Context, u *url.URL, refusal error) (R
 		},
 		// Offered here rather than afterwards because a user adding a host on
 		// their own network is exactly the person whose device may not be able
-		// to route to it (see theme.Source.Proxy for the measurement).
-		Input: &Input{
-			Label:       "If Quire has to go through a proxy to reach it, type the proxy here. Leave it empty otherwise.",
-			Placeholder: "http://localhost:1055",
-		},
+		// to reach it directly (see theme.Source.Proxy for the measurement).
+		// When the name did not resolve at all it is not a convenience but the
+		// only way through, and the label says so.
+		Input: r.proxyInput(known),
 	})
 	if err != nil {
 		return Result{}, false, err
 	}
 	if ans.ID != "continue" {
-		res := r.result("", fmt.Sprintf("Stopped: %s is a private address, and you didn't confirm it's yours.", addr))
-		res.Cancelled = true
-		return res, false, nil
+		// The refusal that was already in force stays in force, *as itself*: the
+		// same verdict and the same sentence the probe would have ended with
+		// before the offer existed.
+		//
+		// Not "Stopped", which is what declining the redirect question gives.
+		// That one is a question about which site to add and nothing has been
+		// judged when it is declined; this one is an offer to override a
+		// judgement already made, so declining leaves the judgement — and with
+		// it the wizard's "Edit the address", which is what a user who simply
+		// mistyped a name needs next.
+		return refused, false, nil
 	}
 
 	if proxy := strings.TrimSpace(ans.Text); proxy != "" {
@@ -591,8 +613,66 @@ func (r *run) offerSelfHosted(ctx context.Context, u *url.URL, refusal error) (R
 		}
 		r.proxy = pu.String()
 	}
+
+	if !known {
+		// Nothing resolved, so there is no address to record and none is
+		// invented. Without a proxy there is also no way to reach the site:
+		// saying yes does not make a name resolvable, and the honest answer is
+		// the lookup failure with the one thing that would fix it named.
+		if r.proxy == "" {
+			return r.result(theme.VerdictInvalidURL,
+				fmt.Sprintf("Quire still can't look up %s. If it's only reachable through a proxy, type the proxy "+
+					"when Quire asks — without one there is no way to reach it from here.", host)), false, nil
+		}
+		r.selfHosted = &theme.SelfHosted{ViaProxy: true, ConfirmedAt: r.p.now().UTC()}
+		return Result{}, true, nil
+	}
 	r.selfHosted = &theme.SelfHosted{ConfirmedAddr: addr.String(), ConfirmedAt: r.p.now().UTC()}
 	return Result{}, true, nil
+}
+
+// offerableAddr asks the guard which address the host resolved to, for the
+// refusal that is about an address. It answers for no other refusal, and a
+// guard that cannot say makes no offer — silence is the old behaviour.
+func (r *run) offerableAddr(ctx context.Context, u *url.URL, refusal error) (netip.Addr, bool) {
+	var ge *fetch.GuardError
+	if !errors.As(refusal, &ge) || !errors.Is(ge.Kind, fetch.ErrBlockedAddress) {
+		return netip.Addr{}, false
+	}
+	g, ok := r.p.guard.(SelfHostableGuard)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	return g.SelfHostableTarget(ctx, u)
+}
+
+// unresolvedHost reports the refusal that is not a judgement about the site at
+// all: the name could not be looked up here.
+//
+// It gets the same question because on this device it is at least as likely to
+// mean "a service on my own network": a mesh VPN's names resolve only inside
+// the mesh, and the tablet's resolver is public DNS (measured 2026-09-20). A
+// mistyped domain lands here too, which is why the default is still no and the
+// question still says plainly that Quire could not look the name up.
+func unresolvedHost(err error) bool {
+	var ge *fetch.GuardError
+	return errors.As(err, &ge) && ge.Unresolved
+}
+
+// proxyInput is the question's field. Its label changes with the situation
+// because its importance does: with a private address a proxy is optional, and
+// with a name that does not resolve it is the whole of the way through.
+func (r *run) proxyInput(addrKnown bool) *Input {
+	if addrKnown {
+		return &Input{
+			Label:       "If Quire has to go through a proxy to reach it, type the proxy here. Leave it empty otherwise.",
+			Placeholder: "http://localhost:1055",
+		}
+	}
+	return &Input{
+		Label:       "Type the proxy Quire should reach it through. Without one, Quire can't look this name up at all.",
+		Placeholder: "http://localhost:1055",
+	}
 }
 
 // schemeLike matches the "scheme:" of RFC 3986, and schemeSlashes the same
