@@ -111,4 +111,10 @@ var CacheStatus = 72
 var ClearCache = 73
 var CacheConfirm = 74
 
+// Setting, changing or clearing a source's proxy. An empty proxy removes it;
+// clearing the proxy on a source confirmed self-hosted via that proxy also
+// withdraws the confirmation. No reply of its own — a fresh Sources follows,
+// like RenameSource.
+var SetSourceProxy = 76
+
 var Error = 90

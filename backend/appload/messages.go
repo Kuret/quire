@@ -425,6 +425,21 @@ const (
 	MessageClearCache   MessageType = 73
 	MessageCacheConfirm MessageType = 74
 
+	// MessageSetSourceProxy is UI→BE, JSON {sourceId, proxy}. An empty (or
+	// all-whitespace) proxy removes it; anything else is validated the same
+	// way the add-source flow validates one, and an invalid proxy leaves the
+	// source untouched.
+	//
+	// Clearing the proxy on a source confirmed self-hosted *by way of* it
+	// (SelfHosted.ViaProxy) also withdraws that confirmation: the address
+	// lives on the far side of the proxy and this device never learns it, so
+	// without the proxy the confirmation would claim a route that no longer
+	// exists. A source confirmed by address keeps its confirmation.
+	//
+	// There is no reply of its own; the reply is a fresh MessageSources, like
+	// MessageRenameSource.
+	MessageSetSourceProxy MessageType = 76
+
 	MessageError MessageType = 90
 )
 
@@ -489,6 +504,7 @@ var messageNames = map[MessageType]string{
 	MessageCacheStatus:           "CacheStatus",
 	MessageClearCache:            "ClearCache",
 	MessageCacheConfirm:          "CacheConfirm",
+	MessageSetSourceProxy:        "SetSourceProxy",
 	MessageError:                 "Error",
 }
 

@@ -68,6 +68,7 @@ func TestMessageTypeValues(t *testing.T) {
 		"ClearCache":            73,
 		"CacheConfirm":          74,
 		"SetView":               75,
+		"SetSourceProxy":        76,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {
