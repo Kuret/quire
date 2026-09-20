@@ -438,6 +438,16 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.sendSources(out)
 
+	case appload.MessageSetSourceProxy:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			Proxy    string `json:"proxy"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.setSourceProxy(out, req.SourceID, req.Proxy)
+
 	case appload.MessageCancelDownload:
 		var req downloadRequest
 		if err := decode(payload, &req); err != nil {
@@ -552,6 +562,15 @@ type sourceView struct {
 	Status       string `json:"status"`
 	StatusDetail string `json:"statusDetail,omitempty"`
 	StatusAt     string `json:"statusAt,omitempty"`
+
+	// Proxy is the address a source is reached through, or "" for none. The UI
+	// needs it to prefill the proxy field it offers for editing.
+	Proxy string `json:"proxy,omitempty"`
+
+	// SelfHostedViaProxy says the source's self-hosted confirmation stands on
+	// the proxy rather than on a resolved address — the UI needs this to warn
+	// before clearing a proxy takes the confirmation with it.
+	SelfHostedViaProxy bool `json:"selfHostedViaProxy,omitempty"`
 }
 
 func (s *Service) sendSources(out Sender) error {
@@ -567,6 +586,10 @@ func (s *Service) sendSources(out Sender) error {
 			Theme: src.Theme, Lang: src.Lang, Enabled: src.IsEnabled(),
 			SplitStrips: split,
 			Status:      "Not checked yet",
+			Proxy:       src.Proxy,
+		}
+		if src.SelfHosted != nil {
+			v.SelfHostedViaProxy = src.SelfHosted.ViaProxy
 		}
 		if src.LastProbe != nil {
 			v.Status = VerdictHeadline(src.LastProbe.Verdict)
@@ -576,6 +599,33 @@ func (s *Service) sendSources(out Sender) error {
 		views = append(views, v)
 	}
 	return send(out, appload.MessageSources, map[string]any{"sources": views})
+}
+
+// setSourceProxy handles MessageSetSourceProxy: an empty proxy removes it,
+// anything else replaces it after the same validation the add-source flow
+// uses (state.Store.SetProxy calls fetch.ParseProxyURL itself).
+//
+// Clearing the proxy goes through state.Store.ClearProxyAndRevoke rather than
+// SetProxy(id, ""): if the source's self-hosted confirmation stands on that
+// proxy (SelfHosted.ViaProxy), the confirmation has to go with it in the same
+// locked store operation, or the store could be left holding — even
+// momentarily — a source theme.Source.validate() would refuse. A source
+// confirmed by address is untouched by that call.
+func (s *Service) setSourceProxy(out Sender, sourceID, proxy string) error {
+	if strings.TrimSpace(proxy) == "" {
+		if err := s.store.ClearProxyAndRevoke(sourceID); err != nil {
+			return s.sendError(out, "not_found", plain(err))
+		}
+		return s.sendSources(out)
+	}
+	switch err := s.store.SetProxy(sourceID, proxy); {
+	case errors.Is(err, state.ErrBadProxy):
+		return s.sendError(out, "bad_proxy",
+			"A proxy has to be an http://, https:// or socks5:// address.")
+	case err != nil:
+		return s.sendError(out, "not_found", plain(err))
+	}
+	return s.sendSources(out)
 }
 
 // VerdictHeadline is the one-line form of a verdict, in plain language. PLAN §6
