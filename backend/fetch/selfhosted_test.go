@@ -304,3 +304,67 @@ func TestSelfHostableAddrIsNarrow(t *testing.T) {
 		}
 	}
 }
+
+// TestSelfHostableTargetOnlyOffersWhatCanBeConfirmed covers the half of this
+// the probe leans on: before a user can be asked "is this yours?", the guard
+// has to say which address the host resolved to, and it must only say so for
+// an address a confirmation could ever cover.
+//
+// It answers a question and grants nothing — the probe re-runs CheckURL
+// afterwards — but a wrong answer here would put a sentence in front of the
+// user naming an address they cannot have meant, which is how consent gets
+// collected for the wrong thing.
+func TestSelfHostableTargetOnlyOffersWhatCanBeConfirmed(t *testing.T) {
+	t.Parallel()
+
+	g := fetch.NewGuard(stubResolve(map[string][]string{
+		"home.example.test":     {"192.168.1.10"},
+		"tailnet.example.test":  {"100.100.0.1"},
+		"public.example.test":   {"93.184.216.34"},
+		"looped.example.test":   {"127.0.0.1"},
+		"metadata.example.test": {"169.254.169.254"},
+		// One private answer and one public one is a rebinding attempt, not a
+		// multihomed server: offered on the strength of its first answer, it
+		// would collect a confirmation for a name that also points at the
+		// internet.
+		"rebound.example.test": {"192.168.1.10", "93.184.216.34"},
+		"mixed.example.test":   {"93.184.216.34", "192.168.1.10"},
+	}))
+
+	tests := []struct {
+		url  string
+		want string // "" means: make no offer
+	}{
+		{"http://home.example.test/", "192.168.1.10"},
+		{"http://tailnet.example.test/", "100.100.0.1"},
+		{"http://192.168.1.10:8084/", "192.168.1.10"}, // an address typed outright
+		{"http://[fd00::1]/", "fd00::1"},
+		{"http://public.example.test/", ""},   // needs no confirmation
+		{"http://looped.example.test/", ""},   // the device itself
+		{"http://metadata.example.test/", ""}, // the cloud metadata service
+		{"http://93.184.216.34/", ""},
+		{"http://rebound.example.test/", ""},
+		{"http://mixed.example.test/", ""},
+		{"http://nowhere.example.test/", ""}, // does not resolve
+	}
+	for _, tt := range tests {
+		u, err := url.Parse(tt.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr, ok := g.SelfHostableTarget(context.Background(), u)
+		if tt.want == "" {
+			if ok {
+				t.Errorf("SelfHostableTarget(%s) offered %s; it must make no offer", tt.url, addr)
+			}
+			continue
+		}
+		if !ok {
+			t.Errorf("SelfHostableTarget(%s) made no offer, want %s", tt.url, tt.want)
+			continue
+		}
+		if addr.String() != tt.want {
+			t.Errorf("SelfHostableTarget(%s) = %s, want %s", tt.url, addr, tt.want)
+		}
+	}
+}

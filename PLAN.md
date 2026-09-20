@@ -1457,7 +1457,7 @@ Both header fields are **signed `int32`**, native-endian — see the correction 
 
 | ID | Direction | Name | Payload |
 |---|---|---|---|
-| 16 | UI→BE | ProbeAnswer | JSON — answers a question raised on the progress stream (e.g. an off-domain redirect) |
+| 16 | UI→BE | ProbeAnswer | JSON `{id, text}` — answers a question raised on the progress stream. Three points ask: an off-domain redirect, two themes too close to call, and a base URL that resolves to a private address (which also takes an optional proxy in `text`) |
 | 17 | UI→BE | SetSourceEnabled | JSON `{sourceId, enabled}` |
 | 18 | UI→BE | RemoveSource | JSON `{sourceId}` |
 | 22 | UI→BE | Browse | Search with an empty query — see the stage-5 correction in §7.5 |

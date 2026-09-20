@@ -47,10 +47,17 @@ const (
 	// MessageConfirmAddSource is UI→BE, JSON {url, theme, name, lang}.
 	MessageConfirmAddSource MessageType = 15
 
-	// MessageProbeAnswer is UI→BE, JSON {id}. The probe has two points where
-	// PLAN §7.5 requires the *user* to decide rather than the code guessing — a
-	// redirect that left the domain they typed, and two themes too close to
-	// call — so the stream of type 13 messages has to be answerable.
+	// MessageProbeAnswer is UI→BE, JSON {id, text}. The probe has three points
+	// where PLAN §7.5 requires the *user* to decide rather than the code
+	// guessing — a redirect that left the domain they typed, two themes too
+	// close to call, and an address that is only reachable if the site is a
+	// service of the user's own — so the stream of type 13 messages has to be
+	// answerable.
+	//
+	// `text` is the optional value a question asked to be typed alongside the
+	// choice, "" for the questions that ask for none. It rides here rather than
+	// on a message of its own: there is one channel the probe asks on, and
+	// keeping it one is worth more than a tidier payload.
 	MessageProbeAnswer MessageType = 16
 	// MessageSetSourceEnabled is UI→BE, JSON {sourceId, enabled}: PLAN §6 M3's
 	// per-source toggle.

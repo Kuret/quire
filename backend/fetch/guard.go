@@ -287,9 +287,82 @@ func selfHosted(u *url.URL, p *Policy) bool {
 	if p == nil || p.SelfHostedHost == "" || u == nil {
 		return false
 	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	approved := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.SelfHostedHost)), ".")
-	return host != "" && host == approved
+	return sameHostname(u.Hostname(), p.SelfHostedHost)
+}
+
+// sameHostname is the exact host match both per-source assertions turn on: the
+// self-hosted exemption above, and the scope of a per-source proxy (proxy.go).
+// Case-folded and with a trailing dot removed, because DNS ignores both; and
+// nothing else — no subdomain, no registrable domain — because a permission
+// the user gave for one host is for that host.
+//
+// One function rather than two copies: the exemption and the proxy have to
+// cover the same set of URLs, and two spellings of "the same host" would
+// eventually disagree about one.
+func sameHostname(a, b string) bool {
+	a = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(a)), ".")
+	b = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(b)), ".")
+	return a != "" && a == b
+}
+
+// SelfHostableTarget reports the address u's host resolves to, when that
+// address is one the user could confirm as a service of their own
+// (SelfHostableAddr). ok is false for anything else, including a host that does
+// not resolve.
+//
+// It exists so the probe can *offer* a self-hosted source instead of stopping
+// at `blocked_address`: the offer has to name the address plainly ("zima.example
+// resolves to 100.79.171.1, which is a private address"), and the confirmation
+// it records is the address the probe actually saw rather than a name that will
+// be re-resolved later.
+//
+// **It exempts nothing and relaxes nothing.** It only answers a question. The
+// guard still has the last word: a probe that gets a yes puts the confirmed host
+// on the policy and runs CheckURL again, so the exemption is granted by the same
+// code path it always was.
+//
+// A host that resolves to a mixture of confirmable and other addresses is
+// refused outright rather than offered on the strength of its first answer —
+// that shape is a rebinding attempt, and checkAddress refuses it for the same
+// reason.
+func (g *Guard) SelfHostableTarget(ctx context.Context, u *url.URL) (netip.Addr, bool) {
+	if u == nil {
+		return netip.Addr{}, false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return netip.Addr{}, false
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		addr = addr.Unmap()
+		return addr, SelfHostableAddr(addr)
+	}
+
+	resolve := g.resolve
+	if resolve == nil {
+		resolve = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
+	}
+	ips, err := resolve(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return netip.Addr{}, false
+	}
+	var first netip.Addr
+	for i, ip := range ips {
+		addr, ok := netip.AddrFromSlice(ip)
+		if !ok {
+			return netip.Addr{}, false
+		}
+		addr = addr.Unmap()
+		if !SelfHostableAddr(addr) {
+			return netip.Addr{}, false
+		}
+		if i == 0 {
+			first = addr
+		}
+	}
+	return first, true
 }
 
 // addrReason returns a plain-language reason to refuse addr, or "" to allow it.

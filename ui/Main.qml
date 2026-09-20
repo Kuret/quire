@@ -1310,7 +1310,7 @@ Rectangle {
             anchors.fill: parent
             visible: root.screen === "add"
             onProbeRequested: root.send(Msg.ProbeSource, {"url": url})
-            onAnswerRequested: root.send(Msg.ProbeAnswer, {"id": answerId})
+            onAnswerRequested: root.send(Msg.ProbeAnswer, {"id": answerId, "text": answerText})
             onConfirmRequested: {
                 root.send(Msg.ConfirmAddSource, {"url": url, "theme": theme, "name": name, "lang": lang})
                 root.showScreen("sources")

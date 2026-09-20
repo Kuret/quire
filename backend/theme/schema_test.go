@@ -131,6 +131,19 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 			},
 		},
 		{
+			name: "a self-hosted source reached through a proxy",
+			src: theme.Source{
+				ID: "zima", Name: "Zima", Lang: "en",
+				Theme: "madara", BaseURL: "http://zima.example:8084",
+				AddedAt: at,
+				SelfHosted: &theme.SelfHosted{
+					ConfirmedAddr: "100.79.171.1",
+					ConfirmedAt:   at,
+				},
+				Proxy: "http://localhost:1055",
+			},
+		},
+		{
 			name: "the generic escape hatch carries selectors and a script",
 			src: theme.Source{
 				ID: "user-added-03", Name: "One-off", Lang: "en",
@@ -210,6 +223,27 @@ func TestSchemaRejectsWhatGoValidationRejects(t *testing.T) {
 			       "selfHosted":{}}`,
 		},
 		{
+			name: "a proxy that is not one of the three schemes",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://zima.example","addedAt":"2026-09-15T00:00:00Z",
+			       "proxy":"socks4://127.0.0.1:1080"}`,
+		},
+		{
+			// A host:port is what people type. It is refused rather than
+			// guessed at: a proxy is the one setting where a wrong guess sends
+			// the request somewhere the user did not choose.
+			name: "a proxy with no scheme",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://zima.example","addedAt":"2026-09-15T00:00:00Z",
+			       "proxy":"localhost:1055"}`,
+		},
+		{
+			name: "a proxy with a path, which is a page served through one",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://zima.example","addedAt":"2026-09-15T00:00:00Z",
+			       "proxy":"http://localhost:1055/proxy"}`,
+		},
+		{
 			name: "a self-hosted confirmation with no date",
 			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
 			       "baseUrl":"http://shelfmark.internal.invalid","addedAt":"2026-09-15T00:00:00Z",
@@ -249,7 +283,7 @@ func TestSourceOmitsEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe", "selfHosted"} {
+	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe", "selfHosted", "proxy"} {
 		if strings.Contains(string(b), `"`+unwanted+`"`) {
 			t.Errorf("a bare source exported %q; it should be omitted:\n%s", unwanted, b)
 		}

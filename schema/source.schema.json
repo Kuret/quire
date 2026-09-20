@@ -72,6 +72,12 @@
         "confirmedAt": { "type": "string", "format": "date-time" }
       }
     },
+    "proxy": {
+      "type": "string",
+      "description": "Proxy this source is reached through, as http://, https:// or socks5://. Absent means a direct connection. It exists because a device can be on a network it cannot route to: measured 2026-09-20, the reMarkable kernel has no TUN device, so a mesh VPN there runs in userspace and only its own local proxy reaches the far end -- but this field names no VPN and knows about none. It says 'reach this source through here', which is equally true of an ssh -D tunnel, a corporate proxy or a reverse proxy. It applies ONLY to requests whose host is this source's own host: not to URLs the site's content supplied, not to allowedHosts entries, and not to a redirect that left that host. A proxy resolves and connects on Quire's behalf, so the guard's address check no longer describes where the bytes go -- a content-chosen URL that inherited the proxy would be an SSRF bypass past exactly the rules selfHosted was careful not to open. Independent of selfHosted, and composes with it: a source on a routable network may want a proxy, and a confirmed self-hosted source on a real interface needs none.",
+      "pattern": "^(https?|socks5)://[^\\s/$.?#][^\\s/?#]*/?$",
+      "maxLength": 2048
+    },
     "rateLimit": {
       "type": "object",
       "description": "Per-source politeness. These narrow the global caps in PLAN §7.4 but can never widen them -- the fetch layer takes the stricter of the two, and the global floor is not configurable.",

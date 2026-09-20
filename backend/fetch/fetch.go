@@ -173,6 +173,23 @@ type Policy struct {
 	// reach it.
 	SelfHostedHost string
 
+	// Proxy is the proxy this source is reached through, already parsed and
+	// validated by ParseProxyURL at the point it was set. Nil — the normal case
+	// — means a direct connection.
+	//
+	// **It applies to BaseURL's host and to nothing else.** The reasoning is on
+	// proxyFor in proxy.go, and it is the sharp end of this feature: a proxy
+	// resolves and connects on Quire's behalf, so a content-chosen URL that
+	// inherited it would be an SSRF bypass past the address rules the guard
+	// exists to enforce.
+	//
+	// Like SelfHostedHost it is set only by theme.Source.Policy, from a field
+	// the user typed. Unlike it, it grants nothing: a proxied request to a
+	// private address still needs the confirmation, and a confirmed source on a
+	// real interface needs no proxy. The two compose because both are things the
+	// user asserted about one source.
+	Proxy *url.URL
+
 	// RateLimit narrows the global caps. It can never widen them.
 	RateLimit *RateLimit
 }
@@ -389,6 +406,12 @@ const defaultResponseHeaderTimeout = 30 * time.Second
 
 func defaultTransport(responseHeader time.Duration) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	// Consulted per request, which is what makes a per-source proxy possible at
+	// all on a shared transport — and what keeps it scoped, since every redirect
+	// hop comes back through here with its own URL. See transportProxy: the
+	// clone's own Proxy was http.ProxyFromEnvironment and still is, for every
+	// request the source's proxy does not cover.
+	t.Proxy = transportProxy
 	// The concurrency caps are enforced by the Limiter, but keeping the pool
 	// small stops a burst of goroutines holding sockets open on the device.
 	t.MaxIdleConnsPerHost = 2

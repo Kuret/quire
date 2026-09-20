@@ -420,6 +420,32 @@ type Source struct {
 	// address rules apply unchanged.
 	SelfHosted *SelfHosted `json:"selfHosted,omitempty"`
 
+	// Proxy is a proxy URL this source — and only this source's own host — is
+	// reached through. Empty, the normal case, means a direct connection.
+	//
+	// http://, https:// and socks5:// are accepted (fetch.ParseProxyURL), and
+	// the value is validated where it is set rather than where it is used, so a
+	// mistyped proxy is refused by the field that took it instead of by a
+	// chapter that will not download.
+	//
+	// It exists because a device can be on a network it cannot route to. The
+	// measured case, 2026-09-20: the reMarkable kernel has no TUN device, so a
+	// mesh VPN there runs in userspace and only its own local proxy can reach
+	// the far end — but nothing here knows that, and it must not. A proxy URL
+	// says "reach this source through here", which is equally true of an
+	// `ssh -D` tunnel, a corporate proxy or a reverse proxy.
+	//
+	// It is independent of SelfHosted and composes with it: a source on a
+	// routable network may want a proxy, and a confirmed self-hosted source on a
+	// real interface needs none. Both are assertions the user made about one
+	// source, which is why they live side by side.
+	//
+	// **It reaches only this source's own host.** fetch.Policy.Proxy carries the
+	// rule, and the reason is there: a proxy resolves and connects on Quire's
+	// behalf, so a scraped URL that inherited it would walk straight past the
+	// address rules.
+	Proxy string `json:"proxy,omitempty"`
+
 	// RateLimit narrows the global politeness caps; it can never widen them.
 	RateLimit *fetch.RateLimit `json:"rateLimit,omitempty"`
 
@@ -516,6 +542,21 @@ func (s *Source) validateSelfHosted() error {
 	return nil
 }
 
+// validateProxy checks the source's proxy URL, if it has one. Like the
+// confirmation above it fails the whole source rather than dropping the field:
+// a source silently fetched directly because its proxy did not parse is one
+// that fails with a timeout on a network the user knows is reachable, which is
+// the least debuggable outcome available.
+func (s *Source) validateProxy() error {
+	if strings.TrimSpace(s.Proxy) == "" {
+		return nil
+	}
+	if _, err := fetch.ParseProxyURL(s.Proxy); err != nil {
+		return fmt.Errorf("theme: source %q: proxy: %w", s.ID, err)
+	}
+	return nil
+}
+
 // ProbeResult is the stored outcome of PLAN §7.5.
 type ProbeResult struct {
 	// Verdict is the §7.5 enum. "blocked_challenge" is terminal.
@@ -583,6 +624,18 @@ func (s *Source) Policy() (*fetch.Policy, error) {
 		// Nothing re-points a source today, and the IP-literal check in
 		// validateSelfHosted catches the case where the host is an address.
 		p.SelfHostedHost = u.Hostname()
+	}
+	if strings.TrimSpace(s.Proxy) != "" {
+		// Parsed here as well as in Registry.Validate, and for the same reason
+		// the confirmation is: this is the last point before the fetch layer,
+		// and it is reached by sources that arrived from an import or a
+		// hand-edited file. A proxy that does not parse fails the Policy rather
+		// than quietly becoming a direct connection.
+		pu, err := fetch.ParseProxyURL(s.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("theme: source %q: proxy: %w", s.ID, err)
+		}
+		p.Proxy = pu
 	}
 	return p, nil
 }

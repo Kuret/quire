@@ -19,7 +19,11 @@ Item {
     id: screen
 
     signal probeRequested(string url)
-    signal answerRequested(string answerId)
+    // answerText is what the user typed into the question's own field, "" when
+    // the question carried none. It travels with the answer rather than on a
+    // message of its own: the probe has one place where it stops and asks, and
+    // a second channel would be a second thing to keep in step.
+    signal answerRequested(string answerId, string answerText)
     signal confirmRequested(string url, string theme, string name, string lang)
     signal doneRequested()
 
@@ -28,6 +32,12 @@ Item {
 
     property string url: ""
     property string questionText: ""
+    // The optional field a question may carry (PLAN §7.5 stage 1's self-hosted
+    // offer asks for a proxy this way). An empty label means no field, which is
+    // what every other question has.
+    property string questionInputLabel: ""
+    property string questionInputHint: ""
+    property string questionInput: ""
     property string verdictHeadline: ""
     property string verdictDetail: ""
     property string verdictWarnings: ""
@@ -51,6 +61,9 @@ Item {
         screen.phase = "form"
         screen.url = ""
         screen.questionText = ""
+        screen.questionInputLabel = ""
+        screen.questionInputHint = ""
+        screen.questionInput = ""
         screen.verdictHeadline = ""
         screen.verdictDetail = ""
         screen.verdictWarnings = ""
@@ -70,7 +83,27 @@ Item {
     // Screens.dismissKeyboard still comes first, and still comes first for a
     // reason — see the note there.
     function dismissInput() {
-        Screens.dismissKeyboard([urlField])
+        Screens.dismissKeyboard([urlField, questionField])
+    }
+
+    // answer sends the user's reply and puts the question away.
+    //
+    // It lives on the screen rather than in the option delegate's own handler,
+    // and that is not a tidiness preference: clearing optionModel destroys the
+    // delegate whose handler is running, and the rest of a handler that has
+    // deleted itself does not reliably run. The answer — the one line that has
+    // to happen — was the last of those, so the tap looked right on screen and
+    // told the backend nothing. Everything here happens in the screen's own
+    // frame, with the option id read out of the model before the call.
+    function answer(optionId) {
+        var typed = screen.questionInput
+        screen.dismissInput()
+        screen.phase = "probing"
+        optionModel.clear()
+        screen.questionInputLabel = ""
+        screen.questionInputHint = ""
+        screen.questionInput = ""
+        screen.answerRequested(optionId, typed)
     }
 
     function start() {
@@ -94,6 +127,13 @@ Item {
         if (msg.question) {
             screen.phase = "question"
             screen.questionText = msg.question.text
+            // A question that asks for nothing typed carries no input block,
+            // and the field is absent rather than empty — an always-present
+            // box would invite an answer to a question nobody asked.
+            screen.questionInputLabel = msg.question.input ? msg.question.input.label : ""
+            screen.questionInputHint = msg.question.input && msg.question.input.placeholder
+                                       ? msg.question.input.placeholder : ""
+            screen.questionInput = ""
             optionModel.clear()
             for (var i = 0; i < msg.question.options.length; ++i) {
                 optionModel.append({
@@ -247,6 +287,25 @@ Item {
         onSubmit: screen.start()
     }
 
+    // The question's own keyboard, up only while a question with a field is on
+    // screen. It is a second Keyboard rather than a shared one because the two
+    // type into different properties, and a keyboard that switches targets is
+    // how text ends up in the wrong field.
+    //
+    // It has no Submit of its own: a typed value is not an answer by itself —
+    // the answer is the option the user taps — so there is nothing for Enter to
+    // mean here.
+    Keyboard {
+        id: questionKeyboard
+        objectName: "questionKeyboard"
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        visible: screen.phase === "question" && screen.questionInputLabel.length > 0
+        layout: "url"
+        onKeyTyped: screen.questionInput += text
+        onBackspace: screen.questionInput = screen.questionInput.substring(0, screen.questionInput.length - 1)
+        onClearAll: screen.questionInput = ""
+    }
+
     // ---- progress ----------------------------------------------------------
 
     Column {
@@ -288,9 +347,64 @@ Item {
             visible: screen.phase === "question"
         }
 
+        // The optional field a question may carry. Today that is the proxy
+        // offered alongside a private address, because the user adding a host
+        // on their own network is the one who may need it — see
+        // theme.Source.Proxy. It is optional in the plainest sense: leaving it
+        // empty answers the question just as completely.
+        Text {
+            objectName: "questionInputLabel"
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: screen.questionInputLabel
+            font.pointSize: Style.smallSize
+            color: Style.muted
+            visible: screen.phase === "question" && screen.questionInputLabel.length > 0
+        }
+
+        Rectangle {
+            objectName: "questionInputBox"
+            width: parent.width
+            height: Style.buttonHeight
+            color: Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+            visible: screen.phase === "question" && screen.questionInputLabel.length > 0
+
+            TextInput {
+                id: questionField
+                objectName: "questionField"
+                anchors {
+                    fill: parent
+                    leftMargin: Style.gap
+                    rightMargin: Style.gap
+                }
+                verticalAlignment: TextInput.AlignVCenter
+                font.pointSize: Style.bodySize
+                color: Style.ink
+                // As on the address field: the device has no system keyboard
+                // available to an embedded app, so text comes from the keyboard
+                // below and this field is never focused for input of its own.
+                activeFocusOnPress: false
+                text: screen.questionInput
+                onTextChanged: screen.questionInput = text
+            }
+
+            Text {
+                objectName: "questionFieldHint"
+                anchors { left: parent.left; leftMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                text: screen.questionInputHint
+                font.pointSize: Style.bodySize
+                color: Style.rule
+                visible: screen.questionInput.length === 0
+            }
+        }
+
         Repeater {
             model: optionModel
             delegate: Rectangle {
+                objectName: "questionOption"
                 width: form.width
                 height: Style.buttonHeight
                 color: optionArea.pressed ? Style.pressed : Style.paper
@@ -307,12 +421,9 @@ Item {
 
                 MouseArea {
                     id: optionArea
+                    objectName: "questionOptionArea"
                     anchors.fill: parent
-                    onClicked: {
-                        screen.phase = "probing"
-                        optionModel.clear()
-                        screen.answerRequested(model.optionId)
-                    }
+                    onClicked: screen.answer(model.optionId)
                 }
             }
         }

@@ -336,6 +336,49 @@ func (s *Store) ConfirmSelfHosted(id, addr string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// ErrBadProxy means the proxy URL offered is not one Quire can use.
+var ErrBadProxy = errors.New("state: a proxy must be an http://, https:// or socks5:// address")
+
+// SetProxy records the proxy a source is reached through, or clears it when raw
+// is empty. It is the only writer of theme.Source.Proxy, for the same reason
+// ConfirmSelfHosted is the only writer of the confirmation beside it: both are
+// assertions the *user* made about one source, and a single writer is what
+// makes "nothing else can set this" checkable rather than hoped for.
+//
+// The URL is validated here — at the point it is set — rather than at the point
+// it is used. A proxy that is only rejected when a chapter fails to download is
+// one the user debugs from the wrong end of the app.
+func (s *Store) SetProxy(id, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		u, err := fetch.ParseProxyURL(raw)
+		if err != nil {
+			return fmt.Errorf("%w (%v)", ErrBadProxy, err)
+		}
+		// Store what was parsed, so the scheme is normalised and the stored
+		// value is the one the fetch layer will act on.
+		raw = u.String()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			if src.Proxy == raw {
+				return nil
+			}
+			was := src.Proxy
+			src.Proxy = raw
+			if err := s.reg.Validate(src); err != nil {
+				src.Proxy = was
+				return fmt.Errorf("state: %w", err)
+			}
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // RevokeSelfHosted takes the confirmation back. A permission that cannot be
 // withdrawn is not one the user is in charge of, and unlike ConfirmSelfHosted
 // this direction needs no evidence: it only ever makes the guard stricter.

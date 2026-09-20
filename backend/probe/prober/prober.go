@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -111,10 +112,11 @@ type Progress struct {
 }
 
 // Question is a point where PLAN §7.5 requires the user to decide rather than
-// the probe guessing: a redirect that left the domain they typed, or two themes
-// too close to call.
+// the probe guessing: a redirect that left the domain they typed, two themes
+// too close to call, or an address that is only reachable if this is a service
+// of the user's own.
 type Question struct {
-	// Kind is "redirect" or "theme".
+	// Kind is "redirect", "theme" or "selfhosted".
 	Kind string `json:"kind"`
 
 	// Text is the whole question, in plain language.
@@ -122,6 +124,28 @@ type Question struct {
 
 	// Options are the answers on offer. The UI renders one button each.
 	Options []Option `json:"options"`
+
+	// Input, when set, is an optional value the user may type *alongside*
+	// choosing an option — today only the proxy offered with a self-hosted
+	// address, because a user adding a host on their own network is exactly the
+	// person who may need one and sending them back through the flow to add it
+	// afterwards would be a second trip for one field.
+	//
+	// It rides on the existing question rather than on a second channel. There
+	// is one place the probe stops to ask the user something, and it stays one
+	// place: a separate "and also type this" message would be a second thing to
+	// keep in step with the wizard for no gain.
+	Input *Input `json:"input,omitempty"`
+}
+
+// Input describes the optional field a Question may carry.
+type Input struct {
+	// Label says what the field is for, in plain language.
+	Label string `json:"label"`
+
+	// Placeholder is an example, shown while the field is empty. It is an
+	// example and not a default: nothing is sent unless the user types it.
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 // Option is one answer to a Question.
@@ -135,6 +159,11 @@ type Option struct {
 // "cancel": when in doubt the probe stops rather than proceeding on a guess.
 type Answer struct {
 	ID string `json:"id"`
+
+	// Text is what was typed into the question's Input, empty when the question
+	// had none or the user left it blank. A question that did not ask for text
+	// ignores it.
+	Text string `json:"text,omitempty"`
 }
 
 // UI is how the prober talks to the frontend. The service implementation sends
@@ -196,6 +225,23 @@ type Result struct {
 // accidentally acquire a second, unguarded network path.
 type AddressGuard interface {
 	CheckURL(ctx context.Context, u *url.URL, p *fetch.Policy) error
+}
+
+// SelfHostableGuard is the side interface stage 1 needs to *offer* a private
+// address rather than merely refusing it: it reports which address the host
+// resolved to, when that address is one a user may confirm as a service of
+// their own (fetch.SelfHostableAddr).
+//
+// It is optional, and silence is the old behaviour: a guard that does not
+// implement it makes no offer and the probe stops at `blocked_address`, exactly
+// as it did before. That direction is deliberate — the safe answer is the one a
+// guard gets by saying nothing.
+//
+// It grants nothing by itself. The probe takes the address, asks the user, and
+// then runs CheckURL again with the confirmation on the policy, so the
+// exemption is still granted by the guard and only by the guard.
+type SelfHostableGuard interface {
+	SelfHostableTarget(ctx context.Context, u *url.URL) (netip.Addr, bool)
 }
 
 // Options configures a Prober.
@@ -299,6 +345,42 @@ type run struct {
 	// guessed, and a guess that failed has to be admitted rather than quietly
 	// retried over an unencrypted connection.
 	assumedHTTPS bool
+
+	// selfHosted is the confirmation the user gave in stage 1, nil when they
+	// were never asked or said no. It carries the address the probe actually
+	// resolved, which is what makes it a record of what was agreed rather than
+	// of a name (see theme.SelfHosted).
+	//
+	// Every policy this run builds carries it from that moment on, so stages 2
+	// to 6 reach the host the user confirmed and nothing else does: the
+	// exemption is per-URL inside the guard, so a cover URL or a redirect
+	// pointing anywhere else on that network is still refused.
+	selfHosted *theme.SelfHosted
+
+	// proxy is the proxy the user supplied with that confirmation, "" when they
+	// supplied none. It is already validated: an unusable one ends the probe at
+	// stage 1 rather than being carried to a request that will fail oddly.
+	proxy string
+}
+
+// policy is the fetch-layer view of the site being probed. Every stage builds
+// its policy through here so that a confirmation or a proxy given in stage 1
+// applies to the rest of the probe — and so that there is one place to read to
+// know what the probe's requests are governed by.
+func (r *run) policy(base *url.URL) *fetch.Policy {
+	p := &fetch.Policy{BaseURL: base}
+	if r.selfHosted != nil {
+		p.SelfHostedHost = base.Hostname()
+	}
+	if r.proxy != "" {
+		// Parsed, not re-validated: stage 1 refused anything unusable, and a
+		// second opinion here could only disagree with the one the user was
+		// shown.
+		if pu, err := fetch.ParseProxyURL(r.proxy); err == nil {
+			p.Proxy = pu
+		}
+	}
+	return p
 }
 
 func (r *run) start(stage int) {
@@ -312,7 +394,10 @@ func (r *run) done(stage int, text string) {
 func (r *run) exec(ctx context.Context, rawurl string) (Result, error) {
 	// Stage 1 — normalise and guard.
 	r.start(StageGuard)
-	base, res, ok := r.stageGuard(ctx, rawurl)
+	base, res, ok, err := r.stageGuard(ctx, rawurl)
+	if err != nil {
+		return res, err
+	}
 	if !ok {
 		return res, nil
 	}
@@ -376,20 +461,20 @@ func (r *run) result(verdict, detail string) Result {
 
 // stageGuard is PLAN §7.5 stage 1: parse, require http(s), resolve DNS, apply
 // the SSRF guard.
-func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, bool) {
+func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, bool, error) {
 	raw := strings.TrimSpace(rawurl)
 	if raw == "" {
-		return nil, r.result(theme.VerdictInvalidURL, "That address is empty. Type the site's address, like weebcentral.com."), false
+		return nil, r.result(theme.VerdictInvalidURL, "That address is empty. Type the site's address, like weebcentral.com."), false, nil
 	}
 	raw, assumed, problem := normaliseScheme(raw)
 	if problem != "" {
-		return nil, r.result(theme.VerdictInvalidURL, problem), false
+		return nil, r.result(theme.VerdictInvalidURL, problem), false, nil
 	}
 	r.assumedHTTPS = assumed
 
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, r.result(theme.VerdictInvalidURL, fmt.Sprintf("That doesn't look like a web address: %v", err)), false
+		return nil, r.result(theme.VerdictInvalidURL, fmt.Sprintf("That doesn't look like a web address: %v", err)), false, nil
 	}
 	// A typed scheme is the user being specific, so credentials in it are the
 	// guard's business (PLAN §7.4). When Quire supplied the scheme, an "@" is
@@ -398,17 +483,116 @@ func (r *run) stageGuard(ctx context.Context, rawurl string) (*url.URL, Result, 
 	// their address book.
 	if assumed && u.User != nil {
 		return nil, r.result(theme.VerdictInvalidURL,
-			"That looks like an email address, not a site. Type just the site's address, like weebcentral.com."), false
+			"That looks like an email address, not a site. Type just the site's address, like weebcentral.com."), false, nil
 	}
 	// The probe only ever wants the site root. A pasted deep link is trimmed
 	// back to it rather than being probed as if it were the homepage.
 	u = &url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/"}
 
-	if err := r.p.guard.CheckURL(ctx, u, &fetch.Policy{BaseURL: u}); err != nil {
-		verdict, detail := guardVerdict(err)
-		return nil, r.result(verdict, detail), false
+	if err := r.p.guard.CheckURL(ctx, u, r.policy(u)); err != nil {
+		// An address the guard refuses is usually the end of the probe. There is
+		// one case where it is a *question* instead, and it is the only way a
+		// self-hosted source has ever been addable: a host that resolves into a
+		// private or CGNAT range may be a service on the user's own network,
+		// which is a fact only they can supply.
+		res, offered, askErr := r.offerSelfHosted(ctx, u, err)
+		if askErr != nil {
+			return nil, Result{}, false, askErr
+		}
+		if !offered {
+			return nil, res, false, nil
+		}
+		// The guard has the last word. It is re-run with the confirmation on the
+		// policy rather than assumed to pass, so the exemption is granted by the
+		// same code that refuses everything else — and a host that resolves
+		// somewhere no confirmation can cover is still refused here.
+		if err := r.p.guard.CheckURL(ctx, u, r.policy(u)); err != nil {
+			verdict, detail := guardVerdict(err)
+			return nil, r.result(verdict, detail), false, nil
+		}
 	}
-	return u, Result{}, true
+	return u, Result{}, true, nil
+}
+
+// offerSelfHosted is PLAN §7.5 stage 1's one question.
+//
+// The probe used to stop here: a base URL resolving into a private or CGNAT
+// range was `blocked_address` and that was the end of it, which left
+// hand-editing sources.json as the only way to add a service on your own
+// network. The address rules are still exactly right for the case they were
+// written for — a *scraped* URL pointing at the local network, where the
+// request is the attack (see fetch.Guard) — but they cannot tell that case apart
+// from the user typing their own NAS, and this is the one place where the user
+// can.
+//
+// So the refusal becomes an offer, on three conditions that keep it from being
+// a way in:
+//
+//   - the address is named plainly, so what is being agreed to is visible;
+//   - the default is no — an empty, unrecognised or cancelled answer leaves the
+//     refusal standing, which is also what an unattended probe gets (silentUI);
+//   - only fetch.SelfHostableAddr ranges are offered at all, so loopback,
+//     link-local (169.254.169.254 is the cloud metadata service) and the
+//     reserved ranges are never on the table.
+//
+// offered=false means the Result returned is the refusal to report.
+func (r *run) offerSelfHosted(ctx context.Context, u *url.URL, refusal error) (Result, bool, error) {
+	verdict, detail := guardVerdict(refusal)
+	refused := r.result(verdict, detail)
+
+	if verdict != theme.VerdictBlockedAddress {
+		return refused, false, nil
+	}
+	g, ok := r.p.guard.(SelfHostableGuard)
+	if !ok {
+		return refused, false, nil
+	}
+	addr, ok := g.SelfHostableTarget(ctx, u)
+	if !ok {
+		return refused, false, nil
+	}
+
+	host := u.Hostname()
+	ans, err := r.ui.Ask(ctx, Question{
+		Kind: "selfhosted",
+		Text: fmt.Sprintf("%s resolves to %s, which is a private address. Quire doesn't connect to addresses like that, "+
+			"because a site it scrapes could use one to reach something on your network. "+
+			"Is this a service on your own network that you run?", host, addr),
+		// "No" first, and it is the answer an empty reply means: the safe
+		// direction here is the refusal that was already in force.
+		Options: []Option{
+			{ID: "cancel", Label: "No, stop"},
+			{ID: "continue", Label: "Yes, it's mine — add it"},
+		},
+		// Offered here rather than afterwards because a user adding a host on
+		// their own network is exactly the person whose device may not be able
+		// to route to it (see theme.Source.Proxy for the measurement).
+		Input: &Input{
+			Label:       "If Quire has to go through a proxy to reach it, type the proxy here. Leave it empty otherwise.",
+			Placeholder: "http://localhost:1055",
+		},
+	})
+	if err != nil {
+		return Result{}, false, err
+	}
+	if ans.ID != "continue" {
+		res := r.result("", fmt.Sprintf("Stopped: %s is a private address, and you didn't confirm it's yours.", addr))
+		res.Cancelled = true
+		return res, false, nil
+	}
+
+	if proxy := strings.TrimSpace(ans.Text); proxy != "" {
+		pu, err := fetch.ParseProxyURL(proxy)
+		if err != nil {
+			// Refused now, in the words of the field it was typed into, rather
+			// than carried into a request that would fail as a timeout.
+			return r.result(theme.VerdictInvalidURL,
+				fmt.Sprintf("Quire can't use that proxy: %v. A proxy is just a host and port, like http://localhost:1055.", err)), false, nil
+		}
+		r.proxy = pu.String()
+	}
+	r.selfHosted = &theme.SelfHosted{ConfirmedAddr: addr.String(), ConfirmedAt: r.p.now().UTC()}
+	return Result{}, true, nil
 }
 
 // schemeLike matches the "scheme:" of RFC 3986, and schemeSlashes the same
@@ -506,7 +690,7 @@ func guardVerdict(err error) (verdict, detail string) {
 // stageReachable is PLAN §7.5 stage 2. It returns cont=false when the probe is
 // over, with the Result to report.
 func (r *run) stageReachable(ctx context.Context, base *url.URL) (Result, bool, error) {
-	pol := &fetch.Policy{BaseURL: base}
+	pol := r.policy(base)
 	resp, err := r.p.fetch.Get(ctx, pol, base.String())
 	if err != nil {
 		return r.reachError(base, err), false, nil
@@ -539,6 +723,17 @@ func (r *run) stageReachable(ctx context.Context, base *url.URL) (Result, bool, 
 			return res, false, nil
 		}
 		// Everything from here on is judged against where we actually landed.
+		//
+		// **Including the two things the user asserted about the host they
+		// typed.** A confirmation that this is a service on their own network,
+		// and a proxy to reach it through, were both given for the host that has
+		// just been replaced; carrying them to a host the *site* chose would
+		// hand content the exemption, which is the one thing none of this may
+		// do. They are dropped, and whatever the new host needs it can be asked
+		// for again.
+		if base.Host != final.Host && (r.selfHosted != nil || r.proxy != "") {
+			r.selfHosted, r.proxy = nil, ""
+		}
 		base.Scheme, base.Host = final.Scheme, final.Host
 	}
 
@@ -731,7 +926,20 @@ func (r *run) draft(base *url.URL, th theme.Theme) *theme.Source {
 		// time, so the list is visible to the user, editable by them, and
 		// unchanged if a later version of the theme changes its mind.
 		AllowedHosts: allowedHosts(th),
-		AddedAt:      r.p.now().UTC(),
+		// What the user answered in stage 1, carried onto the draft for the same
+		// reason allowedHosts is: stage 5 exercises the theme against this
+		// source, so the capability check has to run under the policy the stored
+		// source will have. A confirmed private host that stage 5 probed without
+		// the confirmation would fail every request and report the site as
+		// unreadable.
+		//
+		// The draft is the service's to persist, and it does not persist these
+		// two as they stand: state.Store.ConfirmSelfHosted and
+		// state.Store.SetProxy are the only writers of them, and the add flow
+		// goes through both. See service.confirmAdd.
+		SelfHosted: r.selfHosted,
+		Proxy:      r.proxy,
+		AddedAt:    r.p.now().UTC(),
 	}
 }
 

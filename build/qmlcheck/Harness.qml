@@ -194,6 +194,13 @@ Window {
     property string switchedToName: ""
     property string switchedToSeries: ""
 
+    // What the probe wizard answered with: the choice, and the value typed into
+    // the question's own field. A counter, because the field must not turn into
+    // an answer by itself — the answer is the option the user tapped.
+    property int probeAnswers: 0
+    property string probeAnsweredId: ""
+    property string probeAnsweredText: ""
+
     property int failures: 0
     function want(label, got, expected) {
         if (got !== expected) {
@@ -396,7 +403,16 @@ Window {
             win.splitAskedAbout = sourceId
         }
     }
-    AddSource   { id: addSource;   objectName: "addSource";   anchors.fill: parent }
+    AddSource {
+        id: addSource
+        objectName: "addSource"
+        anchors.fill: parent
+        onAnswerRequested: {
+            win.probeAnswers++
+            win.probeAnsweredId = answerId
+            win.probeAnsweredText = answerText
+        }
+    }
     SeriesGrid {
         id: seriesGrid
         objectName: "seriesGrid"
@@ -856,6 +872,98 @@ Window {
         win.want("and the keyboard with it", urlKeyboard.visible, false)
         addSource.reset()
         win.want("and it is back on the form", urlKeyboard.visible, true)
+
+        // ---- PLAN §7.5 stage 1: the question about a private address -------
+        //
+        // A source on the user's own network was unaddable until the probe
+        // learned to *offer* a private address instead of refusing it. The
+        // wizard's side of that is one question with one extra thing on it: an
+        // optional field for a proxy, because the person adding a host on their
+        // own network is the one whose device may not be able to route to it.
+        //
+        // Everything asserted here is the backend's. The wizard picks no
+        // wording, offers no default proxy, and decides nothing about which
+        // answer is safe.
+
+        // First, the questions that ask for nothing typed — a redirect, a theme
+        // — must look exactly as they did: no field, no second keyboard.
+        addSource.onProgress({"question": {
+            "kind": "redirect", "text": "You asked for a.invalid, but it sent Quire to b.invalid. Add b.invalid instead?",
+            "options": [{"id": "continue", "label": "Yes, use b.invalid"},
+                        {"id": "cancel", "label": "No, stop"}]}})
+        var qBox = win.findChild(addSource, "questionInputBox")
+        var qKeys = win.findChild(addSource, "questionKeyboard")
+        win.want("a question puts the wizard in its question phase", addSource.phase, "question")
+        win.want("a question with nothing to type shows no field", qBox.visible, false)
+        win.want("and raises no keyboard", qKeys.visible, false)
+
+        // Answering it sends the choice and an empty typed value: there was no
+        // field, so there is nothing to carry.
+        win.probeAnswers = 0
+        var qOptions = win.findChildren(addSource, "questionOptionArea", [])
+        qOptions[0].clicked(null)
+        win.want("the answer goes to the backend once", win.probeAnswers, 1)
+        win.want("naming the option tapped", win.probeAnsweredId, "continue")
+        win.want("with nothing typed alongside it", win.probeAnsweredText, "")
+
+        // Now the self-hosted offer, as the backend sends it.
+        addSource.onProgress({"question": {
+            "kind": "selfhosted",
+            "text": "zima.example resolves to 100.79.171.1, which is a private address. Is this a service on your own network that you run?",
+            "options": [{"id": "cancel", "label": "No, stop"},
+                        {"id": "continue", "label": "Yes, it's mine — add it"}],
+            "input": {"label": "If Quire has to go through a proxy to reach it, type the proxy here.",
+                      "placeholder": "http://localhost:1055"}}})
+
+        // The address is on screen. Agreeing to something unnamed is not
+        // agreeing to anything, and the sentence is the backend's, verbatim.
+        win.want("the question is shown as the backend wrote it",
+                 addSource.questionText.indexOf("100.79.171.1") >= 0, true)
+        win.want("the field appears with it", qBox.visible, true)
+        win.want("labelled by the backend",
+                 win.findChild(addSource, "questionInputLabel").text.indexOf("proxy") >= 0, true)
+        win.want("and empty, with the example showing",
+                 win.findChild(addSource, "questionFieldHint").visible, true)
+        win.want("the example is the backend's too",
+                 win.findChild(addSource, "questionFieldHint").text, "http://localhost:1055")
+
+        // No is first: the refusal is the answer already in force, and the
+        // order the backend sent is the order on screen.
+        qOptions = win.findChildren(addSource, "questionOptionArea", [])
+        win.want("both answers are offered", qOptions.length, 2)
+
+        // Typing goes through the question's own keyboard — the device has no
+        // system one — and reaches the field.
+        win.want("a question with a field raises a keyboard", qKeys.visible, true)
+        qKeys.keyTyped("h"); qKeys.keyTyped("t"); qKeys.keyTyped("t"); qKeys.keyTyped("p")
+        win.want("the keys reach the field", addSource.questionInput, "http")
+        win.want("and the field shows them",
+                 win.findChild(addSource, "questionField").text, "http")
+        win.want("the example gets out of the way",
+                 win.findChild(addSource, "questionFieldHint").visible, false)
+        qKeys.backspace()
+        win.want("backspace takes one character back", addSource.questionInput, "htt")
+        qKeys.clearAll()
+        win.want("and a held backspace clears the lot", addSource.questionInput, "")
+        win.want("without putting the keyboard away", qKeys.visible, true)
+
+        // Typing is not answering. The count must not have moved.
+        win.want("typing a proxy answers nothing by itself", win.probeAnswers, 1)
+
+        // The answer carries both halves.
+        addSource.questionInput = "http://localhost:1055"
+        qOptions[1].clicked(null)
+        win.want("the answer reaches the backend", win.probeAnswers, 2)
+        win.want("saying yes", win.probeAnsweredId, "continue")
+        win.want("and carrying the proxy typed", win.probeAnsweredText, "http://localhost:1055")
+        win.want("the wizard goes back to waiting", addSource.phase, "probing")
+        win.want("and the question's keyboard goes with it", qKeys.visible, false)
+
+        // The field does not survive the question it belonged to.
+        win.want("the field is put away", qBox.visible, false)
+        win.want("and holds nothing for the next one", addSource.questionInput, "")
+
+        addSource.reset()
 
         sourceList.renamingId = ""
         seriesGrid.visible = false

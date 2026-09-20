@@ -627,8 +627,38 @@ func (s *Service) confirmAdd(out Sender, url, themeID, name, lang string) error 
 	if l := strings.TrimSpace(lang); l != "" {
 		src.Lang = l
 	}
-	if _, err := s.store.Add(&src); err != nil {
+	// The two things the *user* asserted in stage 1 are added by the store
+	// methods that own them, not by riding along on the source entry.
+	//
+	// state.Store.ConfirmSelfHosted is documented as the only thing in Quire
+	// that ever writes a confirmation, and that claim is worth more than the one
+	// call it saves here: it is what makes "nothing can set this implicitly"
+	// checkable. SetProxy is its neighbour for the same reason. So the copy that
+	// is added carries neither, and each is applied afterwards by name.
+	confirm, proxy := src.SelfHosted, src.Proxy
+	src.SelfHosted, src.Proxy = nil, ""
+
+	stored, err := s.store.Add(&src)
+	if err != nil {
 		return s.sendError(out, "not_added", err.Error())
+	}
+	if confirm != nil {
+		if err := s.store.ConfirmSelfHosted(stored.ID, confirm.ConfirmedAddr); err != nil {
+			// A source on a private address without its confirmation could not
+			// fetch a single page, so it is taken back out rather than left in
+			// the list to fail at every tap.
+			_ = s.store.Remove(stored.ID)
+			return s.sendError(out, "not_added", err.Error())
+		}
+	}
+	if proxy != "" {
+		if err := s.store.SetProxy(stored.ID, proxy); err != nil {
+			// Same reasoning: the user told Quire this source is only reachable
+			// through a proxy, so a source stored without one is a source that
+			// cannot answer.
+			_ = s.store.Remove(stored.ID)
+			return s.sendError(out, "not_added", err.Error())
+		}
 	}
 	s.mu.Lock()
 	delete(s.drafts, strings.TrimSuffix(url, "/"))

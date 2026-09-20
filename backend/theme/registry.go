@@ -188,6 +188,12 @@ func (r *Registry) Validate(s *Source) error {
 		return err
 	}
 
+	// Beside it, for the same reason: how a source is *reached* is a fetch-layer
+	// question and has nothing to do with which theme reads it.
+	if err := s.validateProxy(); err != nil {
+		return err
+	}
+
 	if !validSplitStrips(s.SplitStrips) {
 		return fmt.Errorf("theme: source %q: splitStrips must be one of %s, got %q",
 			s.ID, strings.Join(SplitStripsValues, ", "), s.SplitStrips)

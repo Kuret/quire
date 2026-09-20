@@ -491,6 +491,20 @@ Window {
         win.want("headline and all", addSource.verdictHeadline, "Looks like a Madara site")
         win.want("and the name it proposes", addSource.draftName, "Example Reader")
 
+        // An answer to a probe question goes out as one message, choice and
+        // typed value together (PLAN §7.5 stage 1 offers a proxy with the
+        // private-address question). One channel, because the probe has one
+        // place where it stops and asks.
+        backend.forget()
+        addSource.answerRequested("continue", "http://localhost:1055")
+        win.want("an answer is sent once", backend.countOf(Msg.ProbeAnswer), 1)
+        win.want("naming the option chosen", backend.bodyOf(Msg.ProbeAnswer).id, "continue")
+        win.want("and carrying what was typed with it",
+                 backend.bodyOf(Msg.ProbeAnswer).text, "http://localhost:1055")
+        addSource.answerRequested("cancel", "")
+        win.want("a question with nothing typed sends an empty value",
+                 backend.bodyOf(Msg.ProbeAnswer).text, "")
+
         backend.forget()
         addSource.confirmRequested("https://example.invalid", "madara", "Example Reader", "en")
         win.want("confirming adds the source",
