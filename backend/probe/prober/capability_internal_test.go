@@ -186,3 +186,39 @@ func TestFileCapabilityIgnoresThePageSteps(t *testing.T) {
 		t.Error("a book source with nothing to fetch was accepted")
 	}
 }
+
+func TestAddableEmptyReleasesRequiresTheStrongCheck(t *testing.T) {
+	base := capability{
+		fileBased: true,
+		fileEmpty: true,
+		Confirm:   stepResult{OK: true},
+		Search:    stepResult{OK: true, Count: 3},
+	}
+	if !base.addableEmptyReleases() {
+		t.Error("a confirmed instance with three genuinely empty books was not offered in degraded state")
+	}
+
+	failedConfirm := base
+	failedConfirm.Confirm = stepResult{Note: "it is missing books_output_mode."}
+	if failedConfirm.addableEmptyReleases() {
+		t.Error("addableEmptyReleases ignored a failed strong check")
+	}
+
+	notEmpty := base
+	notEmpty.fileEmpty = false
+	if notEmpty.addableEmptyReleases() {
+		t.Error("addableEmptyReleases fired when a candidate errored rather than being genuinely empty")
+	}
+
+	notFileBased := base
+	notFileBased.fileBased = false
+	if notFileBased.addableEmptyReleases() {
+		t.Error("addableEmptyReleases fired for a page-based theme")
+	}
+
+	challenged := base
+	challenged.Challenge = &challengeSignal{Detail: "cf-challenge"}
+	if challenged.addableEmptyReleases() {
+		t.Error("addableEmptyReleases ignored a terminal challenge")
+	}
+}

@@ -170,51 +170,31 @@ func TestStageFiveRejectsAnInstanceWhoseConfigIsWrong(t *testing.T) {
 	}
 }
 
-// A file theme with nothing to fetch is refused. The mirror of the page check:
-// extraction that yields nothing is not a working source, whatever shape the
-// source has — and the two ways it can yield nothing are kept apart, because
-// "the book has no releases" and "the releases have no address" are different
-// failures and only one of them is the site's fault.
-func TestStageFiveRefusesAFileThemeWithNothingToFetch(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		chapters []theme.Chapter
-		says     string
-	}{
-		{
-			name:     "the book has no releases at all",
-			chapters: nil,
-			says:     "couldn't list anything to download",
-		},
-		{
-			// A release the theme could not address: it is in the list and
-			// there is no way to ask for it. Accepting this would be the false
-			// `ok` — the user adds the source and every download fails.
-			name:     "the releases have no address",
-			chapters: []theme.Chapter{{ID: "", Title: "EPUB · 1.7MB · Direct Download", Number: -1}},
-			says:     "nothing Quire could actually ask it to fetch",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
-				fileStub{id: "books", score: 90, chapters: tc.chapters})
+// A release the theme could not address is refused outright: it is in the
+// list and there is no way to ask for it, which is a real theme bug rather
+// than routine emptiness, and accepting it would be the false `ok` — the
+// user adds the source and every download fails.
+//
+// This is deliberately kept apart from "the book has no releases at all",
+// which moved to TestStageFiveAddsAFileThemeInDegradedStateWhenNoBookHasReleases
+// below (2026-09-20, Part B): the two ways a book can yield nothing to fetch
+// are different failures, and only one of them is the site's fault.
+func TestStageFiveRefusesAFileThemeWhoseReleaseHasNoAddress(t *testing.T) {
+	chapters := []theme.Chapter{{ID: "", Title: "EPUB · 1.7MB · Direct Download", Number: -1}}
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		fileStub{id: "books", score: 90, chapters: chapters})
 
-			if res.Addable || res.Draft != nil {
-				t.Fatalf("a source offering nothing to download was offered for adding: %s", res.Detail)
-			}
-			if !strings.Contains(res.Detail, tc.says) {
-				t.Errorf("detail %q does not name the failing step", res.Detail)
-			}
-			// The refusal says what this kind of source would have to do, in
-			// its own words. "Pages" would be meaningless to somebody adding a
-			// book service.
-			if strings.Contains(strings.ToLower(res.Detail), "page") {
-				t.Errorf("detail %q refuses a book source for want of page images", res.Detail)
-			}
-			if !strings.Contains(res.Detail, "download a book") {
-				t.Errorf("detail %q does not say what the source could not do", res.Detail)
-			}
-		})
+	if res.Addable || res.Draft != nil {
+		t.Fatalf("a source offering nothing to download was offered for adding: %s", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "nothing Quire could actually ask it to fetch") {
+		t.Errorf("detail %q does not name the failing step", res.Detail)
+	}
+	if strings.Contains(strings.ToLower(res.Detail), "page") {
+		t.Errorf("detail %q refuses a book source for want of page images", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "download a book") {
+		t.Errorf("detail %q does not say what the source could not do", res.Detail)
 	}
 }
 
@@ -234,14 +214,120 @@ func TestAThemeWithNoStrongCheckIsStillAccepted(t *testing.T) {
 	}
 }
 
+func TestStageFiveAddsAFileThemeInDegradedStateWhenNoBookHasReleases(t *testing.T) {
+	stubs := []theme.SeriesStub{
+		{ID: "/book/one", Title: "One"},
+		{ID: "/book/two", Title: "Two"},
+		{ID: "/book/three", Title: "Three"},
+	}
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		fileStub{id: "books", score: 90, stubs: stubs, chaptersByID: map[string][]theme.Chapter{
+			"/book/one":   nil,
+			"/book/two":   nil,
+			"/book/three": nil,
+		}})
+
+	if !res.Addable || res.Draft == nil {
+		t.Fatalf("a confirmed instance with three empty books was refused instead of offered in degraded state: %s", res.Detail)
+	}
+	if res.Verdict != theme.VerdictPartial {
+		t.Errorf("verdict = %q, want partial", res.Verdict)
+	}
+	if !strings.Contains(res.Detail, "epub or pdf") {
+		t.Errorf("detail %q does not say what was not found", res.Detail)
+	}
+	if !strings.Contains(strings.ToLower(res.Detail), "sources") {
+		t.Errorf("detail %q does not say this depends on the instance's configured sources", res.Detail)
+	}
+}
+
+// The retry that fixes the bug directly: the first two books tried have
+// nothing, but the third does, and stage 5 must not give up before trying it.
+// A probe that condemned the source on the first arbitrary book is exactly
+// the false refusal reported against a real Shelfmark instance.
+func TestStageFiveTriesMoreThanOneBookBeforeGivingUp(t *testing.T) {
+	stubs := []theme.SeriesStub{
+		{ID: "/book/one", Title: "One"},
+		{ID: "/book/two", Title: "Two"},
+	}
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		fileStub{id: "books", score: 90, stubs: stubs, chaptersByID: map[string][]theme.Chapter{
+			"/book/one": nil,
+			"/book/two": {{ID: "release-1", Title: "EPUB · 1.7MB · Direct Download", Number: 1}},
+		}})
+
+	if res.Verdict != theme.VerdictOK || !res.Addable {
+		t.Fatalf("verdict = %q (%s), want an addable ok once the second book had a release", res.Verdict, res.Detail)
+	}
+}
+
+// A genuine fetch failure along the way stays a refusal, even when every
+// candidate ends up empty overall: "the request failed" and "the book really
+// has nothing" are different claims, and only the second is what Part B
+// exists to stop condemning a source for.
+func TestStageFiveRefusesWhenABookFetchGenuinelyFails(t *testing.T) {
+	stubs := []theme.SeriesStub{
+		{ID: "/book/one", Title: "One"},
+		{ID: "/book/two", Title: "Two"},
+	}
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		fileStub{id: "books", score: 90, stubs: stubs,
+			chaptersByID: map[string][]theme.Chapter{"/book/one": nil},
+			chaptersErrByID: map[string]error{
+				"/book/two": errors.New("books: /api/releases: HTTP 500"),
+			},
+		})
+
+	if res.Addable || res.Draft != nil {
+		t.Fatalf("a source where a book fetch genuinely failed was offered in degraded state: %s", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "couldn't list anything to download") {
+		t.Errorf("detail %q does not name the failing step", res.Detail)
+	}
+}
+
+// The strong check stays non-degradable even here: a source whose strong
+// check failed is refused before any book is even tried, so an empty release
+// list downstream of that never gets a chance to matter.
+func TestStageFiveRefusesEvenWithEmptyReleasesWhenStrongCheckFails(t *testing.T) {
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		confirmingFileStub{
+			fileStub:   fileStub{id: "books", score: 90, chapters: nil},
+			confirmErr: errors.New("books: not the real application"),
+		})
+
+	if res.Addable || res.Draft != nil {
+		t.Fatalf("a source that failed its strong check was offered for adding: %s", res.Detail)
+	}
+	if !strings.Contains(res.Detail, "isn't the application Quire took it for") {
+		t.Errorf("detail %q does not say the strong check is what failed", res.Detail)
+	}
+}
+
 // fileStub is a theme.FileTheme with nothing to offer: a book, and no releases
 // for it. It stands in for an instance whose sources were all unreachable.
 type fileStub struct {
 	id    string
 	score int
 
-	// chapters, when set, are the releases the book has.
+	// chapters, when set and stubs is nil, are the one default book's
+	// releases. Kept as its own field so single-book tests do not have to
+	// build a map for one entry.
 	chapters []theme.Chapter
+
+	// stubs overrides the default single search result, for tests exercising
+	// stage 5's multi-candidate retry. Nil means the default one-book result.
+	stubs []theme.SeriesStub
+
+	// chaptersByID overrides Chapters per stub ID when stubs is set. Nil
+	// falls back to chapters for every ID, which keeps single-book tests
+	// unchanged.
+	chaptersByID map[string][]theme.Chapter
+
+	// chaptersErrByID makes Chapters fail outright for a given stub ID,
+	// instead of merely coming back empty — for the case that must stay a
+	// refusal: a real fetch failure is not "this book has no releases".
+	chaptersErrByID map[string]error
 }
 
 func (f fileStub) ID() string                             { return f.id }
@@ -252,14 +338,25 @@ func (f fileStub) ValidateOverrides(map[string]any) error { return nil }
 func (f fileStub) OverrideKeys() []theme.OverrideDoc      { return nil }
 
 func (f fileStub) Search(context.Context, *theme.Source, string, int) ([]theme.SeriesStub, error) {
+	if f.stubs != nil {
+		return f.stubs, nil
+	}
 	return []theme.SeriesStub{{ID: "/book/one", Title: "One"}}, nil
 }
 
-func (f fileStub) Series(context.Context, *theme.Source, string) (*theme.Series, error) {
-	return &theme.Series{ID: "/book/one", Title: "One"}, nil
+func (f fileStub) Series(_ context.Context, _ *theme.Source, id string) (*theme.Series, error) {
+	return &theme.Series{ID: id, Title: id}, nil
 }
 
-func (f fileStub) Chapters(context.Context, *theme.Source, string) ([]theme.Chapter, error) {
+func (f fileStub) Chapters(_ context.Context, _ *theme.Source, id string) ([]theme.Chapter, error) {
+	if f.chaptersErrByID != nil {
+		if err, ok := f.chaptersErrByID[id]; ok {
+			return nil, err
+		}
+	}
+	if f.chaptersByID != nil {
+		return f.chaptersByID[id], nil
+	}
 	return f.chapters, nil
 }
 
@@ -273,3 +370,13 @@ func (f fileStub) Pages(context.Context, *theme.Source, string) ([]string, error
 func (f fileStub) Retrieve(context.Context, *theme.Source, string, func(string)) (string, string, error) {
 	return "", "", errors.New("books: nothing to retrieve")
 }
+
+// confirmingFileStub adds a theme.Confirmer to fileStub, for the one test
+// where the strong check itself — not the release list — is what must decide
+// the outcome.
+type confirmingFileStub struct {
+	fileStub
+	confirmErr error
+}
+
+func (f confirmingFileStub) Confirm(context.Context, *theme.Source) error { return f.confirmErr }

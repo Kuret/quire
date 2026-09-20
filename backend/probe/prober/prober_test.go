@@ -357,6 +357,50 @@ func TestVerdictPartialRefusedWhenPagesFail(t *testing.T) {
 	}
 }
 
+// Part B (2026-09-20) adds a multi-candidate retry for file-based themes, and
+// this pins that a page-based (manga) theme's behaviour is unchanged by it: a
+// site whose first search result has no chapters is refused exactly as
+// before, even when a later result would have had some. Trying more than one
+// book is right for a service whose per-item availability depends on the
+// user's own configuration; a manga site's first search hit is representative
+// of the whole catalogue, and trying a second one there would only be masking
+// the site failing on the item it was actually asked about.
+func TestStageFivePageBasedThemeDoesNotRetryASecondSearchResult(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /":        {File: "home-unrecognised.html"},
+		"GET /p/1.jpg": imageRoute(),
+	})
+	var chaptersCalls []string
+	th := stubTheme{
+		id:    "alpha",
+		score: 90,
+		stubs: []theme.SeriesStub{
+			{ID: "/series/empty/", Title: "Empty"},
+			{ID: "/series/one/", Title: "One"},
+		},
+		chaptersByID: map[string][]theme.Chapter{
+			"/series/empty/": nil,
+			"/series/one/":   {{ID: "/series/one/1/", Title: "Chapter 1", Number: 1}},
+		},
+		chaptersCalls: &chaptersCalls,
+	}
+	res := runWithFetcher(t, f, th)
+
+	if res.Verdict != theme.VerdictPartial {
+		t.Fatalf("verdict = %q (%s), want partial", res.Verdict, res.Detail)
+	}
+	if res.Addable || res.Draft != nil {
+		t.Fatal("a page-based theme whose first result had no chapters was accepted instead of refused")
+	}
+	if !strings.Contains(res.Detail, "couldn't list any chapters") {
+		t.Errorf("detail %q does not name the failing step", res.Detail)
+	}
+	// The tell: it must never have asked about the second result at all.
+	if got := chaptersCalls; len(got) != 1 || got[0] != "/series/empty/" {
+		t.Errorf("Chapters was asked about %v, want exactly the first result and no more", got)
+	}
+}
+
 // ...and the narrow case where a degraded add *is* offered: search, chapters
 // and pages all work, only the series detail does not.
 func TestVerdictPartialDegradedAddAllowed(t *testing.T) {

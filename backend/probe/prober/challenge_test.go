@@ -28,6 +28,16 @@ type stubTheme struct {
 	// for a refusal ("comick: /v1.0/search: HTTP 444"), which is what the
 	// status-wording tests are about. Nil keeps the working default.
 	searchErr error
+	// stubs overrides the single default search result, for the test pinning
+	// that a page-based theme only ever tries the first one. Nil keeps the
+	// working default.
+	stubs []theme.SeriesStub
+	// chaptersByID overrides Chapters per stub ID when stubs is set. Nil
+	// falls back to the working default of one chapter for every ID.
+	chaptersByID map[string][]theme.Chapter
+	// chaptersCalls, when non-nil, records every ID Chapters was asked about,
+	// so a test can pin how many candidates the capability check tried.
+	chaptersCalls *[]string
 }
 
 func (s stubTheme) ID() string                  { return s.id }
@@ -45,14 +55,26 @@ func (s stubTheme) Search(context.Context, *theme.Source, string, int) ([]theme.
 	if s.searchErr != nil {
 		return nil, s.searchErr
 	}
+	if s.stubs != nil {
+		return s.stubs, nil
+	}
 	return []theme.SeriesStub{{ID: "/series/one/", Title: "One"}}, nil
 }
 
-func (s stubTheme) Series(context.Context, *theme.Source, string) (*theme.Series, error) {
+func (s stubTheme) Series(_ context.Context, _ *theme.Source, id string) (*theme.Series, error) {
+	if s.stubs != nil {
+		return &theme.Series{ID: id, Title: id}, nil
+	}
 	return &theme.Series{ID: "/series/one/", Title: "One"}, nil
 }
 
-func (s stubTheme) Chapters(context.Context, *theme.Source, string) ([]theme.Chapter, error) {
+func (s stubTheme) Chapters(_ context.Context, _ *theme.Source, id string) ([]theme.Chapter, error) {
+	if s.chaptersCalls != nil {
+		*s.chaptersCalls = append(*s.chaptersCalls, id)
+	}
+	if s.chaptersByID != nil {
+		return s.chaptersByID[id], nil
+	}
 	return []theme.Chapter{{ID: "/series/one/1/", Title: "Chapter 1", Number: 1}}, nil
 }
 

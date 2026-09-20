@@ -74,6 +74,13 @@ type capability struct {
 	// serialised: it describes the check, not the site.
 	fileBased bool
 
+	// fileEmpty records that every book candidate stageCapability tried (up to
+	// three) came back with a genuinely empty release list — no error, just
+	// nothing to download — rather than that fetching one of them failed. See
+	// addableEmptyReleases: this is what turns a false refusal into an honest
+	// "these particular books had nothing".
+	fileEmpty bool
+
 	// Image is the fetch of one page image, through the real client: the
 	// limiter, the honest User-Agent, the size cap and — the point — the SSRF
 	// guard under the draft source's seeded allowedHosts. A theme that
@@ -125,6 +132,29 @@ func (c capability) ok() bool {
 func (c capability) addableDegraded() bool {
 	return !c.ok() && c.Challenge == nil && c.Confirm.OK &&
 		c.Search.OK && c.Chapters.OK && c.pagesOK()
+}
+
+// addableEmptyReleases is the file-theme counterpart Part B (2026-09-20)
+// adds, for a case addableDegraded does not and must not cover: every book
+// candidate tried came back with nothing to download, and nothing failed.
+//
+// Release availability for a book service is a property of the book and of
+// which indexers the user has configured on their own instance — narrowed
+// further by Quire's own epub/pdf-only filter (see shelfmark's release
+// filtering) — not a property of the instance being broken. Trying up to
+// three books before giving up (stageCapability) already rules out "the
+// first search hit happened to be obscure"; three-for-three empty is still
+// routine for a self-hosted instance with few or no indexers configured, and
+// it is a fact about those books, not about whether the source works.
+//
+// It requires exactly what addableDegraded requires of Confirm — the strong
+// check is not degradable, here either — plus fileBased and the recorded
+// fileEmpty, and is deliberately its own function rather than a relaxation of
+// addableDegraded: that one is PLAN §7.5's specific allowance for a
+// page-based source missing only page extraction, and loosening it to also
+// mean this would make it stop saying what its name says.
+func (c capability) addableEmptyReleases() bool {
+	return c.fileBased && c.fileEmpty && c.Challenge == nil && c.Confirm.OK && c.Search.OK
 }
 
 // failure names the first failing step, in plain language and as a sentence
@@ -254,22 +284,74 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	cap.Search.OK = true
 	cap.Search.Count = len(stubs)
 
-	// The first result with a usable ID; a theme may legitimately return a stub
-	// it could not fully parse, and picking it would test our patience rather
-	// than the site.
-	var stub theme.SeriesStub
+	// The results with a usable ID and title; a theme may legitimately return a
+	// stub it could not fully parse, and picking one of those would test our
+	// patience rather than the site. Up to three are kept — see the file-based
+	// branch below for why more than one candidate matters there.
+	var candidates []theme.SeriesStub
 	for _, s := range stubs {
 		if strings.TrimSpace(s.ID) != "" && strings.TrimSpace(s.Title) != "" {
-			stub = s
-			break
+			candidates = append(candidates, s)
+			if len(candidates) == 3 {
+				break
+			}
 		}
 	}
-	if stub.ID == "" {
+	if len(candidates) == 0 {
 		cap.Search.OK = false
 		cap.Search.Note = "the results had no titles Quire could follow."
 		return cap
 	}
 
+	if cap.fileBased {
+		// A page-based site's first search hit is representative of the whole
+		// catalogue; a book service's is not. Whether one particular book has
+		// a downloadable release depends on that book and on which indexers
+		// the user's own instance is configured to search — an empty result
+		// for the first hit says nothing about the second. So up to three
+		// candidates are tried, stopping at the first with something to
+		// download, before the source is judged on what remains: routinely
+		// empty across all three tried, not obviously broken.
+		allEmptyNoError := true
+		for _, s := range candidates {
+			series, err := th.Series(ctx, src, s.ID)
+			switch {
+			case err != nil:
+				cap.Series = stepResult{Note: plainError(err)}
+			case series == nil || strings.TrimSpace(series.Title) == "":
+				cap.Series = stepResult{Note: "the series page had no title."}
+			default:
+				cap.Series = stepResult{OK: true}
+			}
+
+			chapters, err := th.Chapters(ctx, src, s.ID)
+			switch {
+			case err != nil:
+				cap.Chapters = stepResult{Note: plainError(err)}
+				allEmptyNoError = false
+			case len(chapters) == 0:
+				cap.Chapters = stepResult{Note: "the series listed no chapters."}
+			default:
+				cap.Chapters = stepResult{OK: true, Count: len(chapters)}
+			}
+
+			if cap.Chapters.OK {
+				cap.Release = fileSteps(chapters)
+				return cap
+			}
+		}
+		// None of the candidates tried had anything. fileEmpty is only set
+		// when every attempt was a genuine, error-free empty list — a real
+		// fetch failure along the way is a different problem and stays a
+		// plain refusal (see addableEmptyReleases).
+		cap.fileEmpty = allEmptyNoError
+		return cap
+	}
+
+	// Page-based themes keep the single-candidate behaviour stage 5 has always
+	// had: the first search hit is representative of the site, unlike a book
+	// service's.
+	stub := candidates[0]
 	series, err := th.Series(ctx, src, stub.ID)
 	switch {
 	case err != nil:
@@ -291,11 +373,6 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		cap.Chapters.Count = len(chapters)
 	}
 	if !cap.Chapters.OK {
-		return cap
-	}
-
-	if cap.fileBased {
-		cap.Release = fileSteps(chapters)
 		return cap
 	}
 

@@ -1058,6 +1058,17 @@ func (r *run) stageAccept(draft *theme.Source, themeID string, cap capability) R
 		res = r.result(theme.VerdictPartial, "Quire can search this site and list chapters, but "+cap.failure()+
 			" You can add it, but expect gaps.")
 		res.Addable = true
+	case cap.addableEmptyReleases():
+		// Part B (2026-09-20): the strong check answered directly — this is a
+		// positive identification of the application itself, stronger evidence
+		// than a markup fingerprint — so an empty result from a handful of
+		// books is a fact about those books, not about the source. Refusing
+		// here is the false refusal this case exists to stop.
+		res = r.result(theme.VerdictPartial, "Quire found this site and confirmed it really is the application it "+
+			"looks like. But none of the books it tried had a downloadable epub or pdf. Whether one does depends "+
+			"on the sources this instance is set up to search, not on Quire's connection to it. You can add it, "+
+			"but it may find nothing to download until sources are configured for the books you want.")
+		res.Addable = true
 	default:
 		// PLAN §7.5: if page extraction fails the source is useless, so refuse.
 		// What "page extraction" means depends on what the source serves — see
