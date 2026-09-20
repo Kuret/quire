@@ -380,6 +380,26 @@ func (c *Client) PostForm(ctx context.Context, p *Policy, rawurl string, form ur
 	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h)
 }
 
+// PostJSON performs a guarded POST of an application/json body.
+//
+// Added 2026-09-20 for the shelfmark theme, whose "start this download"
+// endpoint takes the chosen release object back as JSON. It is a separate
+// method rather than a parameter on PostForm because the content type is the
+// whole difference and a caller should have to pick one.
+//
+// Classification matches PostForm's and for a stronger reason: this POST is
+// the user having chosen a specific file and asked for it, which is retrieval
+// in PLAN §7.4's sense — yet it is sent as *discovery*, the stricter of the
+// two. Nothing is gained by claiming the looser reading for a request Quire
+// makes once per download, and the exception §7.4 grants is worth keeping as
+// narrow as it was written.
+func (c *Client) PostJSON(ctx context.Context, p *Policy, rawurl string, body []byte) (*Response, error) {
+	h := http.Header{}
+	h.Set("Content-Type", "application/json")
+	h.Set("Accept", "application/json")
+	return c.do(ctx, p, KindDiscovery, http.MethodPost, rawurl, body, h)
+}
+
 type policyKey struct{}
 
 func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl string, body []byte, hdr http.Header) (*Response, error) {

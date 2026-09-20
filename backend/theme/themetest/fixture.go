@@ -36,6 +36,12 @@ type Request struct {
 	URL    string
 	Form   url.Values
 
+	// JSON is the raw body of a PostJSON call, nil for every other request.
+	// shelfmark starts a download by posting the chosen release object back,
+	// so "which release did the theme ask for?" is a claim a test has to be
+	// able to check against the bytes actually sent.
+	JSON []byte
+
 	// Kind is the PLAN §7.4 request kind the theme asked for. It is recorded
 	// because "was this fetched as retrieval?" is a claim a test should be
 	// able to check, not something to take a theme's word for.
@@ -143,7 +149,24 @@ func (f *Fetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, 
 	return f.answer(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, form, fetch.Referrer{})
 }
 
+// PostJSON mirrors fetch.Client.PostJSON. It is not on theme.Fetcher — only
+// shelfmark needs it, and it reaches for it by asserting a one-method
+// interface — but the fixture fetcher answers it so that theme can be tested
+// offline like every other.
+func (f *Fetcher) PostJSON(ctx context.Context, p *fetch.Policy, rawurl string, body []byte) (*fetch.Response, error) {
+	return f.answerJSON(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, body)
+}
+
 func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl string, form url.Values, from fetch.Referrer) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: method, URL: rawurl, Form: form, Kind: kind, Referrer: from})
+}
+
+func (f *Fetcher) answerJSON(ctx context.Context, kind fetch.Kind, method, rawurl string, body []byte) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: method, URL: rawurl, JSON: append([]byte(nil), body...), Kind: kind})
+}
+
+func (f *Fetcher) route(ctx context.Context, req Request) (*fetch.Response, error) {
+	method, rawurl := req.Method, req.URL
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -153,7 +176,7 @@ func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl st
 	}
 
 	f.mu.Lock()
-	f.calls = append(f.calls, Request{Method: method, URL: rawurl, Form: form, Kind: kind, Referrer: from})
+	f.calls = append(f.calls, req)
 	f.mu.Unlock()
 
 	// Try the path+query key first, then the bare path, so a route only has to

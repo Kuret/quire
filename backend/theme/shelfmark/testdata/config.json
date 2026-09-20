@@ -1,0 +1,391 @@
+{
+  "audiobook_library_url": null,
+  "auto_open_downloads_sidebar": true,
+  "book_languages": [
+    {
+      "code": "en",
+      "language": "English"
+    },
+    {
+      "code": "zh",
+      "language": "Chinese"
+    },
+    {
+      "code": "ru",
+      "language": "Russian"
+    },
+    {
+      "code": "es",
+      "language": "Spanish"
+    },
+    {
+      "code": "fr",
+      "language": "French"
+    },
+    {
+      "code": "de",
+      "language": "German"
+    },
+    {
+      "code": "it",
+      "language": "Italian"
+    },
+    {
+      "code": "pt",
+      "language": "Portuguese"
+    },
+    {
+      "code": "pl",
+      "language": "Polish"
+    },
+    {
+      "code": "bg",
+      "language": "Bulgarian"
+    },
+    {
+      "code": "nl",
+      "language": "Dutch"
+    },
+    {
+      "code": "ja",
+      "language": "Japanese"
+    },
+    {
+      "code": "ar",
+      "language": "Arabic"
+    },
+    {
+      "code": "he",
+      "language": "Hebrew"
+    },
+    {
+      "code": "tr",
+      "language": "Turkish"
+    },
+    {
+      "code": "hu",
+      "language": "Hungarian"
+    },
+    {
+      "code": "la",
+      "language": "Latin"
+    },
+    {
+      "code": "cs",
+      "language": "Czech"
+    },
+    {
+      "code": "ko",
+      "language": "Korean"
+    },
+    {
+      "code": "uk",
+      "language": "Ukrainian"
+    },
+    {
+      "code": "id",
+      "language": "Indonesian"
+    },
+    {
+      "code": "ro",
+      "language": "Romanian"
+    },
+    {
+      "code": "sv",
+      "language": "Swedish"
+    },
+    {
+      "code": "el",
+      "language": "Greek"
+    },
+    {
+      "code": "lt",
+      "language": "Lithuanian"
+    },
+    {
+      "code": "bn",
+      "language": "Bangla"
+    },
+    {
+      "code": "zh-Hant",
+      "language": "Traditional Chinese"
+    },
+    {
+      "code": "af",
+      "language": "Afrikaans"
+    },
+    {
+      "code": "ca",
+      "language": "Catalan"
+    },
+    {
+      "code": "da",
+      "language": "Danish"
+    },
+    {
+      "code": "th",
+      "language": "Thai"
+    },
+    {
+      "code": "hi",
+      "language": "Hindi"
+    },
+    {
+      "code": "ga",
+      "language": "Irish"
+    },
+    {
+      "code": "lv",
+      "language": "Latvian"
+    },
+    {
+      "code": "bo",
+      "language": "Tibetan"
+    },
+    {
+      "code": "kn",
+      "language": "Kannada"
+    },
+    {
+      "code": "sr",
+      "language": "Serbian"
+    },
+    {
+      "code": "fa",
+      "language": "Persian"
+    },
+    {
+      "code": "hr",
+      "language": "Croatian"
+    },
+    {
+      "code": "sk",
+      "language": "Slovak"
+    },
+    {
+      "code": "jv",
+      "language": "Javanese"
+    },
+    {
+      "code": "vi",
+      "language": "Vietnamese"
+    },
+    {
+      "code": "ur",
+      "language": "Urdu"
+    },
+    {
+      "code": "fi",
+      "language": "Finnish"
+    },
+    {
+      "code": "no",
+      "language": "Norwegian"
+    },
+    {
+      "code": "rw",
+      "language": "Kinyarwanda"
+    },
+    {
+      "code": "ta",
+      "language": "Tamil"
+    },
+    {
+      "code": "be",
+      "language": "Belarusian"
+    },
+    {
+      "code": "kk",
+      "language": "Kazakh"
+    },
+    {
+      "code": "mn",
+      "language": "Mongolian"
+    },
+    {
+      "code": "ka",
+      "language": "Georgian"
+    },
+    {
+      "code": "sl",
+      "language": "Slovenian"
+    },
+    {
+      "code": "eo",
+      "language": "Esperanto"
+    },
+    {
+      "code": "gl",
+      "language": "Galician"
+    },
+    {
+      "code": "mr",
+      "language": "Marathi"
+    },
+    {
+      "code": "fil",
+      "language": "Filipino"
+    },
+    {
+      "code": "gu",
+      "language": "Gujarati"
+    },
+    {
+      "code": "ml",
+      "language": "Malayalam"
+    },
+    {
+      "code": "ky",
+      "language": "Kyrgyz"
+    },
+    {
+      "code": "az",
+      "language": "Azerbaijani"
+    },
+    {
+      "code": "qu",
+      "language": "Quechua"
+    },
+    {
+      "code": "sw",
+      "language": "Swahili"
+    },
+    {
+      "code": "ba",
+      "language": "Bashkir"
+    },
+    {
+      "code": "pa",
+      "language": "Punjabi"
+    },
+    {
+      "code": "ms",
+      "language": "Malay"
+    },
+    {
+      "code": "te",
+      "language": "Telugu"
+    },
+    {
+      "code": "sq",
+      "language": "Albanian"
+    },
+    {
+      "code": "ug",
+      "language": "Uyghur"
+    },
+    {
+      "code": "hy",
+      "language": "Armenian"
+    },
+    {
+      "code": "shn",
+      "language": "Shan"
+    },
+    {
+      "code": "bs",
+      "language": "Bosnian"
+    },
+    {
+      "code": "my",
+      "language": "Burmese"
+    },
+    {
+      "code": "et",
+      "language": "Estonian"
+    },
+    {
+      "code": "is",
+      "language": "Icelandic"
+    },
+    {
+      "code": "gv",
+      "language": "Manx"
+    },
+    {
+      "code": "gd",
+      "language": "Scottish Gaelic"
+    },
+    {
+      "code": "sa",
+      "language": "Sanskrit"
+    }
+  ],
+  "books_output_mode": "folder",
+  "build_version": "0000-00-00-example",
+  "calibre_web_url": null,
+  "debug": false,
+  "default_language": [
+    "en"
+  ],
+  "default_release_source": "",
+  "default_release_source_audiobook": "",
+  "default_sort": "relevance",
+  "download_to_browser_content_types": [
+    "book"
+  ],
+  "force_combined_search": false,
+  "hardcover_auto_remove_on_download": true,
+  "metadata_default_sort": "relevance",
+  "metadata_search_fields": [
+    {
+      "description": "Search by author name",
+      "key": "author",
+      "label": "Author",
+      "placeholder": "",
+      "type": "TextSearchField"
+    },
+    {
+      "description": "Search by book title",
+      "key": "title",
+      "label": "Title",
+      "placeholder": "",
+      "type": "TextSearchField"
+    }
+  ],
+  "metadata_sort_options": [
+    {
+      "label": "Most relevant",
+      "value": "relevance"
+    },
+    {
+      "label": "Newest",
+      "value": "newest"
+    },
+    {
+      "label": "Oldest",
+      "value": "oldest"
+    }
+  ],
+  "onboarding_complete": true,
+  "release_search_timeout": 300.0,
+  "release_version": "main",
+  "search_mode": "direct",
+  "search_page_title": "Book Search & Download",
+  "settings_enabled": true,
+  "show_combined_selector": true,
+  "show_release_source_links": true,
+  "supported_audiobook_formats": [
+    "m4b",
+    "mp3",
+    "m4a",
+    "mp4",
+    "flac",
+    "ogg",
+    "wma",
+    "aac",
+    "wav",
+    "opus",
+    "zip",
+    "rar"
+  ],
+  "supported_formats": [
+    "epub",
+    "mobi",
+    "azw3",
+    "fb2",
+    "djvu",
+    "cbz",
+    "cbr"
+  ]
+}

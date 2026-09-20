@@ -1,0 +1,32 @@
+{
+  "cancelled": {},
+  "complete": {
+    "00000000000000000000000000000000": {
+      "added_time": 1789906777.458389,
+      "author": "Example Author",
+      "content_type": "ebook",
+      "download_path": "/books/An Example Book - Example Author (1970)_1.epub",
+      "downloads": 24517,
+      "format": "epub",
+      "id": "00000000000000000000000000000000",
+      "preview": "/api/covers/00000000000000000000000000000000",
+      "priority": 0,
+      "progress": 92.74355570475261,
+      "request_id": null,
+      "retry_available": false,
+      "size": "0.3MB",
+      "source": "direct_download",
+      "source_display_name": "Direct Download",
+      "status": "complete",
+      "status_message": "Complete",
+      "title": "An Example Book",
+      "user_id": null,
+      "username": null
+    }
+  },
+  "downloading": {},
+  "error": {},
+  "locating": {},
+  "queued": {},
+  "resolving": {}
+}

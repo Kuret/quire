@@ -289,6 +289,41 @@ type DiscoveryClassifier interface {
 	DiscoveryOnly() Theme
 }
 
+// FileTheme is implemented by a theme whose chapters are finished files rather
+// than page images.
+//
+// Every other theme in this package ends at Pages(): a chapter is a list of
+// image URLs, which M4 fetches, resizes and assembles into a PDF. A theme that
+// drives a book service has none of that — the thing the user chose is already
+// an epub or a pdf, and there is nothing to assemble. Such a theme returns an
+// error from Pages (an empty slice would read as "no pages found", which is a
+// different and misleading claim) and implements this instead.
+//
+// It is a side interface rather than part of Theme for the same reason
+// PageReferrer and DiscoveryClassifier are: it describes a property most themes
+// do not have, and a required method that eight themes answered "not me" to
+// would be noise on the interface PLAN §7.2 specifies.
+//
+// # Why a URL and not bytes
+//
+// Retrieve could hand back the file itself; it deliberately does not. Returning
+// a URL keeps the transfer inside the ordinary guarded client — the SSRF guard,
+// the rate limiter, the honest User-Agent, Retry-After and the response size
+// cap all still apply to it, exactly as they do to a page image. A theme that
+// returned bytes would have had to fetch them by some other route, and PLAN
+// §7.4's boundary is not something to have two of.
+type FileTheme interface {
+	// Retrieve starts the retrieval of one chapter and blocks until the file
+	// can be fetched, reporting progress as it goes. It returns a URL the
+	// caller fetches through the ordinary guarded client, and the name to give
+	// the document.
+	//
+	// progress is called with short, user-facing notes; it may be nil, and an
+	// implementation must tolerate that. The call can legitimately take
+	// minutes, so the context is the caller's way out and must be honoured.
+	Retrieve(ctx context.Context, s *Source, chapterID string, progress func(note string)) (fileURL, filename string, err error)
+}
+
 // DiscoveryFetcher wraps f so that retrieval requests are made as discovery
 // instead. It is what a theme's DiscoveryOnly is expected to be built from.
 //

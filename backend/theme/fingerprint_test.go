@@ -16,6 +16,7 @@ import (
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/shelfmark"
 	"github.com/rickl/quire/backend/theme/webtoons"
 	"github.com/rickl/quire/backend/theme/weebcentral"
 )
@@ -89,12 +90,21 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(comick.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// shelfmark, added 2026-09-20, is the odd one out twice over: it drives a
+	// self-hosted book service rather than a comic site, and it is the only
+	// theme here whose instance can be at any address at all, so it has no
+	// host to gate on and scores purely on what a page says about itself. Both
+	// facts make it the most likely of the lot to claim somebody else's page,
+	// which is precisely why it is registered here.
+	if err := reg.Register(shelfmark.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 8
+const scorers = 9
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -230,6 +240,11 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a comick home page",
 			file:       "comick/testdata/home.html",
 			wantWinner: comick.ID,
+		},
+		{
+			name:       "a shelfmark instance's web shell",
+			file:       "shelfmark/testdata/index.html",
+			wantWinner: shelfmark.ID,
 		},
 		{
 			// A bare API body, which the probe never fetches — stage 2 gets
