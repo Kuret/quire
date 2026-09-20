@@ -642,20 +642,29 @@ func (s *Service) confirmAdd(out Sender, url, themeID, name, lang string) error 
 	if err != nil {
 		return s.sendError(out, "not_added", err.Error())
 	}
-	if confirm != nil {
-		if err := s.store.ConfirmSelfHosted(stored.ID, confirm.ConfirmedAddr); err != nil {
-			// A source on a private address without its confirmation could not
-			// fetch a single page, so it is taken back out rather than left in
-			// the list to fail at every tap.
+	// The proxy goes on first, and the order is not incidental: a confirmation
+	// that records "reached through a proxy" rather than an address stands on
+	// that proxy being there, and the store checks it rather than taking the
+	// caller's word for it.
+	if proxy != "" {
+		if err := s.store.SetProxy(stored.ID, proxy); err != nil {
+			// The user told Quire this source is reached through a proxy, so a
+			// source stored without one is a source that cannot answer. It is
+			// taken back out rather than left in the list to fail at every tap.
 			_ = s.store.Remove(stored.ID)
 			return s.sendError(out, "not_added", err.Error())
 		}
 	}
-	if proxy != "" {
-		if err := s.store.SetProxy(stored.ID, proxy); err != nil {
-			// Same reasoning: the user told Quire this source is only reachable
-			// through a proxy, so a source stored without one is a source that
-			// cannot answer.
+	if confirm != nil {
+		var err error
+		if confirm.ConfirmedAddr != "" {
+			err = s.store.ConfirmSelfHosted(stored.ID, confirm.ConfirmedAddr)
+		} else {
+			// Nothing resolved during the probe, so there is no address to
+			// record and none is invented. See theme.SelfHosted.ViaProxy.
+			err = s.store.ConfirmSelfHostedViaProxy(stored.ID)
+		}
+		if err != nil {
 			_ = s.store.Remove(stored.ID)
 			return s.sendError(out, "not_added", err.Error())
 		}

@@ -225,3 +225,99 @@ func TestAnOrdinarySourceGetsNeitherField(t *testing.T) {
 		t.Errorf("an ordinary source's policy = proxy %v, selfHosted %q; want neither", p.Proxy, p.SelfHostedHost)
 	}
 }
+
+// unresolvableGuard is the device as measured on 2026-09-20: the name does not
+// resolve here at all, and the proxy is what reaches it.
+type unresolvableGuard struct{}
+
+func (unresolvableGuard) CheckURL(_ context.Context, u *url.URL, p *fetch.Policy) error {
+	if p != nil && p.SelfHostedHost == u.Hostname() && p.Proxy != nil {
+		return nil
+	}
+	return &fetch.GuardError{
+		URL:        u.Redacted(),
+		Reason:     `cannot resolve "example.invalid": no such host`,
+		Kind:       fetch.ErrInvalidURL,
+		Unresolved: true,
+	}
+}
+
+func (unresolvableGuard) SelfHostableTarget(context.Context, *url.URL) (netip.Addr, bool) {
+	// Nothing resolved, so there is nothing to offer an address for.
+	return netip.Addr{}, false
+}
+
+// TestASourceThatResolvesNowhereIsAddedThroughItsProxy is the flow on the
+// owner's tablet: the name exists only inside their mesh, the lookup fails, the
+// question offers a proxy, and the stored source records the proxy as the
+// evidence rather than an address nobody has.
+func TestASourceThatResolvesNowhereIsAddedThroughItsProxy(t *testing.T) {
+	f := themetest.New(t, routes())
+	reg := theme.NewRegistry()
+	reg.MustRegister(madara.NewWithClock(f, func() time.Time { return fixedNow }))
+	dir := t.TempDir()
+	store, err := state.Open(dir, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(service.Options{
+		Store: store, Registry: reg, Fetcher: f,
+		Covers:     covers.New(dir+"/covers", f),
+		Now:        func() time.Time { return fixedNow },
+		ProbeGuard: unresolvableGuard{},
+	})
+	t.Cleanup(svc.Close)
+	rec := &recorder{}
+
+	handle(t, svc, rec, appload.MessageProbeSource, `{"url":"https://example.invalid"}`)
+	q := waitForQuestion(t, rec)
+	if q.Kind != "selfhosted" {
+		t.Fatalf("question kind = %q, want selfhosted", q.Kind)
+	}
+	handle(t, svc, rec, appload.MessageProbeAnswer, `{"id":"continue","text":"http://localhost:1055"}`)
+
+	var verdict struct {
+		Verdict string `json:"verdict"`
+		Addable bool   `json:"addable"`
+		Theme   string `json:"theme"`
+		Name    string `json:"name"`
+		URL     string `json:"url"`
+		Detail  string `json:"detail"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageProbeVerdict), &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Verdict != theme.VerdictOK || !verdict.Addable {
+		t.Fatalf("verdict = %+v; a proxy should have got the probe through", verdict)
+	}
+
+	handle(t, svc, rec, appload.MessageConfirmAddSource,
+		`{"url":"`+verdict.URL+`","theme":"`+verdict.Theme+`","name":"`+verdict.Name+`","lang":"en"}`)
+
+	got := store.List()
+	if len(got) != 1 {
+		t.Fatalf("store holds %d source(s): %+v", len(got), got)
+	}
+	src := got[0]
+	if src.Proxy != "http://localhost:1055" {
+		t.Errorf("stored proxy = %q", src.Proxy)
+	}
+	if src.SelfHosted == nil || !src.SelfHosted.ViaProxy {
+		t.Fatalf("stored confirmation = %+v, want one recorded as reached through a proxy", src.SelfHosted)
+	}
+	if src.SelfHosted.ConfirmedAddr != "" {
+		t.Errorf("ConfirmedAddr = %q; nothing resolved, so nothing may be recorded", src.SelfHosted.ConfirmedAddr)
+	}
+	if src.SelfHosted.ConfirmedAt.IsZero() {
+		t.Error("ConfirmedAt is zero")
+	}
+	// It survives a reload, which is the store validating the pair on the way
+	// back in: the flag is only legible because the proxy is there with it.
+	again, err := state.Open(dir, reg)
+	if err != nil {
+		t.Fatalf("the stored source did not survive a reload: %v", err)
+	}
+	if reloaded := again.List(); len(reloaded) != 1 || reloaded[0].SelfHosted == nil {
+		t.Fatalf("after reload: %+v", reloaded)
+	}
+}
