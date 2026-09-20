@@ -128,6 +128,17 @@ func (t *Theme) ID() string { return ID }
 // after someone else's deployment detail.
 func (t *Theme) SuggestedName() string { return "Shelfmark" }
 
+// ProbeQuery implements theme.ProbeQuerier.
+//
+// Measured against a live instance (2026-09-20): the empty-query listing
+// stage 5 tries first answers HTTP 400 here — Shelfmark's search requires a
+// query, by design, not by fault — and the package default fallback, "one",
+// came back with zero results from that instance's metadata provider
+// (openlibrary). "dune" is a well-known title any book index answers, so it
+// is what actually tests whether the site works rather than manufacturing a
+// false refusal out of a query chosen for a different family of themes.
+func (t *Theme) ProbeQuery() string { return "dune" }
+
 // AllowedHosts implements theme.Theme.
 //
 // Nil, and it stays nil. Everything this theme fetches is on the instance

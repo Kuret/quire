@@ -352,6 +352,26 @@ type Confirmer interface {
 	Confirm(ctx context.Context, s *Source) error
 }
 
+// ProbeQuerier is implemented by a theme that knows a search term its own
+// backend will actually answer, for stage 5's fallback search.
+//
+// The default fallback query ("one") is chosen for the manga family the
+// capability check was written against: a common word in titles across
+// languages of romanised manga. It is not a safe assumption for every kind of
+// backend — a theme with its own catalogue may answer nothing to it, or may
+// even reject the *listing* stage 5 tries first, by design rather than by
+// fault. A theme that knows better says so here rather than being probed with
+// a query invented for a different family of sites.
+//
+// It is a side interface for the same reason Confirmer and FileTheme are:
+// most themes have no opinion, and the package default is the right answer
+// for them.
+type ProbeQuerier interface {
+	// ProbeQuery is the search term stage 5 should use as the fallback when
+	// the empty-query listing does not work, in place of the package default.
+	ProbeQuery() string
+}
+
 // DiscoveryFetcher wraps f so that retrieval requests are made as discovery
 // instead. It is what a theme's DiscoveryOnly is expected to be built from.
 //

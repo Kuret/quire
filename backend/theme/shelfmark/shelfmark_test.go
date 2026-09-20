@@ -945,6 +945,16 @@ func TestThemeDeclarations(t *testing.T) {
 	if _, ok := any(th).(theme.FileTheme); !ok {
 		t.Error("the theme whose chapters are files does not implement FileTheme")
 	}
+	// Stage 5's fallback search needs a query this theme's own backend
+	// actually answers, not the package default written for manga sites —
+	// see theme.ProbeQuerier.
+	pq, ok := any(th).(theme.ProbeQuerier)
+	if !ok {
+		t.Fatal("the theme does not implement theme.ProbeQuerier")
+	}
+	if got := pq.ProbeQuery(); got != "dune" {
+		t.Errorf("ProbeQuery() = %q, want \"dune\"", got)
+	}
 }
 
 // The real acknowledgement, captured from a live instance on 2026-09-20, names
