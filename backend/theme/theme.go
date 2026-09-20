@@ -324,6 +324,34 @@ type FileTheme interface {
 	Retrieve(ctx context.Context, s *Source, chapterID string, progress func(note string)) (fileURL, filename string, err error)
 }
 
+// Confirmer is implemented by a theme that can *prove* a site is what the
+// fingerprint guessed, by asking the server rather than by reading its markup.
+//
+// Fingerprint scores a page's <head>, which anyone can write. For a family of
+// independently hosted sites that is all there is, and the capability check —
+// search, series, chapters, a page image — is what turns the guess into
+// evidence. A self-hosted application is a different problem: the shell it
+// serves is a near-empty single-page app, so the markup carries almost nothing,
+// and the real evidence is an API response only that application produces.
+// shelfmark.CheckConfig is that: the co-occurrence of four config keys which
+// together describe Shelfmark's model.
+//
+// It is a side interface for the same reason PageReferrer and FileTheme are:
+// most themes have no such endpoint, and "" is the right answer for them. A
+// theme that does not implement it is not failing anything — it is making no
+// claim beyond what stage 5 already exercises.
+//
+// # The contract
+//
+// Confirm must make a *request* and judge the response. A nil return means the
+// site really is this theme's application; an error says why it is not, in
+// language stage 5 can show the user. It must never return nil for "I could not
+// tell": PLAN §7.5's worst outcome is a false `ok`, and a check that passes when
+// it could not run is exactly that.
+type Confirmer interface {
+	Confirm(ctx context.Context, s *Source) error
+}
+
 // DiscoveryFetcher wraps f so that retrieval requests are made as discovery
 // instead. It is what a theme's DiscoveryOnly is expected to be built from.
 //

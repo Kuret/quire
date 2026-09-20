@@ -772,8 +772,10 @@ func (r *run) stageAccept(draft *theme.Source, themeID string, cap capability) R
 		res.Addable = true
 	default:
 		// PLAN §7.5: if page extraction fails the source is useless, so refuse.
+		// What "page extraction" means depends on what the source serves — see
+		// capability.uselessWithout.
 		res = r.result(theme.VerdictPartial, "Quire recognised this site but "+cap.failure()+
-			" A source Quire can't read pages from is no use, so nothing was added.")
+			" "+cap.uselessWithout())
 	}
 	res.ThemeID = themeID
 	if res.Addable {

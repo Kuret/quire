@@ -45,6 +45,11 @@ type downloadedRow struct {
 
 	// Note is why the row cannot be opened, or "".
 	Note string `json:"note,omitempty"`
+
+	// Kind is "book" or "manga" (see kind.go), and absent for a row whose source
+	// has been removed: there is nothing left to ask, and guessing would be
+	// inventing an answer about files the user still has.
+	Kind string `json:"kind,omitempty"`
 }
 
 // RemovedSourceNote is what a row says when the source it came from is gone.
@@ -119,6 +124,10 @@ func (s *Service) downloadedRows() []downloadedRow {
 			Detail:     downloadCount(len(recs)),
 			CoverURL:   s.store.CoverURL(k.source, k.series),
 			LatestUUID: latestUUID(recs),
+			// Asked unconditionally, and answered "" when there is nothing left
+			// to ask: a removed source, or one whose theme this build no longer
+			// has. See kindForSource.
+			Kind: s.kindForSource(k.source),
 		}
 		if src, ok := s.store.Get(k.source); ok {
 			row.SourceName, row.Openable = src.Name, true

@@ -45,6 +45,11 @@ type searchAllMatch struct {
 	sourceOrder int
 
 	title string
+
+	// kind is "book" or "manga" for the source this match came from (see
+	// kind.go). Lowercase like the other sort-and-merge keys: it is what the
+	// group's own kind is derived from, and the frontend is given the group's.
+	kind string
 }
 
 // searchAllGroup is one series as far as the user is concerned.
@@ -53,6 +58,18 @@ type searchAllGroup struct {
 	Title    string           `json:"title"`
 	CoverURL string           `json:"coverUrl,omitempty"`
 	Matches  []searchAllMatch `json:"matches"`
+
+	// Kind is "book" or "manga" when every source in this group agrees, and
+	// absent when they do not.
+	//
+	// Absent rather than "the best match's kind": a combined search merges on
+	// the normalised title, so a book service and a comic site can legitimately
+	// land under one heading — Dune the novel and Dune the manga are the same
+	// six letters. Calling that group a book would be a claim about rows that
+	// are not books, and the group is the wrong place to make a per-row claim.
+	// Empty means "this group is not all one thing", which is the truth, and the
+	// only honest thing a single field can say about it.
+	Kind string `json:"kind,omitempty"`
 }
 
 // searchAllError is one source that did not answer. It carries the source's
@@ -100,6 +117,11 @@ type searchAllSourceState struct {
 	id    string
 	name  string
 	order int
+
+	// kind is what this source deals in, resolved once when the pager is built
+	// rather than per stub: it is a property of the theme and cannot change
+	// under a query.
+	kind string
 
 	// fetch asks this source for one source page, 1-based. It is the only
 	// thing in this file that touches the network.
@@ -297,6 +319,7 @@ func (p *searchAllPager) group() []searchAllGroup {
 				rank:        i + 1,
 				sourceOrder: st.order,
 				title:       stub.Title,
+				kind:        st.kind,
 			})
 		}
 	}
@@ -330,6 +353,7 @@ func (p *searchAllPager) group() []searchAllGroup {
 			Key:      key,
 			Title:    matches[best].title,
 			CoverURL: cover,
+			Kind:     agreedKind(matches),
 			// Within a group the order is the user's source order: the list of
 			// sources under a title should read the same way every time, and
 			// the same way as the source list itself.
@@ -364,6 +388,23 @@ func (p *searchAllPager) group() []searchAllGroup {
 		return a.Key < b.Key
 	})
 	return groups
+}
+
+// agreedKind is the kind every match in a group shares, or "" when they differ.
+// See searchAllGroup.Kind for why disagreement is reported as absence rather
+// than settled by a vote.
+func agreedKind(matches []searchAllMatch) string {
+	kind := ""
+	for i, m := range matches {
+		if i == 0 {
+			kind = m.kind
+			continue
+		}
+		if m.kind != kind {
+			return ""
+		}
+	}
+	return kind
 }
 
 // betterMatch is the relevance comparison: the site's own rank first, the
@@ -474,6 +515,7 @@ func (s *Service) newSearchAllPager(query string) *searchAllPager {
 		if err != nil {
 			st.failure = err.Error()
 		} else {
+			st.kind = kindOf(th)
 			st.fetch = func(ctx context.Context, sourcePage int) ([]theme.SeriesStub, error) {
 				return th.Search(ctx, bound, query, sourcePage)
 			}

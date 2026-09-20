@@ -841,6 +841,9 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 
 	_ = send(out, appload.MessageSearchResults, map[string]any{
 		"sourceId": sourceID,
+		// What these results *are* (see kind.go). One listing is one source, so
+		// it belongs on the message rather than repeated on every row.
+		"kind":     kindOf(th),
 		"query":    query,
 		"page":     res.Page,
 		"pageSize": pageSize,

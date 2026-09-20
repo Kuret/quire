@@ -64,8 +64,16 @@ func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := io.ReadAll(part)
 		name := part.FileName()
-		if !strings.HasSuffix(strings.ToLower(name), ".pdf") {
+		// What xochitl does with the name, measured on the device: it appends
+		// ".pdf" only when the filename has **no extension at all**. An
+		// ".epub" is kept verbatim and lands with fileType "epub", which is
+		// what makes the stock reader paginate it (2026-09-20). A fake that
+		// appended ".pdf" to every non-pdf name would hide exactly the bug the
+		// book path has to avoid.
+		fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
+		if fileType == "" {
 			name += ".pdf"
+			fileType = "pdf"
 		}
 		f.n++
 		f.uploaded = append(f.uploaded, body)
@@ -75,7 +83,7 @@ func (f *fakeLibrary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Parent:      f.selected,
 			Type:        library.Document,
 			VisibleName: name,
-			FileType:    "pdf",
+			FileType:    fileType,
 		})
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"status":"Upload successful"}`)

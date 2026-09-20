@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/shelfmark"
 )
 
 func discardLogger() *slog.Logger {
@@ -299,5 +301,28 @@ func TestStatusCarriesThePerScreenViews(t *testing.T) {
 	}
 	if len(s.Views) != len(state.Screens) {
 		t.Errorf("status carries %d screens, want %d: %v", len(s.Views), len(state.Screens), s.Views)
+	}
+}
+
+// Every theme in the repository has to be *registered* to exist as far as the
+// app is concerned: the probe picks a theme by fingerprinting against the
+// registry, so one that is not in it can never be chosen, however well its own
+// package is tested. shelfmark was written a whole milestone before anything
+// registered it (2026-09-20), which is what this test is here to stop
+// happening again.
+func TestEveryShippedThemeIsRegistered(t *testing.T) {
+	reg := themeRegistry(fetch.NewClient(fetch.Options{Version: "test", Logger: discardLogger()}))
+
+	for _, id := range []string{
+		"madara", "mangathemesia", "mangakakalot", "mangadex", "weebcentral",
+		"webtoons", "fanfox", "comick", "generic",
+		// The file theme. A book source is unusable without it registered, and
+		// the symptom — "Quire doesn't recognise this site's layout" — names
+		// every other theme and gives no hint that this one exists.
+		shelfmark.ID,
+	} {
+		if _, ok := reg.Lookup(id); !ok {
+			t.Errorf("the %s theme is not registered, so no source can ever use it", id)
+		}
 	}
 }

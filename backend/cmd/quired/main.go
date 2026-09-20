@@ -43,6 +43,7 @@ import (
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
 	"github.com/rickl/quire/backend/theme/mangathemesia"
+	"github.com/rickl/quire/backend/theme/shelfmark"
 	"github.com/rickl/quire/backend/theme/webtoons"
 	"github.com/rickl/quire/backend/theme/weebcentral"
 )
@@ -487,6 +488,32 @@ func dataDir() (string, error) {
 	return filepath.Join(filepath.Dir(filepath.Dir(exe)), "data"), nil
 }
 
+// themeRegistry is every theme this build ships, over the one guarded client.
+//
+// It is a function of its own so that "is this theme actually shipped?" is a
+// question a test can ask. A theme nobody registers can never be fingerprinted,
+// never be chosen by the probe and never drive a source — it is present in the
+// repository and absent from the product, which is a difference no amount of
+// passing tests inside the theme's own package would reveal.
+func themeRegistry(client *fetch.Client) *theme.Registry {
+	reg := theme.NewRegistry()
+	reg.MustRegister(madara.New(client))
+	reg.MustRegister(mangathemesia.New(client))
+	reg.MustRegister(mangakakalot.New(client))
+	reg.MustRegister(mangadex.New(client))
+	reg.MustRegister(weebcentral.New(client))
+	reg.MustRegister(webtoons.New(client))
+	reg.MustRegister(fanfox.New(client))
+	reg.MustRegister(comick.New(client))
+	// The one theme whose chapters are finished files rather than page images
+	// (theme.FileTheme, 2026-09-20). It is registered exactly like the rest:
+	// what makes it different is downstream, in the download path — see
+	// service.runFileDownload.
+	reg.MustRegister(shelfmark.New(client))
+	reg.MustRegister(generic.New(client))
+	return reg
+}
+
 // newService wires the backend together: one guarded HTTP client, every theme,
 // the source store and the cover cache.
 //
@@ -515,16 +542,7 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	// the themes are built over it.
 	client := fetch.NewClient(fetch.Options{Version: version, Logger: log})
 
-	reg := theme.NewRegistry()
-	reg.MustRegister(madara.New(client))
-	reg.MustRegister(mangathemesia.New(client))
-	reg.MustRegister(mangakakalot.New(client))
-	reg.MustRegister(mangadex.New(client))
-	reg.MustRegister(weebcentral.New(client))
-	reg.MustRegister(webtoons.New(client))
-	reg.MustRegister(fanfox.New(client))
-	reg.MustRegister(comick.New(client))
-	reg.MustRegister(generic.New(client))
+	reg := themeRegistry(client)
 
 	store, err := state.Open(stateDir, reg)
 	if err != nil {

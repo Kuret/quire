@@ -36,11 +36,43 @@ import (
 // §7.5 and §6 M3 are most emphatic about not producing, and "if page extraction
 // fails the source is useless, so refuse" plainly meant *can we get pages*.
 // So stage 5 now fetches one.
+//
+// CORRECTION 2026-09-20 — the five steps are the *page-based* shape, and a
+// theme.FileTheme has no page images at all: its "chapters" are finished epubs
+// and its Pages() returns an error by design. Running the check above against
+// one would report "it couldn't find the page images in a chapter" for a source
+// that works perfectly, which is a false *refusal* — the mirror image of the
+// mistake the 2026-09-16 correction fixed, and just as wrong.
+//
+// So a file theme is verified by what it actually does: search → book →
+// releases → a release that can be asked for, plus theme.Confirmer's strong
+// check where the theme has one. See fileSteps for what that deliberately does
+// *not* claim, and why stage 5 does not start a real retrieval.
 type capability struct {
 	Search   stepResult `json:"search"`
 	Series   stepResult `json:"series"`
 	Chapters stepResult `json:"chapters"`
 	Pages    stepResult `json:"pages"`
+
+	// Confirm is theme.Confirmer's answer: a request to an endpoint only this
+	// theme's application serves, judged by the theme. It runs first and ends
+	// the stage when it fails — a site that is not the application cannot be
+	// searched as one, and asking it to anyway produces a second, less
+	// informative failure on top of the real one.
+	//
+	// A theme that implements no such check passes here. That is not a hole:
+	// it is a theme making no claim beyond what the other steps exercise, and
+	// the steps below still have to hold.
+	Confirm stepResult `json:"confirm"`
+
+	// Release is the file-theme counterpart of Pages: one chapter of the book
+	// that names a release Quire could go and ask for.
+	Release stepResult `json:"release,omitempty"`
+
+	// fileBased records which shape was checked, so ok(), failure() and summary()
+	// do not have to re-derive it from an empty step and get it wrong. It is not
+	// serialised: it describes the check, not the site.
+	fileBased bool
 
 	// Image is the fetch of one page image, through the real client: the
 	// limiter, the honest User-Agent, the size cap and — the point — the SSRF
@@ -69,29 +101,50 @@ type stepResult struct {
 	Note  string `json:"note,omitempty"`
 }
 
+// pagesOK is the "can we get pages?" half of the check, and it is what a file
+// theme has no version of. Keeping it in one function is what stops the file
+// branch from being bolted onto every boolean below one `&&` at a time.
+func (c capability) pagesOK() bool {
+	if c.fileBased {
+		return c.Release.OK
+	}
+	return c.Pages.OK && c.Image.OK
+}
+
 func (c capability) ok() bool {
-	return c.Challenge == nil && c.Search.OK && c.Series.OK && c.Chapters.OK && c.Pages.OK && c.Image.OK
+	return c.Challenge == nil && c.Confirm.OK && c.Search.OK && c.Series.OK && c.Chapters.OK && c.pagesOK()
 }
 
 // addableDegraded is PLAN §7.5's narrow allowance: "offer to add in a degraded
 // state only if search and chapters work; if page extraction fails the source is
 // useless, so refuse." Series detail is the only step that may be missing.
+//
+// The strong check is not degradable. A theme that has one and failed it is not
+// a weaker version of this source; it is a different site, and adding it would
+// be the false `ok` §7.5 is most emphatic about.
 func (c capability) addableDegraded() bool {
-	return !c.ok() && c.Challenge == nil &&
-		c.Search.OK && c.Chapters.OK && c.Pages.OK && c.Image.OK
+	return !c.ok() && c.Challenge == nil && c.Confirm.OK &&
+		c.Search.OK && c.Chapters.OK && c.pagesOK()
 }
 
 // failure names the first failing step, in plain language and as a sentence
 // fragment that reads after "but".
 func (c capability) failure() string {
 	switch {
+	case !c.Confirm.OK:
+		return "it isn't the application Quire took it for: " + c.Confirm.Note
 	case !c.Search.OK:
 		return "searching it didn't work: " + c.Search.Note
 	case !c.Chapters.OK:
+		if c.fileBased {
+			return "it couldn't list anything to download for a book: " + c.Chapters.Note
+		}
 		return "it couldn't list any chapters: " + c.Chapters.Note
-	case !c.Pages.OK:
+	case c.fileBased && !c.Release.OK:
+		return "it listed nothing Quire could actually ask it to fetch: " + c.Release.Note
+	case !c.fileBased && !c.Pages.OK:
 		return "it couldn't find the page images in a chapter: " + c.Pages.Note
-	case !c.Image.OK:
+	case !c.fileBased && !c.Image.OK:
 		return "it found the page images but couldn't fetch one: " + c.Image.Note
 	case !c.Series.OK:
 		return "it couldn't read a series' details: " + c.Series.Note
@@ -99,9 +152,25 @@ func (c capability) failure() string {
 	return ""
 }
 
+// uselessWithout is the clause stage 6 ends a refusal with: what this kind of
+// source would have to do to be worth adding, in the words of what it is.
+//
+// "A source Quire can't read pages from" is exactly right for a comic site and
+// simply untrue of a book service, which has no pages to read.
+func (c capability) uselessWithout() string {
+	if c.fileBased {
+		return "A source Quire can't download a book from is no use, so nothing was added."
+	}
+	return "A source Quire can't read pages from is no use, so nothing was added."
+}
+
 // summary is the progress line shown while the stage finishes.
 func (c capability) summary() string {
 	if c.ok() {
+		if c.fileBased {
+			return fmt.Sprintf("Found %d books and %d things to download for one of them.",
+				c.Search.Count, c.Chapters.Count)
+		}
 		return fmt.Sprintf("Found %d series, %d chapters and %d page images, and fetched one.",
 			c.Search.Count, c.Chapters.Count, c.Pages.Count)
 	}
@@ -150,6 +219,17 @@ func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.S
 // what does work rather than only where it stopped.
 func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.Source) capability {
 	var cap capability
+	_, cap.fileBased = th.(theme.FileTheme)
+
+	// The strong check first, where the theme has one. A self-hosted
+	// application's markup is a near-empty shell, so the fingerprint that got us
+	// here is weak evidence on its own; this is the request only the real
+	// application can answer. Everything below asks the site to behave like the
+	// theme, which is a question worth nothing until this one says yes.
+	cap.Confirm = r.confirmTheme(ctx, th, src)
+	if !cap.Confirm.OK {
+		return cap
+	}
 
 	stubs, note := r.capabilitySearch(ctx, th, src)
 	if note != "" {
@@ -199,6 +279,11 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		return cap
 	}
 
+	if cap.fileBased {
+		cap.Release = fileSteps(chapters)
+		return cap
+	}
+
 	// The *newest* chapter, which is the last one now that PLAN §7.2 has
 	// Chapters return ascending reading order (2026-09-15).
 	//
@@ -244,6 +329,74 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	}
 	cap.Image, cap.Challenge, cap.ImageHost = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
 	return cap
+}
+
+// confirmTheme runs theme.Confirmer's strong check, or passes when the theme
+// has none.
+//
+// The request is the theme's own — shelfmark GETs its /api/config and runs
+// CheckConfig over the body — and it goes through the same guarded client
+// everything else does, because the theme is built over it. It is classified as
+// discovery for the same reason the rest of the probe is (PLAN §7.4): the user
+// asked to add a site, not for this endpoint.
+//
+// **A theme with no check passes, and that is not a hole.** Eight of the nine
+// themes drive families of independently hosted sites with no endpoint that
+// could identify them; for those the fingerprint plus the four behavioural steps
+// *is* the evidence, and inventing a failing step for "did not answer a question
+// nobody asked" would refuse every source Quire can already read.
+func (r *run) confirmTheme(ctx context.Context, th theme.Theme, src *theme.Source) stepResult {
+	c, ok := th.(theme.Confirmer)
+	if !ok {
+		return stepResult{OK: true}
+	}
+	if err := c.Confirm(ctx, src); err != nil {
+		// The theme's own sentence, trimmed the way every other step's is: it
+		// names which keys were missing, which is the actionable part.
+		return stepResult{Note: plainError(err)}
+	}
+	return stepResult{OK: true}
+}
+
+// fileSteps is stage 5's last step for a theme.FileTheme: is there something
+// here Quire could actually go and ask for?
+//
+// # What this proves, and what it deliberately does not
+//
+// A page theme's last step fetches one image, because extraction succeeding and
+// the bytes arriving turned out to be different questions (see the 2026-09-16
+// correction above). The equivalent here would be to run FileTheme.Retrieve —
+// and stage 5 must not, for reasons that are about the user rather than about
+// cost:
+//
+//   - Retrieve has a *side effect on someone else's machine*. It asks the
+//     instance to go and download a book from a third-party source into the
+//     owner's library. Pasting a URL into the "add a source" box must not put a
+//     file in somebody's library, and a probe that did it once per attempt is
+//     not something a user could take back.
+//   - It can legitimately take minutes — the instance's own release search
+//     timeout is 300s per source and it tries several (measured 2026-09-20) —
+//     against a wizard that is showing "step 5 of 6".
+//
+// So the claim made here is the narrower one the evidence supports: the
+// instance is the application (Confirm proved that against its own config), it
+// found this book, and it listed at least one release, in a format the device
+// opens, that names a source Quire can ask it to fetch. What is *not* proved is
+// that the transfer will succeed — and that is stated plainly rather than
+// papered over, because the alternative is a false `ok`, which the comment at
+// the top of this file is right that we would rather refuse a good site than
+// produce.
+func fileSteps(chapters []theme.Chapter) stepResult {
+	good := 0
+	for _, c := range chapters {
+		if strings.TrimSpace(c.ID) != "" && strings.TrimSpace(c.Title) != "" {
+			good++
+		}
+	}
+	if good == 0 {
+		return stepResult{Note: "the things it offered had no titles or addresses Quire could follow."}
+	}
+	return stepResult{OK: true, Count: good}
 }
 
 // fetchOnePageImage performs stage 5's image fetch and classifies the answer.

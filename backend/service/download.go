@@ -367,6 +367,22 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 		_ = s.sendError(out, "not_found", plain(err))
 		return
 	}
+
+	// A file theme has nothing to confirm: one release is one document, always,
+	// so there is no volume to describe and no "download all 10?" to ask. The
+	// check is skipped rather than answered, because answering it would mean
+	// listing the book's releases — the slow source search, 36 seconds measured
+	// 2026-09-20 — twice for one tap, once here and once inside Retrieve.
+	if _, ok := th.(theme.FileTheme); ok {
+		req.Confirmed = true
+		// Detached for the same reason as the single-chapter case below: the
+		// download outlives the question that decided not to ask.
+		if err := s.enqueueDownload(context.WithoutCancel(ctx), out, req); err != nil {
+			s.log.Warn("could not enqueue a book", "err", err)
+		}
+		return
+	}
+
 	series, err := th.Series(ctx, src, req.SeriesID)
 	if err != nil {
 		_ = s.sendError(out, "series_failed", plain(err))
@@ -512,13 +528,28 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		_ = send(out, appload.MessageDownloadProgress, p)
 	}
 
-	step(phasePreparing, "Looking up the chapters…")
-
 	th, src, err := s.themeFor(req.SourceID)
 	if err != nil {
 		fail("%s", plain(err))
 		return
 	}
+
+	// A theme whose chapters are finished files takes a different path from
+	// here, and takes it *before* the first progress line: "Looking up the
+	// chapters…" is not what is happening to a book, and a sentence that is
+	// wrong for two seconds is still a sentence we told the user (PLAN §2).
+	//
+	// Everything downstream of this point — page URLs, the image queue,
+	// imageproc, assemble, the upload budget's split — is about turning page
+	// images into a PDF, and a book arrives as a document already. See
+	// runFileDownload.
+	if ft, ok := th.(theme.FileTheme); ok {
+		s.runFileDownload(ctx, parent, out, req, th, ft, src)
+		return
+	}
+
+	step(phasePreparing, "Looking up the chapters…")
+
 	series, err := th.Series(ctx, src, req.SeriesID)
 	if err != nil {
 		if cancelled(err) {
