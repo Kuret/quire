@@ -1077,6 +1077,19 @@ func (r *run) stageAccept(draft *theme.Source, themeID string, cap capability) R
 			"on the sources this instance is set up to search, not on Quire's connection to it. You can add it, "+
 			"but it may find nothing to download until sources are configured for the books you want.")
 		res.Addable = true
+	case cap.addableEmptySearch():
+		// 2026-09-20: measured against a live Shelfmark instance, whose
+		// metadata provider (openlibrary) intermittently answers every query
+		// with zero results for a window and then recovers. The strong check
+		// already identified the site as the real application — a request
+		// only it could have answered came back right — so an empty search
+		// right now is a fact about that provider's own upstream, not about
+		// whether Quire can talk to the instance.
+		res = r.result(theme.VerdictPartial, "Quire found this site and confirmed it really is the application it "+
+			"looks like. But it returned no results at all just now. This can happen when the source's own "+
+			"upstream book listing is temporarily empty. You can add it, but it won't find anything until that "+
+			"comes back.")
+		res.Addable = true
 	default:
 		// PLAN §7.5: if page extraction fails the source is useless, so refuse.
 		// What "page extraction" means depends on what the source serves — see

@@ -245,6 +245,42 @@ func TestStageFiveAddsAFileThemeInDegradedStateWhenNoBookHasReleases(t *testing.
 	}
 }
 
+// The false negative one stage earlier (2026-09-20): a confirmed instance
+// whose metadata provider is having its own empty window must not be refused
+// outright. Measured against a live Shelfmark instance: openlibrary
+// intermittently answers every query with zero results, HTTP 200, for a
+// window and then recovers.
+func TestStageFiveAddsAConfirmedInstanceThatFoundNothingToSearch(t *testing.T) {
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		confirmingFileStub{fileStub: fileStub{id: "books", score: 90, stubs: []theme.SeriesStub{}}})
+
+	if !res.Addable || res.Draft == nil {
+		t.Fatalf("a confirmed instance whose search found nothing was refused instead of offered: %s", res.Detail)
+	}
+	if res.Verdict != theme.VerdictPartial {
+		t.Errorf("verdict = %q, want partial", res.Verdict)
+	}
+	if !strings.Contains(res.Detail, "no results") {
+		t.Errorf("detail %q does not say the search came back empty", res.Detail)
+	}
+	if !strings.Contains(strings.ToLower(res.Detail), "upstream") {
+		t.Errorf("detail %q does not say this can be the source's own upstream being temporarily empty", res.Detail)
+	}
+}
+
+// A theme with no strong check at all must still be refused when its search
+// finds nothing: there is no positive evidence to weigh against an empty
+// result, unlike the confirmed case above. This is the same distinction
+// addableEmptyReleases draws, one stage earlier.
+func TestStageFiveRefusesAnUnconfirmedThemeThatFoundNothingToSearch(t *testing.T) {
+	res := runWithTheme(t, map[string]themetest.Route{"GET /": {File: "home-unrecognised.html"}},
+		fileStub{id: "books", score: 90, stubs: []theme.SeriesStub{}})
+
+	if res.Addable || res.Draft != nil {
+		t.Fatalf("an unconfirmed theme whose search found nothing was offered for adding: %s", res.Detail)
+	}
+}
+
 // The retry that fixes the bug directly: the first two books tried have
 // nothing, but the third does, and stage 5 must not give up before trying it.
 // A probe that condemned the source on the first arbitrary book is exactly

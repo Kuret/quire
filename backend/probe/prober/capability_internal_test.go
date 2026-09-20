@@ -58,10 +58,13 @@ func TestCapabilitySearchUsesDefaultQueryWithoutProbeQuerier(t *testing.T) {
 		capabilityQuery: {{ID: "/x", Title: "X"}},
 	}}
 	r := &run{}
-	stubs, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+	stubs, note, empty := r.capabilitySearch(context.Background(), th, &theme.Source{})
 
 	if note != "" {
 		t.Fatalf("note = %q, want none", note)
+	}
+	if empty {
+		t.Error("empty = true, want false: the listing found a result")
 	}
 	if len(stubs) != 1 {
 		t.Fatalf("stubs = %v, want one result", stubs)
@@ -83,10 +86,13 @@ func TestCapabilitySearchUsesTheThemesProbeQuery(t *testing.T) {
 		probeQuery: "dune",
 	}}
 	r := &run{}
-	stubs, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+	stubs, note, empty := r.capabilitySearch(context.Background(), th, &theme.Source{})
 
 	if note != "" {
 		t.Fatalf("note = %q, want none", note)
+	}
+	if empty {
+		t.Error("empty = true, want false: the fallback found a result")
 	}
 	if len(stubs) != 1 || stubs[0].ID != "/dune" {
 		t.Fatalf("stubs = %v, want the dune result", stubs)
@@ -103,7 +109,7 @@ func TestCapabilitySearchUsesTheThemesProbeQuery(t *testing.T) {
 func TestCapabilitySearchDoesNotBlameTheListingForARequiredQuery(t *testing.T) {
 	th := listingErrorsTheme{err: errors.New("shelfmark: /api/metadata/search: HTTP 400")}
 	r := &run{}
-	_, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+	_, note, empty := r.capabilitySearch(context.Background(), th, &theme.Source{})
 
 	if note == "" {
 		t.Fatal("note is empty, want a refusal: both the listing and the fallback found nothing")
@@ -111,6 +117,43 @@ func TestCapabilitySearchDoesNotBlameTheListingForARequiredQuery(t *testing.T) {
 	if got := note; got != "the site returned no results at all." {
 		t.Errorf("note = %q, want the fallback's own outcome, not the listing's HTTP 400", got)
 	}
+	if !empty {
+		t.Error("empty = false, want true: the fallback reached the site and found nothing, no error")
+	}
+}
+
+// A fallback query that fails to reach the site at all must be reported as an
+// error, not as an empty result — the two are different claims, and
+// addableEmptySearch depends on telling them apart structurally rather than
+// by matching note text.
+func TestCapabilitySearchDoesNotReportAFallbackErrorAsEmpty(t *testing.T) {
+	th := fallbackErrorsTheme{err: errors.New("shelfmark: /api/metadata/search: HTTP 500")}
+	r := &run{}
+	stubs, note, empty := r.capabilitySearch(context.Background(), th, &theme.Source{})
+
+	if len(stubs) != 0 {
+		t.Fatalf("stubs = %v, want none", stubs)
+	}
+	if note == "" {
+		t.Fatal("note is empty, want the fallback's own error")
+	}
+	if empty {
+		t.Error("empty = true, want false: the fallback failed to reach the site, it did not find nothing")
+	}
+}
+
+// fallbackErrorsTheme's empty-query listing finds nothing (not an error, so
+// the fallback runs), and the fallback query itself fails outright.
+type fallbackErrorsTheme struct {
+	probeQueryTheme
+	err error
+}
+
+func (f fallbackErrorsTheme) Search(_ context.Context, _ *theme.Source, q string, _ int) ([]theme.SeriesStub, error) {
+	if q == capabilityListing {
+		return nil, nil
+	}
+	return nil, f.err
 }
 
 // listingErrorsTheme fails only the empty-query listing, exactly as a theme
@@ -238,5 +281,55 @@ func TestAddableEmptyReleasesRequiresTheStrongCheck(t *testing.T) {
 	challenged.Challenge = &challengeSignal{Detail: "cf-challenge"}
 	if challenged.addableEmptyReleases() {
 		t.Error("addableEmptyReleases ignored a terminal challenge")
+	}
+}
+
+// addableEmptySearch (2026-09-20) is the search-stage counterpart of
+// addableEmptyReleases: the strong check ran and passed, and the search
+// reached the site but came back with nothing, no error. Asked directly for
+// the same reason the guards above are.
+func TestAddableEmptySearchRequiresTheStrongCheckAndAGenuinelyEmptySearch(t *testing.T) {
+	base := capability{
+		Confirm:         stepResult{OK: true},
+		strongConfirmed: true,
+		Search:          stepResult{Note: "the site returned no results at all."},
+		searchEmpty:     true,
+	}
+	if !base.addableEmptySearch() {
+		t.Error("a confirmed instance with a genuinely empty search was not offered")
+	}
+
+	// The precision bug this guards against: Confirm.OK is true both when the
+	// strong check passed and when the theme has no Confirmer at all. A theme
+	// with no strong check that finds nothing has offered no positive
+	// evidence and must still be refused.
+	noStrongCheck := base
+	noStrongCheck.strongConfirmed = false
+	if noStrongCheck.addableEmptySearch() {
+		t.Error("addableEmptySearch fired for a theme with no strong check at all")
+	}
+
+	// A search that failed to reach the site at all is a different problem
+	// and must stay a plain refusal — this must be told apart structurally,
+	// not by matching cap.Search.Note's text.
+	searchErrored := base
+	searchErrored.Search = stepResult{Note: "the site didn't answer as expected."}
+	searchErrored.searchEmpty = false
+	if searchErrored.addableEmptySearch() {
+		t.Error("addableEmptySearch fired when the search errored rather than being genuinely empty")
+	}
+
+	// A search that actually succeeded must not be treated as empty.
+	searchOK := base
+	searchOK.Search = stepResult{OK: true, Count: 3}
+	searchOK.searchEmpty = false
+	if searchOK.addableEmptySearch() {
+		t.Error("addableEmptySearch fired when the search succeeded")
+	}
+
+	challenged := base
+	challenged.Challenge = &challengeSignal{Detail: "cf-challenge"}
+	if challenged.addableEmptySearch() {
+		t.Error("addableEmptySearch ignored a terminal challenge")
 	}
 }

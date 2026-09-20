@@ -92,6 +92,15 @@ type capability struct {
 	// "these particular books had nothing".
 	fileEmpty bool
 
+	// searchEmpty records that capabilitySearch reached the site — the
+	// fallback query ran and answered with no error — and simply found
+	// nothing, rather than that the request itself failed. See
+	// addableEmptySearch: this is what stops a metadata provider's own empty
+	// window (measured against a live Shelfmark instance, 2026-09-20) from
+	// reading as "the source doesn't work" for an instance the strong check
+	// already confirmed is the real application.
+	searchEmpty bool
+
 	// Image is the fetch of one page image, through the real client: the
 	// limiter, the honest User-Agent, the size cap and — the point — the SSRF
 	// guard under the draft source's seeded allowedHosts. A theme that
@@ -170,6 +179,29 @@ func (c capability) addableEmptyReleases() bool {
 	return c.fileBased && c.fileEmpty && c.Challenge == nil && c.strongConfirmed && c.Search.OK
 }
 
+// addableEmptySearch is stage 5's other confirmed-but-empty case (2026-09-20):
+// the strong check ran and passed, so the site is positively identified as the
+// application, but the search itself — the listing and the fallback query —
+// reached the site and came back with nothing, no error. Measured against a
+// live Shelfmark instance: its metadata provider intermittently answers every
+// query with zero results for a window and then recovers, which is a fact
+// about that provider's own upstream, not about whether Quire can talk to the
+// instance.
+//
+// Gated on strongConfirmed, not Confirm.OK, for the same reason
+// addableEmptyReleases is: a theme with no strong check that finds nothing
+// has offered no positive evidence at all, and must still be refused — an
+// unconfirmed site that searches empty could just as easily be broken.
+//
+// searchEmpty is deliberately a recorded fact rather than a check on
+// cap.Search.Note's text — capabilitySearch's own note collapses a fetch
+// error and a reached-but-empty result into similar-looking strings, and
+// matching on that text would risk treating a real failure as the confirmed,
+// merely-quiet source this exists for.
+func (c capability) addableEmptySearch() bool {
+	return c.strongConfirmed && c.searchEmpty && c.Challenge == nil && !c.Search.OK
+}
+
 // failure names the first failing step, in plain language and as a sentence
 // fragment that reads after "but".
 func (c capability) failure() string {
@@ -238,10 +270,16 @@ func (c capability) summary() string {
 // The query itself is capabilityQuery by default, but a theme that knows its
 // own backend better may say so (theme.ProbeQuerier) — see shelfmark.Theme's
 // implementation for why "one" is the wrong word to ask a book service.
-func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.Source) ([]theme.SeriesStub, string) {
+// The bool return is structural, not derived from note: true exactly when the
+// fallback query reached the site and answered with zero results and no
+// error, false for every other outcome (including success). Callers that need
+// to tell "reached the site, found nothing" apart from "failed to reach the
+// site" — addableEmptySearch — must use this rather than matching note text,
+// which reads similarly for both.
+func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.Source) ([]theme.SeriesStub, string, bool) {
 	stubs, listErr := th.Search(ctx, src, capabilityListing, 1)
 	if listErr == nil && len(stubs) > 0 {
-		return stubs, ""
+		return stubs, "", false
 	}
 
 	query := capabilityQuery
@@ -258,7 +296,7 @@ func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.S
 		// informative of the two errors, because it is the one that actually
 		// ran a search rather than the listing the theme may legitimately
 		// refuse.
-		return nil, plainError(err)
+		return nil, plainError(err), false
 	case len(stubs) == 0:
 		// The fallback reached the site and found nothing — whether or not
 		// the listing errored first. That matters: a theme may legitimately
@@ -267,9 +305,9 @@ func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.S
 		// a refusal that never happened as the reason the probe failed. The
 		// only honest statement is the one about the request that actually
 		// ran: it reached the site, and found nothing.
-		return nil, "the site returned no results at all."
+		return nil, "the site returned no results at all.", true
 	}
-	return stubs, ""
+	return stubs, "", false
 }
 
 // stageCapability exercises the whole path. Every step is attempted even after
@@ -289,9 +327,10 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		return cap
 	}
 
-	stubs, note := r.capabilitySearch(ctx, th, src)
+	stubs, note, searchEmpty := r.capabilitySearch(ctx, th, src)
 	if note != "" {
 		cap.Search.Note = note
+		cap.searchEmpty = searchEmpty
 		return cap
 	}
 	cap.Search.OK = true
