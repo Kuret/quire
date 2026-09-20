@@ -240,6 +240,78 @@ cannot tell you what is wrong, Annex can:
 
 `annex-disable` is the one to reach for when the screen is not helping.
 
+## Books, and sources on your own network
+
+Quire reads books as well as comics. Point it at a Shelfmark instance you run
+yourself and it recognises what it is talking to — not by the URL, but by asking
+`/api/config`, which only the real application answers.
+
+Books are not comics, and Quire does not pretend otherwise:
+
+- A book is **one entry**, not a series of chapters and volumes.
+- Quire lists only the formats **the reMarkable opens natively: epub and pdf.**
+  A Shelfmark instance will happily offer mobi, azw3, fb2, djvu, cbz and cbr.
+  Those are filtered out, because a file this device cannot open is not a
+  download, it is a disappointment with a progress bar.
+- The image-fetching and pdf-assembly pipeline is **skipped entirely.** A book
+  arrives as a finished file; there is nothing to assemble.
+- **It is slow, and that is normal.** A release search asks every indexer your
+  instance is configured with, in turn — measured at roughly 36 seconds against
+  a live instance. Adding a source can take a couple of minutes. Quire waits.
+
+### Reaching a service on your own network
+
+Quire refuses to fetch private addresses by default, so a self-hosted source
+prompts a question during the probe rather than silently working. Answer it and
+the exemption applies **to that source only**, and only to the host you
+confirmed — a cover URL or a redirect pointing anywhere else on your network is
+still refused.
+
+If the address does not resolve at all, Quire asks the same question, because a
+name that exists only inside a mesh VPN looks exactly like a typo to a resolver.
+
+### If your mesh VPN runs in userspace mode
+
+This is the part that will cost you an afternoon if nobody tells you, so:
+Tailscale, Headscale, NetBird and friends can run **without a TUN interface**,
+and on the reMarkable that is the usual arrangement. In that mode:
+
+- there is **no `tailscale0` interface**, so the kernel has no route to the mesh;
+- the system resolver knows nothing of `.ts.net` or any other mesh name, so the
+  name genuinely does not resolve;
+- **using the IP instead does not help** — the kernel hands it to your ordinary
+  default gateway, which drops it. That fails *worse* than the name: a timeout
+  instead of an instant error.
+
+The tunnel exists only inside the VPN daemon's own userspace network stack, and
+the only door into it is an outbound proxy. For tailscaled, that means starting
+it with something like:
+
+```
+FLAGS="--tun userspace-networking --outbound-http-proxy-listen=localhost:1055"
+```
+
+then putting `http://localhost:1055` in the **proxy field** Quire offers when it
+asks about the source. The daemon resolves the name and routes the request on
+its own side; Quire never resolves it locally at all.
+
+**Quire does not configure any of this, deliberately.** We cannot assume how you
+reach your own services, so unlike `qt-resource-rebuilder` — which is always
+required and is installed for you — your VPN is yours to set up. The port number
+is arbitrary; use whatever your daemon is listening on.
+
+### A trap worth knowing about
+
+The proxy flags above are usually a **local edit** to the VPN daemon's
+environment file. On a vellum-managed install that is
+`/home/root/.vellum/etc/default/tailscaled`, and vellum ships it with
+`--tun userspace-networking` and nothing else.
+
+**A package update can overwrite that file and silently revert your proxy
+flags.** Nothing warns you. The symptom is every book source failing at once
+with `no such host`, which looks like a Quire fault and is not one. Check the
+env file first, and keep a copy of your edit.
+
 ## Uninstall
 
 ```sh
