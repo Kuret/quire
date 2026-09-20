@@ -368,6 +368,54 @@ func TestSearchBrowseAndSeriesDetail(t *testing.T) {
 	}
 }
 
+// A theme that carries authors (Shelfmark's shape) must have them reach the
+// frontend's search row, which is what tells two editions of the same title
+// apart.
+func TestSearchRowCarriesAuthors(t *testing.T) {
+	th := &bookTheme{authors: []string{"Frank Herbert"}}
+	env := newBookService(t, th)
+
+	handle(t, env.svc, env.rec, appload.MessageSearch, `{"sourceId":"example-books","query":"dune"}`)
+	var results struct {
+		Series []struct {
+			Title   string   `json:"title"`
+			Authors []string `json:"authors"`
+		} `json:"series"`
+	}
+	if err := json.Unmarshal(env.rec.wait(t, appload.MessageSearchResults), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results.Series) != 1 {
+		t.Fatalf("got %d rows, want 1: %+v", len(results.Series), results)
+	}
+	if got := results.Series[0].Authors; len(got) != 1 || got[0] != "Frank Herbert" {
+		t.Errorf("Authors = %v, want [Frank Herbert]", got)
+	}
+}
+
+// A theme with nothing to say about authors — most of them — must produce a
+// row with no "authors" key at all, not one holding an empty list: that is
+// what json:"authors,omitempty" promises, and it is what lets the frontend
+// tell "this source has no author" from "this book's author is blank".
+func TestSearchRowOmitsAuthorsWhenTheThemeHasNone(t *testing.T) {
+	th := &bookTheme{}
+	env := newBookService(t, th)
+
+	handle(t, env.svc, env.rec, appload.MessageSearch, `{"sourceId":"example-books","query":"dune"}`)
+	var generic struct {
+		Series []map[string]any `json:"series"`
+	}
+	if err := json.Unmarshal(env.rec.wait(t, appload.MessageSearchResults), &generic); err != nil {
+		t.Fatal(err)
+	}
+	if len(generic.Series) != 1 {
+		t.Fatalf("got %d rows, want 1: %+v", len(generic.Series), generic.Series)
+	}
+	if _, present := generic.Series[0]["authors"]; present {
+		t.Errorf("row carries an authors key (%v); want it omitted entirely", generic.Series[0]["authors"])
+	}
+}
+
 // Toggling and removing a source both answer with the whole list, so the UI
 // never has to work out what changed.
 func TestToggleAndRemove(t *testing.T) {

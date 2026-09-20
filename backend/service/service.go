@@ -811,6 +811,11 @@ type seriesRow struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	CoverURL string `json:"coverUrl,omitempty"`
+
+	// Authors mirrors theme.SeriesStub.Authors: empty for the sources that have
+	// none to give, and the reason a search row for a book can name which
+	// edition it is rather than just its title.
+	Authors []string `json:"authors,omitempty"`
 }
 
 func (s *Service) themeFor(sourceID string) (theme.Theme, *theme.Source, error) {
@@ -867,7 +872,7 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 	for _, st := range res.Items {
 		s.rememberCoverReferrer(sourceID, st.CoverURL, st.CoverReferrer)
 		refs = append(refs, state.CoverRef{SeriesID: st.ID, URL: st.CoverURL})
-		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL})
+		rows = append(rows, seriesRow{ID: st.ID, Title: st.Title, CoverURL: st.CoverURL, Authors: st.Authors})
 	}
 	// After the loop, not inside it: one listing is one write. See
 	// state.Store.RememberCovers.

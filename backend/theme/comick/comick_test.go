@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestSearchReadsTheAPIEnvelope(t *testing.T) {
 		// fetched. PLAN §7.6 — see TestCoverReferrerIsThePageTheCoverCameFrom.
 		CoverReferrer: "https://example.invalid/api/search?q=lantern&type=comic",
 	}
-	if got[0] != want {
+	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
 	}
 	for _, s := range got {

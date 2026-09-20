@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestSearchReturnsOneResultPerRow(t *testing.T) {
 		Title:    "The Lantern Keeper",
 		CoverURL: "https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&ttl=1789610400&v=1362908853",
 	}
-	if got[0] != want {
+	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
 	}
 	// The second row's anchor has no title attribute, so the title has to come

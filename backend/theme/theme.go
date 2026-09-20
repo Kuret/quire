@@ -735,6 +735,14 @@ type SeriesStub struct {
 	// CoverReferrer is the absolute URL of the page CoverURL was extracted
 	// from, or "" when the theme has none to name. See CoverRefererFrom.
 	CoverReferrer string `json:"coverReferrer,omitempty"`
+
+	// Authors names the series' authors, mirroring Series.Authors below. Most
+	// themes have no author in a search row at all — a comic site's listing
+	// names a title and a cover, nothing more — and leave this empty; it is
+	// not a promise every source can keep. Shelfmark's search response is the
+	// one that actually carries it, which is why two editions of the same
+	// title are otherwise indistinguishable in a search result.
+	Authors []string `json:"authors,omitempty"`
 }
 
 // Series is a full series page.

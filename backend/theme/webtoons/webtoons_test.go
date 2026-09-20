@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestSearchReturnsSeriesAndNotTabsOrEpisodes(t *testing.T) {
 		Title:    "The Lantern Keeper",
 		CoverURL: "https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90",
 	}
-	if got[0] != want {
+	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
 	}
 	for _, s := range got {

@@ -65,6 +65,10 @@ type bookTheme struct {
 	// manga fixture's title to force the two sources into one group.
 	title string
 
+	// authors overrides the one book's author list, nil by default so most
+	// tests here exercise the "no authors" shape most themes actually have.
+	authors []string
+
 	// notes are the progress notes Retrieve reports, in order.
 	notes []string
 
@@ -107,7 +111,7 @@ func (b *bookTheme) bookTitle() string {
 }
 
 func (b *bookTheme) Search(context.Context, *theme.Source, string, int) ([]theme.SeriesStub, error) {
-	return []theme.SeriesStub{{ID: "/book/openlibrary/OL1W", Title: b.bookTitle()}}, nil
+	return []theme.SeriesStub{{ID: "/book/openlibrary/OL1W", Title: b.bookTitle(), Authors: b.authors}}, nil
 }
 
 func (b *bookTheme) Series(context.Context, *theme.Source, string) (*theme.Series, error) {

@@ -3,6 +3,7 @@ package mangakakalot_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestSearchWithNoQueryBrowsesTheListing(t *testing.T) {
 		t.Fatalf("got %d results, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("result %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}
 	}
@@ -97,7 +98,7 @@ func TestSearchUsesTheNormalisedQueryPath(t *testing.T) {
 		t.Fatalf("got %d results, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("result %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}
 	}

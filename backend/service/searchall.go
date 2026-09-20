@@ -50,6 +50,12 @@ type searchAllMatch struct {
 	// kind.go). Lowercase like the other sort-and-merge keys: it is what the
 	// group's own kind is derived from, and the frontend is given the group's.
 	kind string
+
+	// authors is this match's copy of theme.SeriesStub.Authors, lowercase like
+	// title and kind: the frontend is given the group's authors, chosen from
+	// among the matches the same way the group's cover is (see group()), not
+	// any one source's own.
+	authors []string
 }
 
 // searchAllGroup is one series as far as the user is concerned.
@@ -70,6 +76,12 @@ type searchAllGroup struct {
 	// Empty means "this group is not all one thing", which is the truth, and the
 	// only honest thing a single field can say about it.
 	Kind string `json:"kind,omitempty"`
+
+	// Authors mirrors seriesRow.Authors, chosen the way CoverURL above is: the
+	// best-ranked match that actually names one, not necessarily the group's
+	// best match — a source that lists results with no author metadata would
+	// otherwise blank out a group another source did name.
+	Authors []string `json:"authors,omitempty"`
 }
 
 // searchAllError is one source that did not answer. It carries the source's
@@ -320,6 +332,7 @@ func (p *searchAllPager) group() []searchAllGroup {
 				sourceOrder: st.order,
 				title:       stub.Title,
 				kind:        st.kind,
+				authors:     stub.Authors,
 			})
 		}
 	}
@@ -349,10 +362,19 @@ func (p *searchAllPager) group() []searchAllGroup {
 			}
 		}
 
+		var authors []string
+		for _, m := range byRelevance(matches) {
+			if len(m.authors) > 0 {
+				authors = m.authors
+				break
+			}
+		}
+
 		g := searchAllGroup{
 			Key:      key,
 			Title:    matches[best].title,
 			CoverURL: cover,
+			Authors:  authors,
 			Kind:     agreedKind(matches),
 			// Within a group the order is the user's source order: the list of
 			// sources under a title should read the same way every time, and

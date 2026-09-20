@@ -368,6 +368,7 @@ func (t *Theme) stub(s *theme.Source, b book) (theme.SeriesStub, bool) {
 		ID:       bookID(b.Provider, b.ProviderID),
 		Title:    fullTitle(b),
 		CoverURL: t.coverURL(s, b),
+		Authors:  trimAll(b.Authors),
 		// CoverReferrer is left empty on purpose. The instance serves its own
 		// covers through its own /api/covers/ proxy and asks for no Referer;
 		// naming a page we fetched would send a header nobody wants, and PLAN

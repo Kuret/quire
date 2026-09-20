@@ -148,9 +148,10 @@ type searchAllReply struct {
 	TotalPages int    `json:"totalPages"`
 	HasMore    bool   `json:"hasMore"`
 	Groups     []struct {
-		Key      string `json:"key"`
-		Title    string `json:"title"`
-		CoverURL string `json:"coverUrl"`
+		Key      string   `json:"key"`
+		Title    string   `json:"title"`
+		CoverURL string   `json:"coverUrl"`
+		Authors  []string `json:"authors"`
 		Matches  []struct {
 			SourceID   string `json:"sourceId"`
 			SourceName string `json:"sourceName"`
@@ -336,6 +337,49 @@ func TestAGroupTakesTheBestRankedCoverThatExists(t *testing.T) {
 	}
 	if reply.Groups[0].CoverURL != "https://cdn.invalid/b1.jpg" {
 		t.Errorf("cover = %q, want the only match that has one", reply.Groups[0].CoverURL)
+	}
+}
+
+// Authors follow the same rule as the cover: the best-ranked match that
+// actually names one, not necessarily the group's own best match. A source
+// with no author metadata must not blank out a group another source did name
+// one for.
+func TestAGroupTakesTheBestRankedAuthorsThatExist(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha", "beta")
+	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Dune"}}}
+	th.pages["beta"] = [][]theme.SeriesStub{{{ID: "b1", Title: "Dune", Authors: []string{"Frank Herbert"}}}}
+
+	svc.runSearchAll(context.Background(), out, "dune", 1, 10)
+	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
+
+	if len(reply.Groups) != 1 {
+		t.Fatalf("got %d groups, want one merged", len(reply.Groups))
+	}
+	if got := reply.Groups[0].Authors; len(got) != 1 || got[0] != "Frank Herbert" {
+		t.Errorf("Authors = %v, want [Frank Herbert]", got)
+	}
+}
+
+// A group with no author metadata from any source must carry no "authors" key
+// at all, the same omitempty promise seriesRow makes.
+func TestAGroupOmitsAuthorsWhenNoMatchHasAny(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha")
+	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Vagabond"}}}
+
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	raw := out.only(t, appload.MessageSearchAllResults)
+
+	var generic struct {
+		Groups []map[string]any `json:"groups"`
+	}
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		t.Fatal(err)
+	}
+	if len(generic.Groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(generic.Groups))
+	}
+	if _, present := generic.Groups[0]["authors"]; present {
+		t.Errorf("group carries an authors key (%v); want it omitted entirely", generic.Groups[0]["authors"])
 	}
 }
 

@@ -258,6 +258,12 @@ func TestSearchParsesTheCapture(t *testing.T) {
 	if !strings.HasPrefix(first.CoverURL, base+"/api/covers/") {
 		t.Errorf("first CoverURL = %q, want an absolute URL under %s/api/covers/", first.CoverURL, base)
 	}
+	// The capture's own author, carried onto the search row so that two
+	// editions of the same title are not indistinguishable in a search
+	// result.
+	if len(first.Authors) != 1 || first.Authors[0] != "Frank Herbert" {
+		t.Errorf("first Authors = %v, want [Frank Herbert]", first.Authors)
+	}
 
 	// The query and the page must actually reach the instance.
 	calls := f.Calls()
@@ -336,6 +342,36 @@ func TestSearchDropsBooksItCannotAddress(t *testing.T) {
 	}
 	if got[0].Title != "Addressable" {
 		t.Errorf("kept %q, want %q", got[0].Title, "Addressable")
+	}
+}
+
+// A book with a blank or absent author list must carry no Authors at all,
+// same as trimAll everywhere else in this theme — an absent list and a list
+// of blanks are the same thing downstream, and json:"authors,omitempty" is
+// what lets the frontend tell "no author" from "author unknown but present".
+func TestSearchTrimsAuthorsAndOmitsWhenEmpty(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/metadata/search": {Body: `{
+			"has_more": false, "page": 1, "total_found": 0,
+			"books": [
+				{"title": "Padded", "provider": "openlibrary", "provider_id": "OL1W",
+				 "authors": ["  Ann Leckie  ", "  ", ""]},
+				{"title": "No Author", "provider": "openlibrary", "provider_id": "OL2W",
+				 "authors": []}
+			]}`},
+	})
+	got, err := shelfmark.New(f).Search(context.Background(), source(), "x", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d books, want 2: %+v", len(got), got)
+	}
+	if len(got[0].Authors) != 1 || got[0].Authors[0] != "Ann Leckie" {
+		t.Errorf("Authors = %v, want [Ann Leckie] with whitespace and blanks dropped", got[0].Authors)
+	}
+	if got[1].Authors != nil {
+		t.Errorf("Authors = %v, want nil so json omits the field entirely", got[1].Authors)
 	}
 }
 

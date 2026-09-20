@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func TestSearchAsksTheFragmentEndpointWithADisplayMode(t *testing.T) {
 		Title:    "The Lantern Keeper",
 		CoverURL: "https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp",
 	}
-	if got[0] != want {
+	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
 	}
 	// The second row's cover is a bare <img> rather than a <picture>.
