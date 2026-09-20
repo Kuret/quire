@@ -29,6 +29,9 @@
 // would mean it also deciding how many fit on a subtitle line, which is a
 // question only the view can answer.
 .pragma library
+// Whether a group is a book, and the word that says so, are Kinds.js's — one
+// place decides that an absent `kind` means manga, and it is not this file.
+.import "Kinds.js" as Kinds
 
 // SEPARATOR is what joins names on one line. U+00B7, as SourceList's
 // "Watching · 3 new" already uses — it is in the device's fonts, which is not
@@ -60,9 +63,30 @@ function sourceLine(group) {
     return names.join(SEPARATOR)
 }
 
+// subtitleLine is the whole of a row's second line: what the group *is*, then
+// where it was found.
+//
+// A book says so in a word before its sources, because "Shelfmark" is a source
+// name like any other and nothing else on the row distinguishes a novel from a
+// comic — the title, the cover and the author line all arrive through the same
+// fields. Manga says nothing extra: every row wearing a mark is a mark nobody
+// reads, which is the rule the multi-source badge already keeps.
+function subtitleLine(group) {
+    var mark = Kinds.mark(group)
+    var sources = sourceLine(group)
+    if (mark.length === 0)
+        return sources
+    if (sources.length === 0)
+        return mark
+    return mark + SEPARATOR + sources
+}
+
 // badgeFor marks a group that was found in more than one source, for the grid
 // layout — where there is no subtitle line to put the names on and a tile is
 // too small for them anyway.
+//
+// A book is marked here too, and in the same slot: a tile has no room for a
+// second mark, and the two facts read perfectly well on one line.
 //
 // It reuses CoverGrid's badge corner, which exists for Watching's "3 new
 // chapters". That is the whole reason the mark is a count rather than a row of
@@ -70,8 +94,14 @@ function sourceLine(group) {
 // panel, and already tested. A group found in one source wears none — a mark
 // on every tile is a mark nobody reads.
 function badgeFor(group) {
+    var parts = []
+    var mark = Kinds.mark(group)
+    if (mark.length > 0)
+        parts.push(mark)
     var n = matchesOf(group).length
-    return n > 1 ? n + " sources" : ""
+    if (n > 1)
+        parts.push(n + " sources")
+    return parts.join(SEPARATOR)
 }
 
 // groupRow is one row of the model, with every role it will ever need.
@@ -101,8 +131,12 @@ function groupRow(group) {
         "coverPath": "",
         "sourceId": first.sourceId ? first.sourceId : "",
         "seriesId": first.seriesId ? first.seriesId : "",
-        "sources": sourceLine(group),
+        "sources": subtitleLine(group),
         "sourceCount": matches.length,
+        // What this group is. Carried on the row rather than looked up again
+        // later: the series screen is told what it is showing by the row that
+        // opened it, and the filter reads it off the model it is filtering.
+        "kind": Kinds.of(group),
         "badge": badgeFor(group)
     }
 }
@@ -114,16 +148,35 @@ function groupRow(group) {
 // looked up by the key on the row the user tapped, and a map built from a
 // different reply than the rows is a switcher offering sources for a series
 // nobody is looking at.
-function fill(model, msg) {
+//
+// `kind` is the screen's filter, and an absent one is "all" — every caller that
+// does not filter gets exactly the page it sent. **Filtering happens here, over
+// the reply already in hand, rather than as a request.** The backend merged and
+// paged this page; asking it again for a subset would spend a fan-out to every
+// configured site to hide rows that are already on the screen, and would turn a
+// filter into something that can fail (PLAN §7.4).
+//
+// The matches are indexed for *every* group, filtered out or not. They are a
+// lookup by the key of the row that was tapped, and a hidden row cannot be
+// tapped; keeping the index whole means switching the filter never has to
+// rebuild it.
+function fill(model, msg, kind) {
     model.clear()
     var groups = msg && msg.groups ? msg.groups : []
     var matches = {}
     for (var i = 0; i < groups.length; ++i) {
         var row = groupRow(groups[i])
-        model.append(row)
+        if (Kinds.matches(kind, row.kind))
+            model.append(row)
         matches[row.key] = matchesOf(groups[i])
     }
     return matches
+}
+
+// countOf is how many groups a reply held, before any filtering — the number
+// the hidden count is worked out against.
+function countOf(msg) {
+    return msg && msg.groups ? msg.groups.length : 0
 }
 
 // matchesFor reads the switcher's list back out, or an empty list for a series

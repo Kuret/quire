@@ -57,6 +57,7 @@ import "../ui/Messages.js" as Msg
 import "../ui/Views.js" as Views
 import "../ui/Answers.js" as Answers
 import "../ui/Style.js" as Style
+import "../ui/Kinds.js" as Kinds
 
 Window {
     id: win
@@ -157,6 +158,23 @@ Window {
             {"sourceId": "src-b", "sourceName": "Other Reader",
              "seriesId": "/series/orphan", "coverUrl": "https://example.invalid/o.jpg"}]})
 
+    // A book, from a Shelfmark source. Its rows are releases — the files it is
+    // available as — and the only thing on the wire that says so is `kind`
+    // (ui/Kinds.js): the title, the cover and the sources all arrive through
+    // the same fields a comic's do.
+    property var duneGroup: ({
+        "key": "dune messiah", "title": "Dune Messiah", "kind": "book",
+        "coverUrl": "https://example.invalid/dune.jpg",
+        "matches": [
+            {"sourceId": "src-s", "sourceName": "Shelfmark",
+             "seriesId": "/book/dune-messiah", "coverUrl": ""}]})
+
+    function mixedReply() {
+        return {"query": "dune", "page": 1, "totalPages": 0, "hasMore": false,
+                "groups": [win.lanternGroup, win.orphanGroup, win.duneGroup],
+                "sourceErrors": []}
+    }
+
     // A listing for src-a with one cover and one without, which is what makes
     // the cover batch worth asserting: it holds one entry, not two.
     function seriesReply(page, totalPages, hasMore) {
@@ -174,8 +192,11 @@ Window {
              "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
              "detail": "3 downloads", "openable": true, "note": "",
              "coverUrl": "https://example.invalid/a.jpg", "latestUuid": "doc-9"},
+            // A downloaded book, beside a downloaded comic whose reply says
+            // nothing about kind at all — which is every row a Quire before
+            // books wrote.
             {"sourceId": "src-b", "sourceName": "Other Reader",
-             "seriesId": "/series/orphan", "title": "An Orphan",
+             "seriesId": "/series/orphan", "title": "An Orphan", "kind": "book",
              "detail": "1 download", "openable": false, "note": "One file is missing.",
              "coverUrl": "", "latestUuid": ""}],
             "empty": ""}
@@ -239,6 +260,14 @@ Window {
         win.want("the app connected itself to a Backend", win.backend !== null, true)
         win.want("naming the app the manifest names", win.backend.appId, "quire")
         win.want("which started itself", win.backend.status, "connected")
+
+        // **The kind filter starts at All, every time the app starts.** Nothing
+        // stores it — that would need a backend setting, and there is none — so
+        // this is the whole of "it resets on start": the app above was loaded a
+        // few milliseconds ago and has never been told anything.
+        win.want("the combined search starts showing every kind",
+                 win.screenNamed("searchAll").kindFilter, Kinds.ALL)
+        win.want("hiding nothing", win.screenNamed("searchAll").hiddenCount, 0)
 
         // Off the device there is no library to hand documents to, so every
         // document answer below is the no-bridge one. Asserted rather than
@@ -646,6 +675,160 @@ Window {
         win.want("and how much fits", backend.bodyOf(Msg.SearchAll).pageSize,
                  searchAll.pageSize)
 
+        // ---- filtering the results by kind ----------------------------------
+        //
+        // Books and comics arrive on the same screen from different sources,
+        // which is the whole reason the filter is here and on no other screen.
+        // **It filters the page already on screen.** The backend fanned out to
+        // every configured site, merged and paged to build this page; spending
+        // that again to show a subset of rows already in hand would make a
+        // filter something that can fail (PLAN §7.4).
+
+        // **A reply must not re-fire the search that produced it.** A page
+        // landing asks for its covers and nothing else: a combined search that
+        // answered its own reply would be an endless fan-out to every
+        // configured source, which is invisible here and minutes of work per
+        // round against a slow instance on the device.
+        backend.forget()
+        win.deliver(Msg.SearchAllResults, win.mixedReply())
+        win.want("a page landing asks for its covers", backend.countOf(Msg.RequestCover), 1)
+        win.want("**and never asks for itself again**",
+                 backend.countOf(Msg.SearchAll), 0)
+        win.want("having sent nothing else whatsoever", backend.sendCount, 1)
+
+        win.want("a mixed page holds every group", searchAll.model.count, 3)
+        win.want("with the book's kind on its row", searchAll.model.get(2).kind, "book")
+        win.want("**and manga on the group whose reply never said**",
+                 searchAll.model.get(0).kind, "manga")
+        win.want("the book's row says what it is, beside where it is",
+                 searchAll.model.get(2).sources, "Book · Shelfmark")
+        win.want("while a comic's row is what it always was",
+                 searchAll.model.get(0).sources, "Example Reader · Other Reader")
+        win.want("and its tile is marked in the badge corner",
+                 searchAll.model.get(2).badge, "Book")
+        win.want("nothing is being held back", searchAll.hiddenCount, 0)
+
+        var kindNote = win.findChild(searchAll, "kindFilterNote")
+        win.want("so the screen says nothing about a filter", kindNote.text, "")
+
+        // Tapped, on the control the user would touch — not showKind(), which
+        // would step straight over `enabled`.
+        backend.forget()
+        win.findChild(searchAll, "kindFilterArea-book").clicked(null)
+        win.want("tapping Books filters the page in hand", searchAll.model.count, 1)
+        win.want("to the book", searchAll.model.get(0).title, "Dune Messiah")
+        win.want("counting what it holds back", searchAll.hiddenCount, 2)
+        win.want("**and says so in words**",
+                 kindNote.text, "Showing books only · 2 results hidden.")
+        win.want("**asking every source for nothing**",
+                 backend.countOf(Msg.SearchAll), 0)
+        // The covers are the one thing it does send, and only for the rows
+        // that are still on screen: an empty or smaller batch supersedes the
+        // last one, which is what drops fetches nobody can see (Covers.js).
+        win.want("covers are asked for once", backend.countOf(Msg.RequestCover), 1)
+        win.want("only for the row still showing",
+                 backend.bodyOf(Msg.RequestCover).covers.length, 1)
+        win.want("which is the book's",
+                 backend.bodyOf(Msg.RequestCover).covers[0].seriesId, "/book/dune-messiah")
+
+        backend.forget()
+        win.findChild(searchAll, "kindFilterArea-manga").clicked(null)
+        win.want("tapping Manga shows the other two", searchAll.model.count, 2)
+        win.want("**the one that said so and the one that said nothing**",
+                 searchAll.model.get(0).title + "," + searchAll.model.get(1).title,
+                 "The Lantern Keeper,An Orphan")
+        win.want("holding one back", searchAll.hiddenCount, 1)
+        win.want("and still asking for nothing", backend.countOf(Msg.SearchAll), 0)
+
+        // A page that lands while a filter is on arrives filtered, rather than
+        // the filter having to be re-applied by hand after every page turn.
+        win.deliver(Msg.SearchAllResults, win.mixedReply())
+        win.want("a page that lands under a filter arrives filtered",
+                 searchAll.model.count, 2)
+        win.want("still saying so", kindNote.text, "Showing manga only · 1 result hidden.")
+
+        // A filter that hides everything is **not** a search that found
+        // nothing, and the screen must not say the backend's sentence for it:
+        // that is the one that reads as broken.
+        win.findChild(searchAll, "kindFilterArea-book").clicked(null)
+        win.deliver(Msg.SearchAllResults, {
+            "query": "dune", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [win.lanternGroup, win.orphanGroup], "sourceErrors": []})
+        win.want("a page with no books in it, under Books, has no rows",
+                 searchAll.model.count, 0)
+        win.want("**and says it was the filter**",
+                 searchAll.emptyMessage, "No books in these results.")
+        win.want("with the way out still named on the screen",
+                 kindNote.text, "Showing books only · 2 results hidden.")
+
+        win.deliver(Msg.SearchAllResults, {
+            "query": "nothing", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [], "sourceErrors": []})
+        win.want("while a search that really found nothing still says that",
+                 searchAll.emptyMessage, "Nothing came back for that.")
+        win.want("and claims to be hiding nothing", searchAll.hiddenCount, 0)
+
+        win.deliver(Msg.SearchAllResults, win.mixedReply())
+        backend.forget()
+        win.findChild(searchAll, "kindFilterArea-all").clicked(null)
+        win.want("All brings the rest back", searchAll.model.count, 3)
+        win.want("hiding nothing", searchAll.hiddenCount, 0)
+        win.want("and saying nothing", kindNote.text, "")
+        win.want("having asked no source for anything, either way",
+                 backend.countOf(Msg.SearchAll), 0)
+
+        // ---- and what a book opens onto --------------------------------------
+        //
+        // The series screen is told what it is showing by the row that opened
+        // it: MessageSeriesDetailResult carries no kind, and inventing one on
+        // the wire to save the lookup would be the frontend adding a field to
+        // the protocol.
+
+        var kindTiles = win.findChild(searchAll, "searchAllTiles")
+        win.findChild(kindTiles, "coverTiles").forceLayout()
+        var kindTileAreas = win.findChildren(kindTiles, "coverTileArea", [])
+        win.want("every group on the page is a tap target", kindTileAreas.length, 3)
+        kindTileAreas[2].clicked(null)
+        win.want("tapping a book opens a series", win.app.screen, "series")
+        win.want("**and the screen knows it is a book**", chapterList.kind, "book")
+        win.want("so it says what its list holds",
+                 win.findChild(chapterList, "releaseNote").text,
+                 "Releases · pick the file to download.")
+        win.want("on a strip that is drawn",
+                 win.findChild(chapterList, "releaseStrip").visible, true)
+        win.want("and it cannot be watched",
+                 win.findChild(chapterList, "watchButton").visible, false)
+        win.want("**nor bulk-downloaded over its alternatives**",
+                 win.findChild(chapterList, "selectButton").visible, false)
+
+        // **Even a reply that sent volumes draws none.** A book has one series
+        // and no volumes; the screen refuses the view rather than relying on
+        // the reply to be empty.
+        win.deliver(Msg.SeriesDetailResult, {
+            "series": {"title": "Dune Messiah", "description": "A novel about spice."},
+            "chapters": [{"id": "r0", "title": "EPUB · 0.4MB · Direct Download · fiction"}],
+            "volumes": [{"id": "r0", "title": "Volume 1", "detail": "7 chapters",
+                         "chapterCount": 7}]})
+        win.want("the volumes really did arrive", chapterList.volumeModel.count, 1)
+        win.want("**and a book offers no volume view anyway**",
+                 win.findChild(chapterList, "viewSwitch").visible, false)
+        win.want("the releases are the list", chapterList.model.count, 1)
+        win.want("titled as the backend titled them",
+                 chapterList.model.get(0).title, "EPUB · 0.4MB · Direct Download · fiction")
+
+        // And the other half: a group that never mentioned a kind opens the
+        // screen it has always opened.
+        win.app.goBack()
+        win.want("Back returns to the combined search", win.app.screen, "searchall")
+        kindTileAreas[0].clicked(null)
+        win.want("**a group with no kind opens as manga**", chapterList.kind, "manga")
+        win.want("with no release wording on it",
+                 win.findChild(chapterList, "releaseStrip").visible, false)
+        win.want("and its watch button back",
+                 win.findChild(chapterList, "watchButton").visible, true)
+        win.app.goBack()
+        win.app.showScreen("searchall")
+
         // ---- opening a group: the matches become the source switcher --------
         //
         // Tapped for real, on the tile the user would touch. What arrives at
@@ -1022,6 +1205,71 @@ Window {
                  backend.bodyOf(Msg.FolderDeleted).folderName, "The Lantern Keeper")
         win.want("with no library, it did not go",
                  backend.bodyOf(Msg.FolderDeleted).removed, false)
+
+        // ---- a downloaded book ---------------------------------------------------
+        //
+        // The same lookup from the other direction: a downloaded row carries
+        // the kind the backend gave it, and opening one is what tells the
+        // series screen whether it is listing chapters or releases.
+
+        win.app.showScreen("downloaded")
+        win.deliver(Msg.DownloadedList, win.downloadedReply())
+        win.want("a downloaded row carries its kind",
+                 downloadedList.model.get(1).kind, "book")
+        win.want("**and a row whose reply never said is manga**",
+                 downloadedList.model.get(0).kind, "manga")
+        // The screen spans every source, so its rows are marked — in the badge
+        // corner on a tile, in front of the source name on a row.
+        win.want("a downloaded book is marked", downloadedList.model.get(1).badge, "Book")
+        win.want("**and a downloaded comic is not**",
+                 downloadedList.model.get(0).badge, "")
+        downloadedList.view = Views.LIST
+        win.findChild(downloadedList, "downloadedRows").forceLayout()
+        var dlLines = win.findChildren(downloadedList, "downloadedRowDetail", [])
+        win.want("which is what the row says", dlLines[1].text,
+                 "Book · Other Reader · 1 download — One file is missing.")
+        win.want("while a comic's row is untouched", dlLines[0].text,
+                 "Example Reader · 3 downloads")
+        downloadedList.view = Views.GRID
+
+        downloadedList.openRequested("src-b", "Other Reader", "/series/orphan",
+                                     "An Orphan")
+        win.want("opening a downloaded book opens a book", chapterList.kind, "book")
+        win.want("which lists releases",
+                 win.findChild(chapterList, "releaseStrip").visible, true)
+        win.app.showScreen("downloaded")
+        downloadedList.openRequested("src-a", "Example Reader", "/manga/lantern/",
+                                     "The Lantern Keeper")
+        win.want("and opening a downloaded comic opens a comic",
+                 chapterList.kind, "manga")
+        win.want("with no release wording",
+                 win.findChild(chapterList, "releaseStrip").visible, false)
+
+        // A series reached from the watched list has no kind to be had at all —
+        // those rows predate books — and lands on the default rather than on
+        // nothing.
+        win.app.showScreen("watching")
+        watchList.openRequested("src-a", "Example Reader", "/manga/lantern/",
+                                "The Lantern Keeper")
+        win.want("a series opened from the watched list is manga",
+                 chapterList.kind, "manga")
+
+        // Coming to the combined search fresh is a fresh question, filter and
+        // all — the same state the app starts in.
+        win.app.openSearchAll()
+        win.want("opening the combined search resets the filter",
+                 searchAll.kindFilter, Kinds.ALL)
+        win.want("and empties the page it was filtering",
+                 searchAll.model.count, 0)
+        backend.forget()
+        win.findChild(searchAll, "kindFilterArea-book").clicked(null)
+        win.want("a filter tapped on an empty screen shows nothing",
+                 searchAll.model.count, 0)
+        win.want("**rather than the answer to somebody's earlier question**",
+                 searchAll.emptyMessage, "Nothing came back for that.")
+        win.want("and asks no source for one", backend.sendCount, 0)
+
+        win.app.showScreen("downloaded")
 
         // ---- reconciling with the tablet -----------------------------------------
         //

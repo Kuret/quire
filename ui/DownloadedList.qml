@@ -36,6 +36,9 @@ import QtQuick 2.5
 import "Style.js" as Style
 import "Paging.js" as Paging
 import "Views.js" as Views
+// Whether a row is a book — and that an absent kind is not one — is decided in
+// exactly one place, and it is not this file.
+import "Kinds.js" as Kinds
 
 Item {
     id: screen
@@ -160,6 +163,31 @@ Item {
     property string menuTitle: ""
     property string menuLatestUuid: ""
 
+    // subtitleOf is the row's second line: what it is, which source it came
+    // from, and what is already on the tablet.
+    //
+    // **The mark is here because this screen spans every source.** A single
+    // source is one kind and names itself, so ui/SeriesGrid.qml needs nothing;
+    // here a book and a comic sit in the same list with a cover, a title and an
+    // author line that arrive through identical fields. It is the same argument
+    // the combined search's rows are marked under, and the same word — in
+    // words, never in colour alone (ui/Kinds.js).
+    //
+    // It reads the `badge` role rather than re-deriving the mark from the kind:
+    // that role is what the tile already wears in its badge corner, composed
+    // once in Main.qml, and a second derivation is a second place for "absent
+    // means manga" to be decided. An absent role is an absent property rather
+    // than an empty string (CoverGrid's roleOf records the same trap).
+    function subtitleOf(row) {
+        var mark = row.badge === undefined || row.badge === null ? "" : String(row.badge)
+        var line = row.sourceName + " · " + row.detail
+        if (mark.length > 0)
+            line = mark + " · " + line
+        // The backend's note about a source that has been removed, kept where
+        // it was: at the end, after everything that is still true.
+        return row.openable ? line : line + " — " + row.note
+    }
+
     // readable says whether the row names a document to open. A row carries the
     // newest download of its series; a library that predates the record, or a
     // series whose last download has gone, names none.
@@ -199,9 +227,25 @@ Item {
         // that cannot ever be used on this row is not an item.
         if (screen.readable(row))
             items.push({"action": "read", "label": "Read latest", "enabled": true})
-        items.push(row.watched === true
-                   ? {"action": "unwatch", "label": "Stop watching", "enabled": true}
-                   : {"action": "watch", "label": "Watch", "enabled": true})
+        // **Never offered on a book**, in either layout, and absent rather than
+        // greyed out — the same treatment the series screen's Watch button
+        // gets, and it has to be the same or the two screens disagree about
+        // what a book is. A user who found a book watchable here and not there
+        // would reasonably conclude one of the two is broken.
+        //
+        // The reason is not tidiness. Watching is the new-chapters machinery
+        // from end to end (PLAN §12.2): every check is a real round trip per
+        // watched series, and a book's releases are the files one finished book
+        // already exists as. Pointing a check at one buys a request to a slow
+        // Shelfmark instance that can only ever answer "nothing new", forever.
+        //
+        // A book that was already watched before this — from an older Quire —
+        // is still unwatchable, from the watched screen itself (ui/WatchList.qml),
+        // which is where a watch record is managed.
+        if (!Kinds.isBook(row))
+            items.push(row.watched === true
+                       ? {"action": "unwatch", "label": "Stop watching", "enabled": true}
+                       : {"action": "watch", "label": "Watch", "enabled": true})
         items.push({"action": "delete",
                     "label": "Delete everything from this series", "enabled": true})
         return items
@@ -263,6 +307,12 @@ Item {
             }
             visible: !screen.listing
             model: screen.model
+            // A tile has no subtitle line, so the mark a row carries in words
+            // goes in the badge corner — the slot Watching's "3 new chapters"
+            // already uses, already drawn and already legible on this panel. A
+            // comic's row carries no badge at all: a mark on every tile is a
+            // mark nobody reads.
+            badges: true
             firstIndex: Paging.firstIndex(screen.page, screen.pageSize)
             onTapped: {
                 var row = screen.model.get(index)
@@ -380,13 +430,12 @@ Item {
                     // facts the user needs before tapping: which of their
                     // sources this came from, and how much is already here.
                     Text {
+                        objectName: "downloadedRowDetail"
                         width: parent.width
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
-                        text: model.openable
-                              ? model.sourceName + " · " + model.detail
-                              : model.sourceName + " · " + model.detail + " — " + model.note
+                        text: screen.subtitleOf(model)
                         font.pointSize: Style.smallSize
                         color: Style.muted
                     }

@@ -18,6 +18,7 @@ import "../../ui/Answers.js" as Answers
 import "../../ui/Style.js" as Style
 import "../../ui/Views.js" as Views
 import "../../ui/Grouping.js" as Grouping
+import "../../ui/Kinds.js" as Kinds
 import "../../ui/Covers.js" as Covers
 
 
@@ -42,6 +43,13 @@ Window {
     ListModel { id: emptyVolumesModel }
     ListModel { id: watchedModel }
     ListModel { id: downloadedModel }
+
+    // One book's releases — the files it is available as, titled by the backend
+    // exactly as they arrive (ui/Kinds.js). They fill the same roles a chapter
+    // does, because they are the same rows on the same screen; what differs is
+    // that the two a chapter has and a release does not, `published` and
+    // `scanlator`, are empty.
+    ListModel { id: releasesModel }
 
     // One page of the combined search, filled per case from a whole reply the
     // way Main.qml fills it — through Grouping.js, which is the half of that
@@ -166,6 +174,11 @@ Window {
     property int searchAllPageAsked: 0
     property int searchAllCoverAsks: 0
     property var searchAllCovers: []
+    // What the kind filter asked for. A count, because the property under test
+    // is that the filter already on asks for **nothing**: re-rendering a page
+    // of results is this screen's most expensive repaint.
+    property int refilterAsks: 0
+
     property int searchAllOpens: 0
     property string searchAllOpenedKey: ""
     property string searchAllOpenedSource: ""
@@ -344,6 +357,21 @@ Window {
         return out
     }
 
+    // Every word a screen actually puts in front of somebody, joined.
+    //
+    // Visible text only, and `visible` on a QML item is the *effective* one —
+    // a Text inside a collapsed strip reads false — which is what makes this
+    // the honest question to ask of a book's series screen: not "is the volume
+    // switch hidden" but "does the word Volumes appear anywhere on it".
+    function wordsOn(item) {
+        var texts = win.textsUnder(item, [])
+        var said = []
+        for (var i = 0; i < texts.length; ++i)
+            if (texts[i].visible && String(texts[i].text).length > 0)
+                said.push(String(texts[i].text))
+        return said.join(" | ")
+    }
+
     function findChild(item, name) {
         if (!item)
             return null
@@ -405,6 +433,7 @@ Window {
             win.searchAllCoverAsks++
             win.searchAllCovers = covers
         }
+        onRefilterRequested: win.refilterAsks++
         onOpenRequested: {
             win.searchAllOpens++
             win.searchAllOpenedKey = key
@@ -446,6 +475,14 @@ Window {
     // there, not empty: PLAN §6 M4, revised 2026-09-16.
     ChapterList { id: plainChapterList; objectName: "plainChapterList"; anchors.fill: parent
                   model: chaptersModel; volumeModel: emptyVolumesModel }
+
+    // The same screen showing a book. **It is deliberately given the volume
+    // model that has three rows in it**: a book has no volumes whatever a
+    // reply happens to contain, and the screen has to refuse the view rather
+    // than merely be handed nothing to draw in it.
+    ChapterList { id: bookChapterList; objectName: "bookChapterList"; anchors.fill: parent
+                  kind: "book"; model: releasesModel; volumeModel: volumesModel
+                  synopsis: "A novel about spice." }
     Settings {
         id: settings
         objectName: "settings"
@@ -579,6 +616,19 @@ Window {
                                  "detail": "7 chapters, Chapter 1 to Chapter 7",
                                  "chapterCount": 7,
                                  "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+
+        // Three releases of one book, titled the way the backend titles them.
+        // Every role a chapter row has, because it is the same row: the two a
+        // release has nothing to put in are empty, which is what the screen
+        // must not turn into "Date unknown".
+        var releases = ["EPUB · 0.4MB · Direct Download · fiction",
+                        "PDF · 2.1MB · Direct Download · fiction",
+                        "MOBI · 0.5MB · Mirror · fiction"]
+        for (var r = 0; r < releases.length; ++r)
+            releasesModel.append({"chapterId": "r" + r, "title": releases[r], "number": 0,
+                                  "published": "", "scanlator": "",
+                                  "downloadState": "", "downloadMessage": "",
+                                  "documentUuid": ""})
 
         var log = []
         for (var k = 0; k < 300; ++k)
@@ -1658,6 +1708,12 @@ Window {
                     "coverUrl": r.coverUrl ? r.coverUrl : "",
                     "coverPath": r.coverPath ? r.coverPath : "",
                     "latestUuid": r.latestUuid ? r.latestUuid : "",
+                    // Both of the kind's roles, on every row, for the reason
+                    // above: a fixture that left them off the first row would
+                    // take them off every row after it, and the mark would then
+                    // be asserted against a model shape the app never produces.
+                    "kind": Kinds.of(r),
+                    "badge": Kinds.mark(r),
                     "watched": r.watched ? true : false})
             }
             win.findChild(downloadedList, "downloadedRows").forceLayout()
@@ -2925,6 +2981,543 @@ Window {
         searchAll.busy = false
         searchAll.pendingPage = 0
         searchAll.visible = false
+
+        // ---- what a row is: manga, or a book -------------------------------
+        //
+        // A Shelfmark source publishes books; every source before it published
+        // page-based series. The field says which, it may be **absent**, and
+        // absent is the old world rather than an unknown one — so the default
+        // is asserted first and from several directions, because it is the one
+        // rule that, if it slipped, would silently reclassify every existing
+        // source the day a filter was switched on.
+
+        win.want("a row with no kind at all is manga",
+                 Kinds.of({"title": "Something"}), Kinds.MANGA)
+        win.want("so is one that says so", Kinds.of({"kind": "manga"}), Kinds.MANGA)
+        win.want("a book says so", Kinds.of({"kind": "book"}), Kinds.BOOK)
+        // A kind from a newer Quire, or a settings file edited into nonsense:
+        // drawn the usual way rather than not drawn at all (Views.js takes the
+        // same line on layouts).
+        win.want("a kind nothing here knows is manga",
+                 Kinds.of({"kind": "audiobook"}), Kinds.MANGA)
+        win.want("and no row at all is manga", Kinds.of(null), Kinds.MANGA)
+        win.want("a book is the one thing that is one", Kinds.isBook({"kind": "book"}), true)
+        win.want("and a row with no kind is not", Kinds.isBook({"title": "x"}), false)
+
+        // The filter itself. The case that matters is the third: a manga
+        // filter has to keep the rows whose kind was never sent, or turning it
+        // on would empty a library of sources that predate the field.
+        win.want("All keeps a book", Kinds.matches(Kinds.ALL, Kinds.BOOK), true)
+        win.want("All keeps a row with no kind", Kinds.matches(Kinds.ALL, undefined), true)
+        win.want("**Manga keeps a row with no kind**",
+                 Kinds.matches(Kinds.MANGA, undefined), true)
+        win.want("Manga keeps manga", Kinds.matches(Kinds.MANGA, Kinds.MANGA), true)
+        win.want("Manga hides books", Kinds.matches(Kinds.MANGA, Kinds.BOOK), false)
+        win.want("Books keeps books", Kinds.matches(Kinds.BOOK, Kinds.BOOK), true)
+        win.want("Books hides manga", Kinds.matches(Kinds.BOOK, Kinds.MANGA), false)
+        win.want("**and Books hides a row with no kind**",
+                 Kinds.matches(Kinds.BOOK, undefined), false)
+        // A filter nothing recognises shows too much rather than nothing: an
+        // empty screen is the failure that reads as broken.
+        win.want("a filter nobody set keeps everything",
+                 Kinds.matches("", Kinds.BOOK), true)
+
+        win.want("the control offers three, in order",
+                 Kinds.filters()[0].kind + "," + Kinds.filters()[1].kind + ","
+                 + Kinds.filters()[2].kind,
+                 "all,manga,book")
+        win.want("labelled in words",
+                 Kinds.filters()[0].label + "," + Kinds.filters()[1].label + ","
+                 + Kinds.filters()[2].label,
+                 "All,Manga,Books")
+        // A .pragma library shares one copy of its state, so the segments are
+        // handed out fresh rather than shared: one screen splicing the list
+        // must not be a different control on the next.
+        win.want("and handed out fresh each time",
+                 Kinds.filters() !== Kinds.filters(), true)
+
+        // The mark a book wears in a list. A word, because colour on this panel
+        // is a solid area only and a mark that were only a fill would leave
+        // "is this a book?" answerable by hue alone (ui/Style.js).
+        win.want("a book is marked in a word", Kinds.mark({"kind": "book"}), "Book")
+        win.want("and manga wears no mark at all", Kinds.mark({"kind": "manga"}), "")
+
+        // **The screen has to say a filter is on.** A filtered screen and a
+        // search that found nothing look identical otherwise, and the second
+        // is the one people report as broken.
+        win.want("showing everything says nothing", Kinds.filterLine(Kinds.ALL, 4), "")
+        win.want("a filter with nothing to hide still says it is on",
+                 Kinds.filterLine(Kinds.BOOK, 0), "Showing books only.")
+        win.want("and says how much it is holding back",
+                 Kinds.filterLine(Kinds.BOOK, 3), "Showing books only · 3 results hidden.")
+        win.want("one of them included",
+                 Kinds.filterLine(Kinds.MANGA, 1), "Showing manga only · 1 result hidden.")
+
+        // The two emptinesses are different answers and must not share a
+        // sentence: one is the backend's, the other is undone by tapping All.
+        win.want("a search that found nothing says so",
+                 Kinds.emptyLine(Kinds.ALL, 0), "Nothing came back for that.")
+        win.want("a page the book filter emptied says that instead",
+                 Kinds.emptyLine(Kinds.BOOK, 4), "No books in these results.")
+        win.want("and the manga filter its own",
+                 Kinds.emptyLine(Kinds.MANGA, 4), "No manga in these results.")
+        win.want("an empty search is still an empty search under a filter",
+                 Kinds.emptyLine(Kinds.BOOK, 0), "Nothing came back for that.")
+
+        // ---- a book among the groups ---------------------------------------
+
+        var duneGroup = {
+            "key": "dune messiah", "title": "Dune Messiah", "kind": "book",
+            "coverUrl": "https://example.invalid/dune.jpg",
+            "matches": [
+                {"sourceId": "src-s", "sourceName": "Shelfmark",
+                 "seriesId": "/book/dune-messiah", "coverUrl": ""}]}
+        var twoSiteBook = {
+            "key": "dune", "title": "Dune", "kind": "book", "coverUrl": "",
+            "matches": [
+                {"sourceId": "src-s", "sourceName": "Shelfmark", "seriesId": "/book/dune"},
+                {"sourceId": "src-t", "sourceName": "Other Shelf", "seriesId": "/b/dune"}]}
+
+        win.want("a group carries its kind onto the row",
+                 Grouping.groupRow(duneGroup).kind, "book")
+        win.want("and a group with none is manga on the row",
+                 Grouping.groupRow(lanternGroup).kind, "manga")
+
+        // The row's second line. A book's cover, title and author line all
+        // arrive through the same fields a comic's do, so the word is the only
+        // thing on the row that tells them apart.
+        win.want("a book's row says what it is, then where it is",
+                 Grouping.subtitleLine(duneGroup), "Book · Shelfmark")
+        win.want("**and a manga row is exactly what it always was**",
+                 Grouping.subtitleLine(lanternGroup), "Example Reader · Other Reader")
+        win.want("which is what the row is filled with",
+                 Grouping.groupRow(duneGroup).sources, "Book · Shelfmark")
+        win.want("a tile marks a book in the badge corner",
+                 Grouping.badgeFor(duneGroup), "Book")
+        win.want("beside the count when there is one too",
+                 Grouping.badgeFor(twoSiteBook), "Book · 2 sources")
+        win.want("and a manga tile's badge is untouched",
+                 Grouping.badgeFor(lanternGroup), "2 sources")
+
+        // Filling one page through the filter. **Nothing is re-fetched**: the
+        // groups are the ones already in hand, so a filter cannot fail and
+        // cannot cost a fan-out to every configured site (PLAN §7.4).
+        var mixedReply = {
+            "query": "dune", "page": 1, "pageSize": 6, "totalPages": 0, "hasMore": false,
+            "groups": [lanternGroup, orphanGroup, duneGroup], "sourceErrors": []}
+
+        win.want("a reply says how many it held", Grouping.countOf(mixedReply), 3)
+        win.want("and no reply held none", Grouping.countOf(null), 0)
+
+        var allIndex = Grouping.fill(searchAllModel, mixedReply, Kinds.ALL)
+        win.want("All shows every group", searchAllModel.count, 3)
+        Grouping.fill(searchAllModel, mixedReply)
+        win.want("**and so does a caller that passes no filter at all**",
+                 searchAllModel.count, 3)
+        Grouping.fill(searchAllModel, mixedReply, Kinds.BOOK)
+        win.want("Books shows only the book", searchAllModel.count, 1)
+        win.want("which is the book", searchAllModel.get(0).title, "Dune Messiah")
+        var mangaIndex = Grouping.fill(searchAllModel, mixedReply, Kinds.MANGA)
+        win.want("Manga shows the other two", searchAllModel.count, 2)
+        win.want("**including the one whose kind was never sent**",
+                 searchAllModel.get(0).title, "The Lantern Keeper")
+        // The switcher's index is built for every group, hidden or not: it is
+        // a lookup by the key of a row that was tapped, and rebuilding it on
+        // every filter change would be work for a case that cannot arise.
+        win.want("the switcher's sources survive filtering",
+                 Grouping.matchesFor(mangaIndex, "dune messiah").length, 1)
+        win.want("as they do unfiltered",
+                 Grouping.matchesFor(allIndex, "the lantern keeper").length, 2)
+
+        // ---- the filter, as a control --------------------------------------
+        //
+        // The same shape as the layout switch (ui/ViewToggle.qml): the one you
+        // are in is the filled one and is dead to touch, so it answers "which
+        // am I in?" before it is touched.
+
+        Grouping.fill(searchAllModel, mixedReply, Kinds.ALL)
+        searchAll.visible = true
+        searchAll.hiddenCount = 0
+        var kindAll = win.findChild(searchAll, "kindFilter-all")
+        var kindManga = win.findChild(searchAll, "kindFilter-manga")
+        var kindBook = win.findChild(searchAll, "kindFilter-book")
+        var kindAllArea = win.findChild(searchAll, "kindFilterArea-all")
+        var kindBookArea = win.findChild(searchAll, "kindFilterArea-book")
+        var kindNote = win.findChild(searchAll, "kindFilterNote")
+
+        win.want("the filter is on the combined search",
+                 kindAll !== null && kindManga !== null && kindBook !== null, true)
+        win.want("and it is drawn", win.findChild(searchAll, "kindStrip").visible, true)
+        win.want("**it starts showing everything**", searchAll.kindFilter, Kinds.ALL)
+        win.want("with All the filled one", win.colorOf(kindAll), Style.accent)
+        win.want("and the other two on paper", win.colorOf(kindBook), Style.paper)
+        win.want("the one you are in is dead to touch", kindAllArea.enabled, false)
+        win.want("and the others are live", kindBookArea.enabled, true)
+        win.want("showing everything says nothing", kindNote.text, "")
+
+        // Tapped, not called: a case that calls showKind() directly proves the
+        // function works and says nothing about whether the segment is
+        // reachable — `enabled` is exactly what it would step over.
+        win.refilterAsks = 0
+        kindBookArea.clicked(null)
+        win.want("tapping Books asks for the page again once", win.refilterAsks, 1)
+        win.want("and moves the filter", searchAll.kindFilter, Kinds.BOOK)
+        win.want("Books is the filled one now", win.colorOf(kindBook), Style.accent)
+        win.want("All is back on paper", win.colorOf(kindAll), Style.paper)
+        win.want("Books is the inert one now", kindBookArea.enabled, false)
+        win.want("and All is live again", kindAllArea.enabled, true)
+
+        // Asking for the filter already on re-renders nothing. The guard is
+        // asserted as well as `enabled`, because the two protect against
+        // different mistakes: one is a tap, the other is a caller.
+        win.refilterAsks = 0
+        searchAll.showKind(Kinds.BOOK)
+        win.want("asking for the filter already on costs nothing",
+                 win.refilterAsks, 0)
+
+        // **The screen says it is filtering, in words.** Without this a
+        // filtered screen and a broken search are the same picture.
+        win.want("a filter that is on says so", kindNote.text, "Showing books only.")
+        win.want("and it is actually on screen", kindNote.visible, true)
+        searchAll.hiddenCount = 2
+        win.want("with how much it is holding back",
+                 kindNote.text, "Showing books only · 2 results hidden.")
+        // In ink, like every other word in the app: the colour on this control
+        // is the fill behind the segment and nothing else (ui/Style.js).
+        win.want("said in ink, not in colour", win.colorOf(kindNote), Style.ink)
+        win.want("as is the label on the filled segment",
+                 win.colorOf(win.findChild(searchAll, "kindFilterLabel-book")), Style.ink)
+
+        // The intent behind the fill, which comparing it to Style.accent cannot
+        // catch: set the accent to paper and every assertion above still
+        // passes while the control marks nothing at all.
+        win.want("the filled segment is not the paper the others are",
+                 win.colorOf(kindBook) !== win.colorOf(kindAll), true)
+        win.want("and is not a grey: it has a hue",
+                 win.channels(win.colorOf(kindBook))[0]
+                 > win.channels(win.colorOf(kindBook))[2], true)
+        win.want("dark enough to read as the filled one without its colour",
+                 win.luminance(win.colorOf(kindBook)) < win.luminance(Style.paper) / 2, true)
+        win.want("and black on it clears body text's contrast",
+                 win.contrast(Style.ink, win.colorOf(kindBook)) >= 4.5, true)
+        // The border is grey on both, because a coloured 2px stroke is the
+        // shape the measurement in ui/Style.js rules out.
+        win.want("no colour on the border of the filled one",
+                 String(kindBook.border.color).toUpperCase(), Style.rule)
+
+        // A page the filter emptied is not a search that found nothing: the
+        // status text says which, and the strip above still says the filter is
+        // on, so the way out is on the screen.
+        searchAll.emptyMessage = Kinds.emptyLine(searchAll.kindFilter, 3)
+        Grouping.fill(searchAllModel, {"groups": [lanternGroup]}, Kinds.BOOK)
+        win.want("a page the filter emptied has no rows", searchAll.rowCount, 0)
+        win.want("and says it was the filter",
+                 win.findChild(searchAll, "searchAllStatus").text,
+                 "No books in these results.")
+        win.want("where the user can read it",
+                 win.findChild(searchAll, "searchAllStatus").visible, true)
+        win.want("with the way back out still on screen",
+                 kindNote.text.indexOf("Showing books only") === 0, true)
+
+        // Opening the screen fresh starts the question again, filter and all.
+        // The app starting is the same state by construction: nothing stores
+        // this, so there is nothing to restore (see the note in SearchAll.qml).
+        searchAll.reset()
+        win.want("a fresh screen is back to showing everything",
+                 searchAll.kindFilter, Kinds.ALL)
+        win.want("hiding nothing", searchAll.hiddenCount, 0)
+        win.want("and saying nothing about a filter", kindNote.text, "")
+        win.want("All is the filled one again", win.colorOf(kindAll), Style.accent)
+
+        searchAll.emptyMessage = ""
+        Grouping.fill(searchAllModel, {"query": "lantern", "groups": [lanternGroup, orphanGroup]})
+        searchAll.visible = false
+
+        // ---- a book's series screen ----------------------------------------
+        //
+        // The rows are **releases** — the files this one book is available as —
+        // and the screen around them has to stop talking about chapters,
+        // volumes and reading order. It is the same screen with different
+        // words rather than a second one: strip the words out and a book is a
+        // series of one volume, and a copy of this file would be ~700 lines of
+        // paging and selection bookkeeping duplicated to change four strings.
+
+        bookChapterList.visible = true
+        win.findChild(bookChapterList, "chapterRows").forceLayout()
+
+        win.want("a screen nobody told anything is manga", plainChapterList.isBook, false)
+        win.want("and one told it is a book is", bookChapterList.isBook, true)
+
+        // **No volume view, and not because the model is empty.** This screen
+        // was handed the three volumes on purpose.
+        win.want("the volumes are there to be drawn",
+                 bookChapterList.volumeModel.count > 0, true)
+        win.want("**and a book offers no volume view anyway**",
+                 bookChapterList.hasVolumes, false)
+        win.want("so the switch is not on the screen",
+                 win.findChild(bookChapterList, "viewSwitch").visible, false)
+        win.want("and takes no room", win.findChild(bookChapterList, "viewSwitch").height, 0)
+        bookChapterList.view = "volumes"
+        win.want("and asking for it outright still shows the releases",
+                 bookChapterList.showingVolumes, false)
+        bookChapterList.view = "chapters"
+
+        // Watching is the new-chapters machinery end to end (PLAN §12.2). A
+        // book's releases are the files one finished book already exists as, so
+        // the button would promise an announcement that cannot arrive.
+        win.want("a book cannot be watched",
+                 win.findChild(bookChapterList, "watchButton").visible, false)
+        win.want("and the button is dead as well as hidden",
+                 win.findChild(bookChapterList, "watchArea").enabled, false)
+        win.want("**while a manga series still offers it**",
+                 win.findChild(chapterList, "watchButton").visible, true)
+        win.want("and it is still live there",
+                 win.findChild(chapterList, "watchArea").enabled, true)
+
+        // What the list is, said once where the volume switch would have been,
+        // so a book's rows start exactly where a manga's do.
+        win.want("a book says what its list holds",
+                 win.findChild(bookChapterList, "releaseNote").text,
+                 "Releases · pick the file to download.")
+        win.want("on a strip that is drawn",
+                 win.findChild(bookChapterList, "releaseStrip").visible, true)
+        win.want("**and takes no room at all on a manga screen**",
+                 win.findChild(chapterList, "releaseStrip").height, 0)
+        win.want("where it is not drawn either",
+                 win.findChild(chapterList, "releaseStrip").visible, false)
+
+        // A release has no publication date and no scanlator — the whole of
+        // what it is, is in the title the backend composed. "Date unknown"
+        // under it would be the screen inventing a fact.
+        var releaseSubs = win.findChildren(bookChapterList, "chapterSubtitle", [])
+        var chapterSubs = win.findChildren(chapterList, "chapterSubtitle", [])
+        win.want("a release's row says nothing under its title",
+                 releaseSubs[0].text, "")
+        win.want("**while a chapter's still carries its date and group**",
+                 chapterSubs[0].text, "2026-01-01 · Group")
+        win.want("and the release's title is the backend's, untouched",
+                 win.findChildren(bookChapterList, "chapterTitle", [])[0].text,
+                 "EPUB · 0.4MB · Direct Download · fiction")
+
+        // **No bulk download over a set of alternatives.** Three releases of
+        // one book are three copies of it in three formats; queueing them is
+        // never what anyone meant, and each one is minutes of a slow queue.
+        // For a manga the mode is the whole point, so this is the one place the
+        // two want different behaviour rather than different words.
+        win.want("the releases are there to be picked", bookChapterList.rowCount, 3)
+        win.want("**and a book offers no Select**",
+                 win.findChild(bookChapterList, "selectButton").visible, false)
+        win.want("the way in is dead as well as hidden",
+                 win.findChild(bookChapterList, "selectArea").enabled, false)
+        win.want("no release is selectable in the first place",
+                 bookChapterList.canSelect("", ""), false)
+        // The door is barred as well as hidden: the two stop different
+        // mistakes, and a caller is not a tap.
+        bookChapterList.enterSelection()
+        win.want("and asking to select outright does nothing",
+                 bookChapterList.selecting, false)
+        win.want("so no bar of bulk actions appears",
+                 win.findChild(bookChapterList, "selectionBar").visible, false)
+        // Visible boxes, not boxes that exist: the delegate builds one per row
+        // and draws it only for a row that can be picked, which is the property
+        // under test (the same count the manga case takes).
+        var bookBoxes = win.findChildren(bookChapterList, "selectBox", [])
+        var bookBoxesShown = 0
+        for (var bb = 0; bb < bookBoxes.length; ++bb)
+            if (bookBoxes[bb].visible)
+                bookBoxesShown++
+        win.want("and no boxes on the releases", bookBoxesShown, 0)
+
+        // The counterpart: thirty chapters in one tap is untouched.
+        win.want("**while a manga series still offers Select**",
+                 win.findChild(chapterList, "selectButton").visible, true)
+        win.want("with the way in live", win.findChild(chapterList, "selectArea").enabled, true)
+        win.want("and its rows still pickable", chapterList.canSelect("", ""), true)
+
+        // The empty state. The rows are gone, not the wording.
+        win.want("an empty book list says releases",
+                 win.findChild(bookChapterList, "chapterEmpty").text,
+                 "No releases listed.")
+        win.want("**and an empty chapter list still says chapters**",
+                 win.findChild(chapterList, "chapterEmpty").text, "No chapters listed.")
+        bookChapterList.model = emptyVolumesModel
+        win.want("and it is what is actually shown when there is nothing",
+                 win.findChild(bookChapterList, "chapterEmpty").visible, true)
+        bookChapterList.model = releasesModel
+        win.findChild(bookChapterList, "chapterRows").forceLayout()
+
+        // And the whole point, asked of the screen rather than of its parts:
+        // no word on a book's series screen is about chapters, volumes or the
+        // order to read them in.
+        var bookWords = win.wordsOn(bookChapterList)
+        win.want("a book's screen says nothing about chapters",
+                 bookWords.toLowerCase().indexOf("chapter"), -1)
+        win.want("nothing about volumes", bookWords.toLowerCase().indexOf("volume"), -1)
+        win.want("and invents no date for a file",
+                 bookWords.indexOf("Date unknown"), -1)
+        win.want("nor offers a bulk action over alternatives",
+                 bookWords.indexOf("Select"), -1)
+        win.want("of any wording", bookWords.indexOf("Download selected"), -1)
+        win.want("while still saying what it does hold",
+                 bookWords.indexOf("Releases") >= 0, true)
+
+        // The counterpart, and the one that keeps this honest: the manga screen
+        // is untouched. If the words above went missing everywhere, this fails.
+        chapterList.visible = true
+        win.findChild(chapterList, "chapterRows").forceLayout()
+        var mangaWords = win.wordsOn(chapterList)
+        win.want("**a manga screen still talks about chapters**",
+                 mangaWords.indexOf("Chapter") >= 0, true)
+        win.want("and still offers the bulk download",
+                 mangaWords.indexOf("Select") >= 0, true)
+        win.want("and still offers its volumes",
+                 mangaWords.indexOf("Volumes") >= 0, true)
+        win.want("with the view switch on screen",
+                 win.findChild(chapterList, "viewSwitch").visible, true)
+        win.want("and says nothing about releases",
+                 mangaWords.indexOf("Releases"), -1)
+        // Left as the cases after this one found it: every screen in this
+        // harness is stacked over every other and drawn by default, and the
+        // accent sweep further down reads effective visibility.
+        chapterList.visible = true
+        bookChapterList.visible = false
+
+        // ---- a book in the downloaded library ------------------------------
+        //
+        // **This screen spans every source**, which is exactly why its rows are
+        // marked where a single source's results are not: a book and a comic
+        // sit in the same list, and the cover, the title and the author line
+        // all arrive through identical fields. Same word, same two layouts, and
+        // in words rather than in colour alone.
+
+        var dlViewBefore = downloadedList.view
+        downloadedList.visible = true
+        downloadedRows([
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/lantern/", "title": "The Lantern Keeper",
+             "detail": "3 downloads", "openable": true, "note": "", "coverUrl": ""},
+            // Watched on purpose: a book that somehow already carries a watch
+            // record must not be offered the toggle either, or the line comes
+            // back for exactly the rows that most look like it belongs.
+            {"sourceId": "src-s", "sourceName": "Shelfmark",
+             "seriesId": "/book/dune-messiah", "title": "Dune Messiah", "kind": "book",
+             "detail": "1 download", "openable": true, "note": "", "coverUrl": "",
+             "watched": true},
+            {"sourceId": "gone", "sourceName": "gone", "seriesId": "/book/lost",
+             "title": "Lost Book", "kind": "book",
+             "detail": "1 download", "openable": false,
+             "note": "The source this came from has been removed.", "coverUrl": ""},
+            // A watched comic, so the two halves of the manga line are both on
+            // the screen the book row is being compared against.
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/manga/orphan/", "title": "An Orphan",
+             "detail": "2 downloads", "openable": true, "note": "", "coverUrl": "",
+             "watched": true}])
+
+        downloadedList.view = "list"
+        win.findChild(downloadedList, "downloadedRows").forceLayout()
+        var dlDetails = win.findChildren(downloadedList, "downloadedRowDetail", [])
+        win.want("every downloaded row has its line", dlDetails.length, 4)
+        win.want("**a downloaded comic's line is exactly what it always was**",
+                 dlDetails[0].text, "Example Reader · 3 downloads")
+        win.want("**and a book's says so before its source**",
+                 dlDetails[1].text, "Book · Shelfmark · 1 download")
+        // The count sentence is the backend's and is drawn verbatim either way
+        // (PLAN §2); the mark is the only thing the view puts in front of it.
+        win.want("with the backend's own count untouched",
+                 dlDetails[1].text.indexOf("1 download") > 0, true)
+        win.want("and nothing about chapters on a book's row",
+                 dlDetails[1].text.toLowerCase().indexOf("chapter"), -1)
+        win.want("a book whose source is gone keeps the mark and the note",
+                 dlDetails[2].text,
+                 "Book · gone · 1 download — The source this came from has been removed.")
+
+        // The tile has no subtitle line, so the mark goes in the badge corner —
+        // the slot Watching's count already uses.
+        downloadedList.view = "grid"
+        win.findChild(downloadedList, "coverTiles").forceLayout()
+        var dlBadges = win.findChildren(downloadedList, "coverBadge", [])
+        var dlBadgeText = win.findChildren(downloadedList, "coverBadgeText", [])
+        win.want("a downloaded book's tile is marked", dlBadges[1].visible, true)
+        win.want("in a word", dlBadgeText[1].text, "Book")
+        win.want("**and a comic's tile wears no mark at all**",
+                 dlBadges[0].visible, false)
+        win.want("the mark is black on the fill, never a coloured word",
+                 win.colorOf(dlBadgeText[1]), Style.ink)
+
+        // ---- and what the long press offers a book -------------------------
+        //
+        // **No watching.** Every check is a real round trip per watched series
+        // (PLAN §12.2), and a book's releases are the files one finished book
+        // already exists as — a watch on one buys a request to a slow instance
+        // that can only ever answer "nothing new". Absent rather than greyed
+        // out, and the same answer in both layouts, because a book that could
+        // be watched here but not from its own series screen would read as one
+        // of the two screens being broken.
+
+        downloadedList.view = "list"
+        win.findChild(downloadedList, "downloadedRows").forceLayout()
+        var dlAreas = win.findChildren(downloadedList, "downloadedRowArea", [])
+        win.holdOn(dlAreas[1])
+        var bookMenu = win.menuLabels(downloadedList)
+        win.want("a held book row opens a menu", bookMenu.length > 0, true)
+        win.want("**offering no way to watch it**",
+                 bookMenu.indexOf("Watch"), -1)
+        win.want("not even one that is already watched",
+                 bookMenu.indexOf("Stop watching"), -1)
+        win.want("while still offering everything that means something",
+                 bookMenu.join(","), "Open,Delete everything from this series")
+        win.want("and not one line of it counts chapters",
+                 bookMenu.join(" | ").toLowerCase().indexOf("chapter"), -1)
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+
+        // Side by side with a comic, so the case cannot pass by the menu
+        // simply having come back empty.
+        win.holdOn(dlAreas[0])
+        var comicMenu = win.menuLabels(downloadedList)
+        win.want("**while a comic beside it still offers Watch**",
+                 comicMenu.indexOf("Watch") >= 0, true)
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+        win.holdOn(dlAreas[3])
+        var watchedMenu = win.menuLabels(downloadedList)
+        win.want("and a watched comic still offers the way out",
+                 watchedMenu.indexOf("Stop watching") >= 0, true)
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+
+        // The same answer in the grid, where there is no row and no button on
+        // it: the layout switch decides how the screen looks, never what it
+        // can do.
+        downloadedList.view = "grid"
+        win.findChild(downloadedList, "coverTiles").forceLayout()
+        var dlTileAreas = win.findChildren(downloadedList, "coverTileArea", [])
+        win.holdOn(dlTileAreas[1])
+        var bookTileMenu = win.menuLabels(downloadedList)
+        win.want("a held book tile opens a menu too", bookTileMenu.length > 0, true)
+        win.want("**offering no way to watch it either**",
+                 bookTileMenu.indexOf("Watch"), -1)
+        win.want("nor to stop", bookTileMenu.indexOf("Stop watching"), -1)
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+        win.holdOn(dlTileAreas[0])
+        win.want("**while a comic's tile still offers it**",
+                 win.menuLabels(downloadedList).indexOf("Watch") >= 0, true)
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+
+        // The book above is watched, so the line it would have worn is "Stop
+        // watching". The other half of the same rule, on a book nobody has ever
+        // watched, where the line would read "Watch".
+        downloadedModel.setProperty(1, "watched", false)
+        downloadedList.view = "list"
+        win.findChild(downloadedList, "downloadedRows").forceLayout()
+        win.holdOn(win.findChildren(downloadedList, "downloadedRowArea", [])[1])
+        var freshBookMenu = win.menuLabels(downloadedList)
+        win.want("**an unwatched book is offered no Watch either**",
+                 freshBookMenu.indexOf("Watch"), -1)
+        win.want("and the rest of its menu is unchanged",
+                 freshBookMenu.join(","), "Open,Delete everything from this series")
+        win.findChild(downloadedList, "contextMenuScrim").clicked(null)
+
+        downloadedList.view = dlViewBefore
+        downloadedList.visible = false
 
         // ---- the series screen's source switcher ---------------------------
         //

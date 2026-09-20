@@ -29,6 +29,9 @@
 //   - **Sources that failed are not a failure.** They contributed no rows
 //     while the rest filled the screen, so they are one subdued line under the
 //     results and nothing else — never a blank page, never an error.
+//   - **A filter on what kind of thing a result is.** Only here: a single
+//     source is one kind, so the same control on ui/SeriesGrid.qml would be
+//     three buttons that cannot change anything. See the strip below.
 
 import QtQuick 2.5
 import "Style.js" as Style
@@ -36,6 +39,7 @@ import "Paging.js" as Paging
 import "Screens.js" as Screens
 import "Views.js" as Views
 import "Grouping.js" as Grouping
+import "Kinds.js" as Kinds
 
 Item {
     id: screen
@@ -61,6 +65,42 @@ Item {
     // sourceErrors. Empty when they all did, and empty is what is shown: a
     // line that is always there is a line nobody reads.
     property string failedSources: ""
+
+    // ---- the kind filter ----------------------------------------------------
+    //
+    // Which kind of result is being shown: Kinds.ALL, MANGA or BOOK. A combined
+    // search is the one screen where the two mix, which is the whole reason the
+    // control is here and nowhere else.
+    //
+    // **It is transient on purpose, and that is a limit rather than a
+    // decision.** Every other remembered choice in Quire — the layout switch,
+    // the robots setting — goes to the backend's store and comes back on the
+    // status, so the screen draws what was saved rather than what it hoped.
+    // There is no stored setting for this one, so it starts at ALL every time
+    // the app starts, and a filter that outlived a restart would need that
+    // setting first.
+    property string kindFilter: Kinds.ALL
+
+    // How many groups on the page in hand the filter is holding back. Set by
+    // the shell, which is what holds the reply; the line below is drawn from
+    // it. Zero is not "no filter": a filter can be on with nothing to hide.
+    property int hiddenCount: 0
+
+    readonly property string filterNote: Kinds.filterLine(screen.kindFilter, screen.hiddenCount)
+
+    // Asks the shell to draw the page in hand again through the new filter.
+    // Nothing is fetched: the groups are already here (Grouping.fill).
+    signal refilterRequested()
+
+    // showKind is the one way the filter moves. Guarded, so tapping the filter
+    // already on re-renders nothing — a repaint of the whole page of results is
+    // the most expensive thing this screen can do for no change.
+    function showKind(kind) {
+        if (screen.kindFilter === kind)
+            return
+        screen.kindFilter = kind
+        screen.refilterRequested()
+    }
 
     // Where in the listing we are. All of it comes from the backend: it owns
     // the merge and the cache, so it is the only thing that knows whether
@@ -110,6 +150,12 @@ Item {
         screen.query = ""
         screen.emptyMessage = ""
         screen.failedSources = ""
+        // A fresh screen is a fresh question, and the filter is part of the
+        // question. Coming *back* from a series is a different route and does
+        // not pass through here, so the filter survives that — what the user
+        // was looking at is still what they were looking at.
+        screen.kindFilter = Kinds.ALL
+        screen.hiddenCount = 0
         screen.page = 1
         screen.totalPages = 0
         screen.hasMore = false
@@ -120,8 +166,13 @@ Item {
     // the page in hand is the wrong size. Ask for a whole one rather than
     // leaving a gap or a clipped row. Only ever when there is a search to
     // re-run: an empty query must not fan out, whatever moved (Grouping.js).
+    // A page held back by the filter is legitimately shorter than a full one,
+    // so the mismatch this looks for would be true of every filtered page —
+    // and re-fetching would throw the user back to page 1 for a window resize
+    // that changed nothing they can see.
     onPageSizeChanged: {
         if (Grouping.searchable(screen.query) && screen.pageSize > 0
+                && screen.hiddenCount === 0
                 && screen.rowCount > 0 && screen.rowCount !== screen.pageSize)
             screen.turnTo(1)
     }
@@ -225,6 +276,117 @@ Item {
         }
     }
 
+    // ---- the kind filter ----------------------------------------------------
+    //
+    // Three words and the state of the filter spelled out beside them. The same
+    // shape as the layout switch (ui/ViewToggle.qml), deliberately: the one you
+    // are in is the filled one and it is dead to touch, so the control answers
+    // "which am I in?" before it is touched and asking for it again costs
+    // nothing.
+    //
+    // **The fill is the only colour, and it is a solid block.** Measured on the
+    // device: this panel composes a coloured pixel through its filter array and
+    // draws black at full resolution, so a coloured word or a coloured 2px
+    // border reads muddy (ui/Style.js). Every label here is ink, on the filled
+    // segment as well as the others.
+    //
+    // **And colour is never the only signal.** The filled segment is also the
+    // inert one, it is visibly the dark one with the hue taken away, and the
+    // line to its right says in words which filter is on and how much it is
+    // holding back. A reader who cannot tell the hues apart, or a panel in
+    // direct sun, gets the same answer.
+    //
+    // It is always on screen rather than appearing when a search has books in
+    // it: a control that comes and goes is a control the user has to discover
+    // twice, and its absence would be indistinguishable from a search that
+    // happened to find no books.
+    Item {
+        id: kindStrip
+        objectName: "kindStrip"
+        anchors { top: searchBar.bottom; left: parent.left; right: parent.right }
+        height: Style.buttonHeight + Style.margin
+
+        Row {
+            id: kindButtons
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: Style.gap
+
+            Repeater {
+                // A Repeater over the three, rather than three near-identical
+                // Rectangles: they differ in one word and one value, and a copy
+                // is how the third ends up a few pixels shorter than the first.
+                model: Kinds.filters()
+
+                delegate: Rectangle {
+                    id: segment
+                    objectName: "kindFilter-" + modelData.kind
+
+                    readonly property bool current: screen.kindFilter === modelData.kind
+
+                    width: 180
+                    height: Style.buttonHeight
+                    color: segmentArea.pressed ? Style.pressed
+                                               : (segment.current ? Style.accent : Style.paper)
+                    border.width: 2
+                    // Grey on both, as the layout switch has: a coloured 2px
+                    // border is a thin coloured stroke, which is the shape the
+                    // measurement in ui/Style.js rules out.
+                    border.color: Style.rule
+                    radius: 6
+
+                    Text {
+                        objectName: "kindFilterLabel-" + modelData.kind
+                        anchors.centerIn: parent
+                        text: modelData.label
+                        font.pointSize: Style.smallSize
+                        // Black on the accent fill: 5.90:1 (ui/Style.js). The
+                        // segments that are not on stay grey on paper, so the
+                        // three differ in type colour as well as in fill.
+                        color: segment.current ? Style.ink : Style.muted
+                    }
+
+                    MouseArea {
+                        id: segmentArea
+                        objectName: "kindFilterArea-" + modelData.kind
+                        anchors.fill: parent
+                        // The filter already on is inert, for the reason
+                        // showKind() guards as well: re-rendering the page of
+                        // results is this screen's most expensive repaint and
+                        // it would change nothing.
+                        enabled: !segment.current
+                        onClicked: screen.showKind(modelData.kind)
+                    }
+                }
+            }
+        }
+
+        // What the filter is doing, in words. Empty — and therefore silent —
+        // while everything is being shown; a line that is always there is a
+        // line nobody reads.
+        Text {
+            objectName: "kindFilterNote"
+            anchors {
+                left: kindButtons.right; leftMargin: Style.gap
+                right: parent.right; rightMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideRight
+            text: screen.filterNote
+            font.pointSize: Style.smallSize
+            color: Style.ink
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     // ---- the results -------------------------------------------------------
     //
     // Both layouts are built and one is hidden, rather than a Loader swapping
@@ -235,7 +397,7 @@ Item {
     Item {
         id: viewport
         anchors {
-            top: searchBar.bottom
+            top: kindStrip.bottom
             left: parent.left; leftMargin: Style.margin
             right: parent.right; rightMargin: Style.margin
             bottom: failedBar.top
@@ -327,10 +489,14 @@ Item {
                         color: Style.ink
                     }
 
-                    // Which sources have it, in the user's own source order —
-                    // the line SeriesGrid keeps for the one source it is
-                    // showing. The height is kept even when it is empty, so a
-                    // page holds the same number of rows either way.
+                    // What it is and which sources have it, in the user's own
+                    // source order — the line SeriesGrid keeps for the one
+                    // source it is showing. A book says so here in a word
+                    // (Grouping.subtitleLine): its cover, title and author line
+                    // all arrive through the same fields a comic's do, so
+                    // nothing else on the row would tell them apart. The height
+                    // is kept even when it is empty, so a page holds the same
+                    // number of rows either way.
                     Text {
                         objectName: "searchAllRowSources"
                         width: parent.width

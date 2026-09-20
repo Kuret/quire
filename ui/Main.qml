@@ -46,6 +46,7 @@ import "Screens.js" as Screens
 import "Answers.js" as Answers
 import "Views.js" as Views
 import "Grouping.js" as Grouping
+import "Kinds.js" as Kinds
 import "Covers.js" as Covers
 
 Rectangle {
@@ -357,6 +358,18 @@ Rectangle {
                 // none, and the tile is a titled placeholder rather than a
                 // blank square.
                 "coverUrl": r.coverUrl ? r.coverUrl : "",
+                // Whether this row is a book. Carried so the series screen can
+                // be told what it is showing by the row that opened it — the
+                // detail reply says nothing about kind (ui/Kinds.js) — and
+                // written on every row because a ListModel fixes its roles on
+                // the first append and drops keys added later.
+                "kind": Kinds.of(r),
+                // The word a book wears on this screen, in both layouts: the
+                // tile's badge corner reads it directly, and the row's subtitle
+                // line puts it in front of the source name
+                // (ui/DownloadedList.qml subtitleOf). Composed once, here, so
+                // "absent means manga" is decided in exactly one place.
+                "badge": Kinds.mark(r),
                 // Filled in later, when MessageCoverReady lands. The role has
                 // to exist from the first append or that write is dropped.
                 "coverPath": "",
@@ -393,6 +406,13 @@ Rectangle {
     // been turned away from resolves to nothing rather than to the wrong
     // sources (Grouping.js matchesFor).
     property var searchAllMatches: ({})
+
+    // The last page of combined results exactly as it arrived, so the kind
+    // filter can redraw it without asking every source again. Null until a
+    // search has come back, and emptied when the screen is opened fresh: a
+    // filter tapped on an empty screen must not repopulate it with the answer
+    // to somebody's earlier question.
+    property var lastSearchAll: null
     ListModel { id: chaptersModel }
 
     // The volume view's rows (PLAN §6 M4, revised 2026-09-16). It is empty
@@ -637,6 +657,11 @@ Rectangle {
                 "title": list[i].title,
                 "coverUrl": list[i].coverUrl ? list[i].coverUrl : "",
                 "coverPath": "",
+                // What this result is — absent means manga (ui/Kinds.js). One
+                // source is one kind, so this screen draws no filter; it is
+                // here because opening a result is what tells the series screen
+                // whether it is listing chapters or releases.
+                "kind": Kinds.of(list[i]),
                 // Whether this result is already watched, for the long-press
                 // menu's Watch / Stop watching line. Derived from the watched
                 // model rather than carried by the search reply: the store is
@@ -676,7 +701,14 @@ Rectangle {
     // say.
     function fillSearchAll(msg) {
         searchAllScreen.busy = false
-        root.searchAllMatches = Grouping.fill(searchAllModel, msg)
+
+        // The reply is kept whole, because the kind filter is drawn from it
+        // again every time it moves. **Nothing is re-fetched to filter**: this
+        // page was merged and paged by the backend out of a request to every
+        // configured site, and spending that again to show a subset of rows
+        // already on screen would make a filter something that can fail
+        // (PLAN §7.4).
+        root.lastSearchAll = msg
 
         // Where the backend says we are. It clamps a page that ran past the
         // end, so this is the page actually served, and totalPages stays 0
@@ -687,10 +719,29 @@ Rectangle {
         searchAllScreen.hasMore = msg ? !!msg.hasMore : false
         searchAllScreen.pendingPage = 0
         searchAllScreen.failedSources = Grouping.failedLine(msg ? msg.sourceErrors : [])
+        root.showSearchAllGroups()
+    }
+
+    // showSearchAllGroups draws the page in hand through the screen's kind
+    // filter. Called when a page lands and again whenever the filter moves.
+    //
+    // The two emptinesses are kept apart here (ui/Kinds.js): a search that
+    // found nothing is the backend's answer, and a page whose results the
+    // filter is holding back is the filter's — and is undone by tapping All.
+    // Saying the first when the second is true is how a working search gets
+    // reported as broken.
+    function showSearchAllGroups() {
+        var msg = root.lastSearchAll
+        var total = Grouping.countOf(msg)
+        root.searchAllMatches = Grouping.fill(searchAllModel, msg,
+                                              searchAllScreen.kindFilter)
+        searchAllScreen.hiddenCount = total - searchAllModel.count
         searchAllScreen.emptyMessage = searchAllModel.count === 0
-            ? "Nothing came back for that." : ""
-        // One batch for the page that just landed, every entry naming its own
-        // source: this screen draws series from several at once.
+            ? Kinds.emptyLine(searchAllScreen.kindFilter, total) : ""
+        // One batch for the rows now on screen, every entry naming its own
+        // source: this screen draws series from several at once. A filtered-out
+        // group is not in the batch, and an empty batch supersedes the last one
+        // — which is what drops fetches for covers nobody can see (Covers.js).
         searchAllScreen.requestVisibleCovers()
     }
 
@@ -930,6 +981,7 @@ Rectangle {
         root.showScreen("searchall")
         searchAllModel.clear()
         root.searchAllMatches = ({})
+        root.lastSearchAll = null
         searchAllScreen.reset()
         searchAllScreen.busy = false
         // The keyboard comes up with the screen: there is nothing else to do
@@ -952,7 +1004,11 @@ Rectangle {
     // search's group — every source the same series was found in — and is
     // absent for every other route in, which is what decides that the source
     // chips are drawn at all (ui/ChapterList.qml).
-    function openSeries(seriesId, title, matches) {
+    // `kind` is what the row that opened this said it was, and is absent for
+    // the routes that cannot know — the watched list, whose rows predate books
+    // entirely. Absent is manga, which is what every source but a Shelfmark one
+    // is (ui/Kinds.js).
+    function openSeries(seriesId, title, matches, kind) {
         root.currentSeriesId = seriesId
         // Where Back goes. Not recomputed when this is re-entered from the
         // series screen itself — which is what switching source does — because
@@ -975,6 +1031,9 @@ Rectangle {
         // series' volume view is never on screen over this one's chapters.
         volumesModel.clear()
         chapterListScreen.view = "chapters"
+        // Set before the detail is asked for, so the screen is never briefly a
+        // chapter list for a book: "Fetching…" arrives under the right heading.
+        chapterListScreen.kind = Kinds.normalise(kind)
         chapterListScreen.seriesTitle = title
         chapterListScreen.synopsis = ""
         chapterListScreen.page = 1
@@ -1001,7 +1060,11 @@ Rectangle {
     function switchSource(sourceId, sourceName, seriesId) {
         root.currentSourceId = sourceId
         root.currentSourceName = sourceName
-        root.openSeries(seriesId, chapterListScreen.seriesTitle, chapterListScreen.sources)
+        // The kind travels with it: the sources in a group were merged because
+        // they are the same work, and a switch between them changes which site
+        // it is being read from, not what it is.
+        root.openSeries(seriesId, chapterListScreen.seriesTitle, chapterListScreen.sources,
+                        chapterListScreen.kind)
     }
 
     // showScreen is the one way a screen becomes the active one.
@@ -1298,7 +1361,12 @@ Rectangle {
             onOpenRequested: {
                 root.currentSourceId = sourceId
                 root.currentSourceName = sourceName
-                root.openSeries(seriesId, title)
+                // What the row said it was. Looked up by the pair rather than
+                // carried on the signal: the signal is the same one three
+                // screens raise, and only this one's rows have a kind.
+                root.openSeries(seriesId, title, undefined,
+                                Kinds.kindFor(downloadedModel,
+                                              {"sourceId": sourceId, "seriesId": seriesId}))
             }
             onDeleteRequested: root.send(Msg.DeleteSeries,
                 {"sourceId": sourceId, "seriesId": seriesId})
@@ -1353,7 +1421,8 @@ Rectangle {
             // (Covers.js), so the second path was one screen away from
             // cancelling another's covers.
             onCoversRequested: root.requestCoversBySource(covers, root.currentSourceId)
-            onOpenRequested: root.openSeries(seriesId, title)
+            onOpenRequested: root.openSeries(seriesId, title, undefined,
+                                            Kinds.kindFor(seriesModel, {"seriesId": seriesId}))
 
             // Watching straight from the results, without opening the series
             // first. One source is being browsed, so it is this screen's
@@ -1379,6 +1448,9 @@ Rectangle {
             // it per source was a real bug on Downloaded: each message
             // cancelled the one before it.
             onCoversRequested: root.requestCoversBySource(covers)
+            // The kind filter moved. The page is already here, so this only
+            // draws it again — see showSearchAllGroups.
+            onRefilterRequested: root.showSearchAllGroups()
             // Opening a group opens its first match — the one the backend put
             // first, which is first in the user's own source order. The rest
             // go with it, and become the chips on the series screen; nothing
@@ -1388,7 +1460,8 @@ Rectangle {
                 root.currentSourceId = sourceId
                 root.currentSourceName = matches.length > 0 && matches[0].sourceName
                     ? matches[0].sourceName : ""
-                root.openSeries(seriesId, title, matches)
+                root.openSeries(seriesId, title, matches,
+                                Kinds.kindFor(searchAllModel, {"key": key}))
             }
         }
 

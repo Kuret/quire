@@ -18,6 +18,27 @@
 // screen that would push rows off the page or leave a half row at the bottom,
 // which is the scrolling problem in miniature.
 
+// # A book is the same screen with different words
+//
+// A Shelfmark source publishes books, and what fills this list for one is not
+// chapters but **releases** — the files that book is available as, of which the
+// reader picks one. The backend titles each of them for display ("EPUB · 0.4MB
+// · Direct Download · …"), so none of that wording is here.
+//
+// What *is* here is everything around the list, and for a book most of it was
+// a lie: a volume view, a watch button that promises to announce new chapters,
+// "No chapters listed.", a date line for a thing with no date.
+//
+// **It is conditional wording rather than a second screen**, and deliberately:
+// strip the words out and a book behaves identically to a series of one volume
+// — one paged list, one button a row, the same download states, the same
+// delete question, the same selection mode, the same pager. A ReleaseList.qml
+// would be a copy of ~700 lines of paging and selection bookkeeping in order to
+// change four strings and hide two controls, and the copy is where the next fix
+// to the selection logic would fail to land. The cases where a book genuinely
+// differs are all *absences*, which this screen already knows how to draw: it
+// has collapsed the volume switch to nothing since volumes existed.
+
 import QtQuick 2.5
 import "Style.js" as Style
 import "Paging.js" as Paging
@@ -30,6 +51,17 @@ Item {
     property string synopsis: ""
     property bool busy: false
 
+    // What this series is: "manga" — every source that existed before books —
+    // or "book". It is set from the row that opened the screen, because that is
+    // where the backend says it (ui/Kinds.js); the detail reply carries no kind
+    // of its own and inventing one on the wire would be the frontend adding a
+    // field to the protocol.
+    //
+    // The default is what an absent field means, so a screen nobody told is the
+    // world as it was.
+    property string kind: "manga"
+    readonly property bool isBook: screen.kind === "book"
+
     // The volume view (PLAN §6 M4, revised 2026-09-16). Chapters are the
     // default and are always here; volumes are a second view of the same
     // series, offered only when the backend sent rows for one.
@@ -40,7 +72,13 @@ Item {
     // worse answer than no tab.
     property alias volumeModel: volumeList.model
 
-    readonly property bool hasVolumes: screen.volumeModel ? screen.volumeModel.count > 0 : false
+    // A book has exactly one series and no volumes, so the switch is never
+    // offered for one — whatever happens to be in the model. Written as a
+    // refusal here rather than trusted to arrive empty: "Volumes" on a book is
+    // the screen claiming a reading order that does not exist, and the cost of
+    // being sure is one term.
+    readonly property bool hasVolumes: !screen.isBook
+                                       && (screen.volumeModel ? screen.volumeModel.count > 0 : false)
 
     // Which view is on screen. It is never "volumes" without rows to show: a
     // series that loses its volumes on a refresh must not leave the screen
@@ -190,6 +228,17 @@ Item {
     // It is deliberately the same set of states that make the row's button say
     // Download or Retry, so what is selectable is what the row already offers.
     function canSelect(state, documentUuid) {
+        // A book's rows are **alternatives**: three releases of one book are
+        // three copies of the same thing in three formats, and queueing them is
+        // never what anyone meant. For a manga the mode is the whole point —
+        // thirty chapters in one tap — so this is the one place the two
+        // genuinely want different behaviour rather than different words.
+        //
+        // Refused here as well as at the door (enterSelection) because the two
+        // stop different mistakes: that stops the mode being entered, this
+        // means no row is pickable even if it somehow were.
+        if (screen.isBook)
+            return false
         if (documentUuid)
             return false
         return state === "" || state === "failed" || state === "cancelled"
@@ -253,6 +302,11 @@ Item {
     // clears: a selection the user cannot see is a selection they will act on
     // by accident, which is the same rule the confirm strip follows.
     function enterSelection() {
+        // Never for a book — see canSelect. A bulk action over a set of
+        // alternatives invites exactly the mistake it makes easy, and each
+        // mistaken copy is minutes of a slow queue.
+        if (screen.isBook)
+            return
         screen.closeConfirm()
         screen.selecting = true
         screen.clearSelection()
@@ -415,7 +469,8 @@ Item {
             anchors {
                 top: parent.top; topMargin: Style.margin
                 left: parent.left; leftMargin: Style.margin
-                right: selectButton.visible ? selectButton.left : watchButton.left
+                right: selectButton.visible ? selectButton.left
+                                            : (watchButton.visible ? watchButton.left : parent.right)
                 rightMargin: Style.gap
             }
             wrapMode: Text.WordWrap
@@ -440,12 +495,18 @@ Item {
             id: selectButton
             objectName: "selectButton"
             anchors {
-                right: watchButton.left; rightMargin: Style.gap
+                // Takes the watch button's place when there is no watch button
+                // — a book has none — rather than leaving a hole where it was.
+                right: watchButton.visible ? watchButton.left : parent.right
+                rightMargin: watchButton.visible ? Style.gap : Style.margin
                 top: parent.top; topMargin: Style.margin
             }
             width: 220
             height: Style.buttonHeight
-            visible: !screen.selecting && screen.rowCount > 0
+            // Absent for a book, not inert: the mode it opens has nothing to
+            // offer a list of alternatives, and a control that is there and
+            // does nothing is worse than one that never was.
+            visible: !screen.selecting && screen.rowCount > 0 && !screen.isBook
             color: selectArea.pressed ? Style.pressed : Style.paper
             border.width: 2
             border.color: Style.ink
@@ -476,6 +537,14 @@ Item {
             }
             width: 220
             height: Style.buttonHeight
+            // Not offered for a book. Watching is the new-chapters machinery
+            // (PLAN §12.2) from end to end: the backend seeds a watch from the
+            // chapter list it last served and every check answers "how many new
+            // chapters". A book's releases are the files one finished book
+            // already exists as — nothing is ever added to them — so the button
+            // would promise an announcement that cannot arrive, and the badge it
+            // leads to would be counting chapters on a thing with none.
+            visible: !screen.isBook
             color: watchArea.pressed ? Style.pressed : Style.paper
             border.width: 2
             border.color: Style.ink
@@ -490,7 +559,13 @@ Item {
 
             MouseArea {
                 id: watchArea
+                objectName: "watchArea"
                 anchors.fill: parent
+                // Dead as well as invisible. An invisible item takes no touches
+                // in any case; saying so here is what makes "a book cannot be
+                // watched" a property of the control rather than of where it
+                // happens to be drawn.
+                enabled: watchButton.visible
                 onClicked: {
                     if (screen.watched)
                         screen.unwatchRequested()
@@ -595,6 +670,45 @@ Item {
         }
     }
 
+    // ---- what the list holds, for a book -----------------------------------
+    //
+    // A book's rows are not chapters and not episodes: they are the files this
+    // one book is available as, and the reader is picking a format and a place
+    // to get it from rather than working through a list in order. Nothing else
+    // on the screen says so — the rows are titled by the backend, and a list of
+    // rows with Download beside each reads as a list of parts.
+    //
+    // One line, in the strip the view switch would occupy, so a book's list
+    // starts exactly where a manga's does and a page holds the same number of
+    // rows. It is a label on the list, the same class of wording as "Select" or
+    // "3 selected"; the sentences the backend composes are untouched (PLAN §2).
+    Item {
+        id: releaseStrip
+        objectName: "releaseStrip"
+        anchors { top: sourceStrip.bottom; left: parent.left; right: parent.right }
+        visible: screen.isBook
+        height: visible ? Style.buttonHeight + Style.margin : 0
+
+        Text {
+            objectName: "releaseNote"
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            elide: Text.ElideRight
+            text: "Releases · pick the file to download."
+            font.pointSize: Style.smallSize
+            color: Style.ink
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     // ---- the view switch ---------------------------------------------------
     //
     // Two words, not a tab bar, and nothing at all when there is one view. It
@@ -604,7 +718,7 @@ Item {
     Item {
         id: viewSwitch
         objectName: "viewSwitch"
-        anchors { top: sourceStrip.bottom; left: parent.left; right: parent.right }
+        anchors { top: releaseStrip.bottom; left: parent.left; right: parent.right }
         visible: screen.hasVolumes
         height: visible ? Style.buttonHeight + Style.margin : 0
 
@@ -780,10 +894,19 @@ Item {
                                 wrapMode: Text.WordWrap
                                 maximumLineCount: 2
                                 elide: Text.ElideRight
+                                // A release has no publication date and no
+                                // scanlator: the whole of what it is — format,
+                                // size, where it comes from — is in the title
+                                // the backend composed. "Date unknown" under it
+                                // would be the screen inventing a fact about a
+                                // thing that has none, so a book's row says
+                                // nothing here until a download does.
                                 text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
                                       ? model.downloadMessage
-                                      : (model.published.length > 0 ? model.published : "Date unknown") +
-                                        (model.scanlator.length > 0 ? " · " + model.scanlator : "")
+                                      : (screen.isBook
+                                         ? ""
+                                         : (model.published.length > 0 ? model.published : "Date unknown") +
+                                           (model.scanlator.length > 0 ? " · " + model.scanlator : ""))
                                 font.pointSize: Style.smallSize
                                 color: Style.muted
                             }
@@ -1050,8 +1173,10 @@ Item {
         }
 
         Text {
+            objectName: "chapterEmpty"
             anchors.centerIn: parent
-            text: screen.busy ? "Fetching…" : "No chapters listed."
+            text: screen.busy ? "Fetching…"
+                              : (screen.isBook ? "No releases listed." : "No chapters listed.")
             font.pointSize: Style.bodySize
             color: Style.muted
             visible: screen.rowCount === 0
