@@ -1,6 +1,133 @@
 package prober
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/rickl/quire/backend/probe"
+	"github.com/rickl/quire/backend/theme"
+)
+
+// probeQueryTheme is the minimal theme.Theme needed to exercise
+// capabilitySearch's query choice directly, plus an optional
+// theme.ProbeQuerier.
+type probeQueryTheme struct {
+	// queries records every query capabilitySearch asked Search with, in
+	// order.
+	queries *[]string
+	// results, keyed by query, are what Search answers. A query with no entry
+	// answers no error and no results.
+	results map[string][]theme.SeriesStub
+	// probeQuery, when non-empty, makes this theme implement
+	// theme.ProbeQuerier.
+	probeQuery string
+}
+
+func (p probeQueryTheme) ID() string                             { return "probe" }
+func (p probeQueryTheme) Fingerprint(*probe.Page) int            { return 0 }
+func (p probeQueryTheme) AllowedHosts() []string                 { return nil }
+func (p probeQueryTheme) SuggestedName() string                  { return "" }
+func (p probeQueryTheme) ValidateOverrides(map[string]any) error { return nil }
+func (p probeQueryTheme) OverrideKeys() []theme.OverrideDoc      { return nil }
+
+func (p probeQueryTheme) Search(_ context.Context, _ *theme.Source, q string, _ int) ([]theme.SeriesStub, error) {
+	*p.queries = append(*p.queries, q)
+	return p.results[q], nil
+}
+
+func (p probeQueryTheme) Series(context.Context, *theme.Source, string) (*theme.Series, error) {
+	return nil, errors.New("not used")
+}
+func (p probeQueryTheme) Chapters(context.Context, *theme.Source, string) ([]theme.Chapter, error) {
+	return nil, errors.New("not used")
+}
+func (p probeQueryTheme) Pages(context.Context, *theme.Source, string) ([]string, error) {
+	return nil, errors.New("not used")
+}
+
+// probeQuerierTheme adds theme.ProbeQuerier to probeQueryTheme.
+type probeQuerierTheme struct{ probeQueryTheme }
+
+func (p probeQuerierTheme) ProbeQuery() string { return p.probeQuery }
+
+// A theme with no opinion gets the package default fallback query.
+func TestCapabilitySearchUsesDefaultQueryWithoutProbeQuerier(t *testing.T) {
+	var queries []string
+	th := probeQueryTheme{queries: &queries, results: map[string][]theme.SeriesStub{
+		capabilityQuery: {{ID: "/x", Title: "X"}},
+	}}
+	r := &run{}
+	stubs, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+
+	if note != "" {
+		t.Fatalf("note = %q, want none", note)
+	}
+	if len(stubs) != 1 {
+		t.Fatalf("stubs = %v, want one result", stubs)
+	}
+	if len(queries) != 2 || queries[1] != capabilityQuery {
+		t.Errorf("queries = %v, want the listing then %q", queries, capabilityQuery)
+	}
+}
+
+// A theme.ProbeQuerier's own query replaces the package default fallback —
+// this is what lets shelfmark ask "dune" instead of "one".
+func TestCapabilitySearchUsesTheThemesProbeQuery(t *testing.T) {
+	var queries []string
+	th := probeQuerierTheme{probeQueryTheme{
+		queries: &queries,
+		results: map[string][]theme.SeriesStub{
+			"dune": {{ID: "/dune", Title: "Dune"}},
+		},
+		probeQuery: "dune",
+	}}
+	r := &run{}
+	stubs, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+
+	if note != "" {
+		t.Fatalf("note = %q, want none", note)
+	}
+	if len(stubs) != 1 || stubs[0].ID != "/dune" {
+		t.Fatalf("stubs = %v, want the dune result", stubs)
+	}
+	if len(queries) != 2 || queries[1] != "dune" {
+		t.Errorf("queries = %v, want the listing then %q, not the package default", queries, "dune")
+	}
+}
+
+// The misleading-attribution fix: a theme that legitimately requires a query
+// (its empty listing errors, by design) must not have that error surfaced as
+// the reason the probe failed when the fallback query reaches the site and
+// merely finds nothing.
+func TestCapabilitySearchDoesNotBlameTheListingForARequiredQuery(t *testing.T) {
+	th := listingErrorsTheme{err: errors.New("shelfmark: /api/metadata/search: HTTP 400")}
+	r := &run{}
+	_, note := r.capabilitySearch(context.Background(), th, &theme.Source{})
+
+	if note == "" {
+		t.Fatal("note is empty, want a refusal: both the listing and the fallback found nothing")
+	}
+	if got := note; got != "the site returned no results at all." {
+		t.Errorf("note = %q, want the fallback's own outcome, not the listing's HTTP 400", got)
+	}
+}
+
+// listingErrorsTheme fails only the empty-query listing, exactly as a theme
+// that requires a search query does, and answers the fallback with nothing —
+// the shape Shelfmark's own metadata search had against a query with no
+// matches (measured 2026-09-20).
+type listingErrorsTheme struct {
+	probeQueryTheme
+	err error
+}
+
+func (l listingErrorsTheme) Search(_ context.Context, _ *theme.Source, q string, _ int) ([]theme.SeriesStub, error) {
+	if q == capabilityListing {
+		return nil, l.err
+	}
+	return nil, nil
+}
 
 // The verdict booleans, asked directly.
 //

@@ -191,24 +191,39 @@ func (c capability) summary() string {
 // The text query is the fallback for a site whose listing is genuinely empty —
 // a search-only front page — and it is never shorter than capabilityQuery,
 // because short queries are the shape edges treat as abuse.
+//
+// The query itself is capabilityQuery by default, but a theme that knows its
+// own backend better may say so (theme.ProbeQuerier) — see shelfmark.Theme's
+// implementation for why "one" is the wrong word to ask a book service.
 func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.Source) ([]theme.SeriesStub, string) {
 	stubs, listErr := th.Search(ctx, src, capabilityListing, 1)
 	if listErr == nil && len(stubs) > 0 {
 		return stubs, ""
 	}
 
+	query := capabilityQuery
+	if pq, ok := th.(theme.ProbeQuerier); ok {
+		query = pq.ProbeQuery()
+	}
+
 	// Nothing from the listing — either it is empty or the theme needs a query
 	// to search at all. One more request, with a word rather than a letter.
-	stubs, err := th.Search(ctx, src, capabilityQuery, 1)
+	stubs, err := th.Search(ctx, src, query, 1)
 	switch {
 	case err != nil:
+		// The fallback itself failed to reach the site: this is the more
+		// informative of the two errors, because it is the one that actually
+		// ran a search rather than the listing the theme may legitimately
+		// refuse.
 		return nil, plainError(err)
 	case len(stubs) == 0:
-		if listErr != nil {
-			// The listing failed too, and its reason is the more informative
-			// of the two: the search merely found nothing.
-			return nil, plainError(listErr)
-		}
+		// The fallback reached the site and found nothing — whether or not
+		// the listing errored first. That matters: a theme may legitimately
+		// require a query and 400 on an empty one (correct behaviour, not a
+		// fault), and blaming the site for that 400 here would be reporting
+		// a refusal that never happened as the reason the probe failed. The
+		// only honest statement is the one about the request that actually
+		// ran: it reached the site, and found nothing.
 		return nil, "the site returned no results at all."
 	}
 	return stubs, ""

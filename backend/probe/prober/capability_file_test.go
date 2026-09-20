@@ -89,6 +89,31 @@ func TestStageFiveAcceptsAShelfmarkInstance(t *testing.T) {
 	}
 }
 
+func TestStageFiveWorksAroundAListingThatRequiresAQuery(t *testing.T) {
+	routes := shelfmarkRoutes(t)
+	delete(routes, "GET /api/metadata/search")
+	routes["GET /api/metadata/search?page=1&query="] = themetest.Route{
+		Status: 400,
+		Body:   `{"error":"Either 'query' or search field values are required"}`,
+	}
+	routes["GET /api/metadata/search?page=1&query=one"] = themetest.Route{
+		Body: `{"books":[],"has_more":false,"page":1,"total_found":0}`,
+	}
+	routes["GET /api/metadata/search?page=1&query=dune"] = themetest.Route{
+		Body: shelfmarkFixture(t, "metadata-search-dune.json"),
+	}
+
+	f := themetest.New(t, routes)
+	res := runWithFetcher(t, f, shelfmark.New(f))
+
+	if res.Verdict != theme.VerdictOK || !res.Addable {
+		t.Fatalf("verdict = %q (%s), want an addable ok", res.Verdict, res.Detail)
+	}
+	if !f.Requested("GET", "/api/metadata/search") {
+		t.Error("stage 5 never searched the instance")
+	}
+}
+
 // The rejection that matters. The markup says Shelfmark — that is stage 4's
 // whole evidence, and it is evidence anyone can manufacture — but /api/config
 // does not carry the key set, so this is some other server wearing the name.
