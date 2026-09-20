@@ -31,7 +31,7 @@ Window {
         id: sourcesModel
         ListElement { sourceId: "s1"; name: "Example Reader"; baseUrl: "https://example.invalid"
                       theme: "madara"; lang: "en"; enabled: true; status: "Working"; statusDetail: ""
-                      splitStrips: "never" }
+                      splitStrips: "never"; proxy: "http://localhost:1055"; selfHostedViaProxy: true }
         // No splitStrips at all: a source stored before PLAN §12.3 existed. It
         // has to read as Automatic rather than blank.
         ListElement { sourceId: "s2"; name: "Another"; baseUrl: "https://other.invalid"
@@ -79,6 +79,10 @@ Window {
     property int splitAsks: 0
     property string splitAskedFor: ""
     property string splitAskedAbout: ""
+
+    property int proxyAsks: 0
+    property string proxyAskedFor: ""
+    property string proxyAskedAbout: ""
 
     property int volumeAsks: 0
     property string volumeAskedFor: ""
@@ -401,6 +405,11 @@ Window {
             win.splitAsks++
             win.splitAskedFor = mode
             win.splitAskedAbout = sourceId
+        }
+        onProxyRequested: {
+            win.proxyAsks++
+            win.proxyAskedFor = proxy
+            win.proxyAskedAbout = sourceId
         }
     }
     AddSource {
@@ -1276,6 +1285,73 @@ Window {
         // button, so reaching past it would be testing nothing.
         win.findChild(sourceList, "splitDoneArea").clicked(null)
         win.want("done closes the panel", splitPanel.visible, false)
+
+        // ---- editing a source's proxy after it was added -------------------
+        //
+        // Before this, a wrong proxy meant deleting the source and adding it
+        // again. The Proxy action opens the same kind of panel Rename does,
+        // prefilled with what is stored, and warns before clearing the field
+        // takes a ViaProxy confirmation with it.
+        var proxyButton = win.findChild(sourceList, "proxyButton")
+        win.want("the Proxy action is offered on the row strip", proxyButton !== null, true)
+
+        var proxyPanel = win.findChild(sourceList, "proxyPanel")
+        win.want("the proxy panel is closed until asked for", proxyPanel.visible, false)
+
+        // Opened from the row strip, the way Rename and Splitting are: carrying
+        // the source's own proxy and viaProxy flag along, since the strip is
+        // outside the delegate that knows them.
+        sourceList.confirmingId = "s1"
+        sourceList.confirmingName = "Example Reader"
+        sourceList.confirmingProxy = "http://localhost:1055"
+        sourceList.confirmingViaProxy = true
+        sourceList.startProxy(sourceList.confirmingId, sourceList.confirmingName,
+                               sourceList.confirmingProxy, sourceList.confirmingViaProxy)
+        win.want("the panel opens", proxyPanel.visible, true)
+        win.want("opening it closes the row strip", sourceList.confirmingId, "")
+        var proxyField = win.findChild(sourceList, "proxyField")
+        win.want("the field prefills with the stored proxy",
+                 proxyField.text, "http://localhost:1055")
+
+        // The proxy panel carries its own keyboard, the way the rename panel
+        // does.
+        var proxyKeys = win.findChild(sourceList, "proxyKeyboard")
+        win.want("the proxy panel brings a keyboard", proxyKeys !== null, true)
+        win.want("and it is up while the panel is", proxyKeys.visible, true)
+
+        // Clearing the field warns, because this source's confirmation stands
+        // on the proxy being cleared.
+        var proxyWarning = win.findChild(sourceList, "proxyRevokeWarning")
+        win.want("no warning while a proxy is still typed", proxyWarning.visible, false)
+        sourceList.proxyText = ""
+        win.want("clearing the field on a ViaProxy source warns", proxyWarning.visible, true)
+
+        // Submitting sends the sourceId and the (now empty) proxy, exactly
+        // once.
+        win.proxyAsks = 0
+        sourceList.commitProxy()
+        win.want("submitting asks once", win.proxyAsks, 1)
+        win.want("it names the source", win.proxyAskedAbout, "s1")
+        win.want("it sends what was typed", win.proxyAskedFor, "")
+        win.want("committing closes the panel", proxyPanel.visible, false)
+
+        // A source with no proxy and not confirmed via one — s2 — offers the
+        // same action, prefilled empty, and never warns.
+        sourceList.confirmingId = "s2"
+        sourceList.confirmingName = "Another"
+        sourceList.confirmingProxy = ""
+        sourceList.confirmingViaProxy = false
+        sourceList.startProxy(sourceList.confirmingId, sourceList.confirmingName,
+                               sourceList.confirmingProxy, sourceList.confirmingViaProxy)
+        win.want("a source with no proxy prefills empty", proxyField.text, "")
+        win.want("no warning for a source not confirmed via a proxy",
+                 proxyWarning.visible, false)
+
+        win.proxyAsks = 0
+        sourceList.proxyText = "http://localhost:1080"
+        sourceList.commitProxy()
+        win.want("setting a proxy on a bare source asks once", win.proxyAsks, 1)
+        win.want("with the typed value", win.proxyAskedFor, "http://localhost:1080")
 
         // ---- the volume view (PLAN §6 M4, revised 2026-09-16) --------------
 

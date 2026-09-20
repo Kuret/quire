@@ -56,6 +56,8 @@ Item {
     // the schema's own spellings, sent as data. The words the user reads are
     // chosen below and never travel.
     signal splitStripsRequested(string sourceId, string mode)
+    // The proxy a source is reached through. An empty proxy removes it.
+    signal proxyRequested(string sourceId, string proxy)
     signal noticeDismissed()
 
     // A quiet line from the backend, above the list. Composed there, not here.
@@ -75,6 +77,11 @@ Item {
     // The open row's current splitting mode, carried for the same reason the
     // name is: the strip is drawn outside the delegate that knows it.
     property string confirmingSplit: "auto"
+    // The open row's current proxy and whether its self-hosted confirmation
+    // stands on it, carried the same way: to prefill the proxy panel and to
+    // decide whether clearing the field needs a warning.
+    property string confirmingProxy: ""
+    property bool confirmingViaProxy: false
 
     // The source whose splitting panel is open, and the mode shown as chosen.
     // Kept as a plain string rather than read back through the model on each
@@ -136,7 +143,7 @@ Item {
     // what lowers it; the focus drop still comes first, for the reason in
     // Screens.js.
     function dismissInput() {
-        Screens.dismissKeyboard([nameField])
+        Screens.dismissKeyboard([nameField, proxyField])
     }
 
     function commitRename() {
@@ -146,6 +153,36 @@ Item {
         screen.renameRequested(screen.renamingId, screen.renameText.trim())
         screen.renamingId = ""
         screen.renameText = ""
+    }
+
+    // The source being given, changed, or cleared of a proxy. A wrong proxy
+    // used to mean deleting the source and adding it again; this is the way
+    // back without that.
+    property string proxyingId: ""
+    property string proxyingName: ""
+    property string proxyText: ""
+    // Whether the source's self-hosted confirmation stands on the proxy being
+    // edited — carried from confirmingViaProxy at the moment the panel opens,
+    // so the warning below reads against the value the field started at, not
+    // against whatever is typed.
+    property bool proxyingViaProxy: false
+
+    function startProxy(sourceId, name, proxy, viaProxy) {
+        screen.confirmingId = ""
+        screen.confirmingName = ""
+        screen.splittingId = ""
+        screen.renamingId = ""
+        screen.proxyingId = sourceId
+        screen.proxyingName = name
+        screen.proxyText = proxy
+        screen.proxyingViaProxy = viaProxy
+    }
+
+    function commitProxy() {
+        screen.dismissInput()
+        screen.proxyRequested(screen.proxyingId, screen.proxyText.trim())
+        screen.proxyingId = ""
+        screen.proxyText = ""
     }
 
     // The notice strip. One line, on the first screen, with a way to dismiss
@@ -281,6 +318,8 @@ Item {
                             screen.confirmingName = open ? model.name : ""
                             screen.confirmingSplit = open && model.splitStrips
                                                    ? model.splitStrips : "auto"
+                            screen.confirmingProxy = open && model.proxy ? model.proxy : ""
+                            screen.confirmingViaProxy = open && !!model.selfHostedViaProxy
                         }
                     }
 
@@ -392,7 +431,7 @@ Item {
             id: splitButton
             objectName: "splitButton"
             anchors {
-                right: renameButton.left; rightMargin: Style.gap
+                right: proxyButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
             width: 300
@@ -415,6 +454,38 @@ Item {
                 anchors.fill: parent
                 onClicked: screen.startSplitting(screen.confirmingId, screen.confirmingName,
                                                  screen.confirmingSplit)
+            }
+        }
+
+        // The proxy a source is reached through, editable the same way its
+        // name is: opening a panel over the list rather than a screen of its
+        // own, since it too is one field.
+        Rectangle {
+            id: proxyButton
+            objectName: "proxyButton"
+            anchors {
+                right: renameButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 160
+            height: Style.buttonHeight - Style.gap
+            color: proxyArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Proxy"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: proxyArea
+                anchors.fill: parent
+                onClicked: screen.startProxy(screen.confirmingId, screen.confirmingName,
+                                             screen.confirmingProxy, screen.confirmingViaProxy)
             }
         }
 
@@ -771,6 +842,149 @@ Item {
             onBackspace: screen.renameText = screen.renameText.substring(0, screen.renameText.length - 1)
             onClearAll: screen.renameText = ""
             onSubmit: screen.commitRename()
+        }
+    }
+
+    // ---- proxy --------------------------------------------------------------
+    //
+    // The address a source is reached through, editable after the fact — until
+    // this, a wrong proxy meant deleting the source and adding it again. A
+    // panel over the list for the same reason renaming is one: it is a single
+    // field, and there is no system keyboard here (PLAN §11 Q5).
+    Rectangle {
+        id: proxyPanel
+        objectName: "proxyPanel"
+        anchors.fill: parent
+        color: Style.paper
+        visible: screen.proxyingId.length > 0
+
+        // Swallow taps so the list underneath cannot be operated while this is
+        // open.
+        MouseArea { anchors.fill: parent }
+
+        Column {
+            anchors {
+                top: parent.top; topMargin: Style.margin
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+            spacing: Style.gap
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "What proxy should " + screen.proxyingName + " be reached through? " +
+                      "Leave it blank to reach the source directly."
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Rectangle {
+                width: parent.width
+                height: Style.buttonHeight
+                color: Style.paper
+                border.width: 2
+                border.color: Style.ink
+                radius: 6
+
+                TextInput {
+                    id: proxyField
+                    objectName: "proxyField"
+                    anchors {
+                        fill: parent
+                        leftMargin: Style.gap
+                        rightMargin: Style.gap
+                    }
+                    verticalAlignment: TextInput.AlignVCenter
+                    font.pointSize: Style.bodySize
+                    color: Style.ink
+                    // Fed by ui/Keyboard.qml below, never focused for input of
+                    // its own.
+                    activeFocusOnPress: false
+                    text: screen.proxyText
+                    onTextChanged: screen.proxyText = text
+                }
+            }
+
+            // Clearing the field on a source confirmed self-hosted *by way of*
+            // the proxy takes the confirmation with it: the address lives on
+            // the far side of the proxy and this device never learns it, so
+            // without the proxy the confirmation would be permission for a
+            // route that no longer exists. Said here, before Save is pressed,
+            // rather than discovered afterwards.
+            Text {
+                objectName: "proxyRevokeWarning"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: screen.proxyingViaProxy && screen.proxyText.trim().length === 0
+                text: "This also withdraws permission for the private address this source " +
+                      "reaches, because that permission was only ever granted through the proxy."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Row {
+                spacing: Style.gap
+
+                Rectangle {
+                    objectName: "proxySaveButton"
+                    width: 220
+                    height: Style.buttonHeight
+                    color: proxySaveArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Save"
+                        font.pointSize: Style.bodySize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: proxySaveArea
+                        anchors.fill: parent
+                        onClicked: screen.commitProxy()
+                    }
+                }
+
+                Rectangle {
+                    width: 220
+                    height: Style.buttonHeight
+                    color: cancelProxyArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: Style.ink
+                    radius: 6
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pointSize: Style.bodySize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: cancelProxyArea
+                        anchors.fill: parent
+                        onClicked: {
+                            screen.dismissInput()
+                            screen.proxyingId = ""
+                            screen.proxyText = ""
+                        }
+                    }
+                }
+            }
+        }
+
+        Keyboard {
+            objectName: "proxyKeyboard"
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            layout: "url"
+            onKeyTyped: screen.proxyText += text
+            onBackspace: screen.proxyText = screen.proxyText.substring(0, screen.proxyText.length - 1)
+            onClearAll: screen.proxyText = ""
+            onSubmit: screen.commitProxy()
         }
     }
 

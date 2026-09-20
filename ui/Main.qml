@@ -642,7 +642,9 @@ Rectangle {
                 // blank; the fallback is for a reply from an older backend.
                 "splitStrips": s.splitStrips ? s.splitStrips : "auto",
                 "status": s.status,
-                "statusDetail": s.statusDetail ? s.statusDetail : ""
+                "statusDetail": s.statusDetail ? s.statusDetail : "",
+                "proxy": s.proxy ? s.proxy : "",
+                "selfHostedViaProxy": !!s.selfHostedViaProxy
             })
         }
     }
@@ -1311,6 +1313,8 @@ Rectangle {
             onRenameRequested: root.send(Msg.RenameSource, {"sourceId": sourceId, "name": name})
             onSplitStripsRequested: root.send(Msg.SetSourceSplitStrips,
                                               {"sourceId": sourceId, "splitStrips": mode})
+            onProxyRequested: root.send(Msg.SetSourceProxy,
+                                        {"sourceId": sourceId, "proxy": proxy})
         }
 
         AddSource {
