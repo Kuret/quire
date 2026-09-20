@@ -27,6 +27,21 @@ func confirmedSource(base, addr string) *theme.Source {
 	}
 }
 
+// viaProxySource is the other shape a confirmation comes in: no address,
+// because the host resolves to nothing here, and the proxy the user typed
+// standing as the evidence instead. proxy may be empty, which is the shape that
+// must be refused.
+func viaProxySource(base, proxy string) *theme.Source {
+	return &theme.Source{
+		ID: "zima", Name: "Zima", Lang: "en", Theme: "alpha", BaseURL: base, Proxy: proxy,
+		AddedAt: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+		SelfHosted: &theme.SelfHosted{
+			ViaProxy:    true,
+			ConfirmedAt: time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC),
+		},
+	}
+}
+
 // TestPolicyCarriesTheConfirmationForItsOwnHostOnly is the join between the
 // stored record and the guard: the exemption on the Policy is the source's own
 // host, and a source with no confirmation carries none at all.
@@ -73,9 +88,23 @@ func TestUnusableConfirmationsAreRefused(t *testing.T) {
 		wantSub string
 	}{
 		{
+			// Still refused, and still the case this whole type exists for: a
+			// record with nothing in it is the bare "let this one through" flag.
+			// The wording moved on 2026-09-20, when a confirmation gained a
+			// second thing it may record — a proxy, for a host that resolves
+			// nowhere on this device (SelfHosted.ViaProxy) — so an empty record
+			// is now "neither" rather than "not an IP address".
 			name:    "no address at all",
 			src:     confirmedSource("http://shelfmark.internal.invalid/", ""),
-			wantSub: "not an IP address",
+			wantSub: "neither an address nor a proxy",
+		},
+		{
+			// The half of that which would otherwise be the new way in: the
+			// flag on its own, with no proxy behind it to be evidence of
+			// anything.
+			name:    "reached through a proxy, with no proxy",
+			src:     viaProxySource("http://shelfmark.internal.invalid/", ""),
+			wantSub: "has no proxy",
 		},
 		{
 			name:    "a host name where an address belongs",

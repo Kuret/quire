@@ -144,6 +144,18 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 			},
 		},
 		{
+			// The host that resolves to nothing on this device: the record
+			// names the proxy it was reached through instead of an address.
+			name: "a self-hosted source confirmed through its proxy",
+			src: theme.Source{
+				ID: "zima", Name: "Zima", Lang: "en",
+				Theme: "madara", BaseURL: "http://zima.example:8084",
+				AddedAt:    at,
+				SelfHosted: &theme.SelfHosted{ViaProxy: true, ConfirmedAt: at},
+				Proxy:      "http://localhost:1055",
+			},
+		},
+		{
 			name: "the generic escape hatch carries selectors and a script",
 			src: theme.Source{
 				ID: "user-added-03", Name: "One-off", Lang: "en",
@@ -248,6 +260,21 @@ func TestSchemaRejectsWhatGoValidationRejects(t *testing.T) {
 			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
 			       "baseUrl":"http://shelfmark.internal.invalid","addedAt":"2026-09-15T00:00:00Z",
 			       "selfHosted":{"confirmedAddr":"192.168.1.10"}}`,
+		},
+		{
+			// Neither an address nor the proxy flag: the bare "let this one
+			// through" the whole record exists to refuse.
+			name: "a confirmation recording nothing at all",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://zima.example","addedAt":"2026-09-15T00:00:00Z",
+			       "selfHosted":{"confirmedAt":"2026-09-15T00:00:00Z"}}`,
+		},
+		{
+			name: "viaProxy written as false, which records nothing either",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://zima.example","addedAt":"2026-09-15T00:00:00Z",
+			       "proxy":"http://localhost:1055",
+			       "selfHosted":{"viaProxy":false,"confirmedAt":"2026-09-15T00:00:00Z"}}`,
 		},
 		{
 			name: "an unknown property inside the confirmation",

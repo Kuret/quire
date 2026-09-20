@@ -502,7 +502,34 @@ type Source struct {
 type SelfHosted struct {
 	// ConfirmedAddr is the address the source's host resolved to at the moment
 	// the user approved it, as text ("192.168.1.10", "fd00::1", "100.100.0.1").
-	ConfirmedAddr string `json:"confirmedAddr"`
+	//
+	// Empty when there was no address to record, which is the ViaProxy case
+	// below. It is never filled in with a guess: an address nobody resolved is
+	// a record of nothing.
+	ConfirmedAddr string `json:"confirmedAddr,omitempty"`
+
+	// ViaProxy records that the user confirmed this source by supplying a proxy
+	// to reach it through, because its host does not resolve on this device at
+	// all.
+	//
+	// Measured 2026-09-20, and it is not an edge case: the owner's source is a
+	// MagicDNS name on their mesh, the tablet's resolver is public DNS, and the
+	// kernel has no TUN device so the userspace VPN installs no resolver of its
+	// own. `nslookup` fails; `http_proxy=localhost:1055 wget .../api/health`
+	// answers {"status":"ok"}. That name will never resolve here, and it never
+	// needs to — the proxy resolves it.
+	//
+	// So the record says what actually happened rather than naming an address.
+	// Resolving *through the proxy* just to have a value was rejected: it would
+	// be a second, unguarded lookup whose answer is a fact about the proxy's
+	// network, recorded as though the user had agreed to it.
+	//
+	// It is evidence of the same kind as an address, which is what validation
+	// turns on: a proxy is something the user typed during the probe, and — like
+	// an address the probe resolved — it is not something a page, a theme or a
+	// one-word edit to sources.json can produce. validateSelfHosted requires the
+	// source to actually carry that proxy, so this cannot be set on its own.
+	ViaProxy bool `json:"viaProxy,omitempty"`
 
 	// ConfirmedAt is when the user approved it.
 	ConfirmedAt time.Time `json:"confirmedAt"`
@@ -516,6 +543,30 @@ func (s *Source) validateSelfHosted() error {
 	if s.SelfHosted == nil {
 		return nil
 	}
+	if s.SelfHosted.ConfirmedAt.IsZero() {
+		return fmt.Errorf("theme: source %q: selfHosted.confirmedAt is missing; a confirmation records when it was given", s.ID)
+	}
+	// A confirmation records one of two things, and a bare flag remains
+	// refused. Either the address the host resolved to when the user agreed, or
+	// — when it resolves to nothing on this device — the proxy they gave to
+	// reach it through. Both are evidence of the same kind: something the user
+	// supplied during the probe, which nothing else in Quire can manufacture.
+	if strings.TrimSpace(s.SelfHosted.ConfirmedAddr) == "" {
+		if !s.SelfHosted.ViaProxy {
+			return fmt.Errorf("theme: source %q: selfHosted records neither an address nor a proxy; "+
+				"a confirmation has to say what was agreed to", s.ID)
+		}
+		if strings.TrimSpace(s.Proxy) == "" {
+			// The flag without the proxy it claims to stand on is exactly the
+			// bare "let this one through" this type exists to refuse.
+			return fmt.Errorf("theme: source %q: selfHosted.viaProxy is set but the source has no proxy; "+
+				"the proxy is the evidence, so the two cannot be separated", s.ID)
+		}
+		return nil
+	}
+	if s.SelfHosted.ViaProxy && strings.TrimSpace(s.Proxy) == "" {
+		return fmt.Errorf("theme: source %q: selfHosted.viaProxy is set but the source has no proxy", s.ID)
+	}
 	addr, err := netip.ParseAddr(strings.TrimSpace(s.SelfHosted.ConfirmedAddr))
 	if err != nil {
 		return fmt.Errorf("theme: source %q: selfHosted.confirmedAddr %q is not an IP address: %w",
@@ -528,9 +579,6 @@ func (s *Source) validateSelfHosted() error {
 		// accepted as one.
 		return fmt.Errorf("theme: source %q: selfHosted.confirmedAddr %s is not an address a source can be confirmed on; "+
 			"only private and CGNAT addresses can be", s.ID, addr)
-	}
-	if s.SelfHosted.ConfirmedAt.IsZero() {
-		return fmt.Errorf("theme: source %q: selfHosted.confirmedAt is missing; a confirmation records when it was given", s.ID)
 	}
 	// When the user typed an address rather than a name there is nothing to
 	// resolve, so the record can be checked against the source outright.

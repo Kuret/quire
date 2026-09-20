@@ -116,3 +116,38 @@ func TestProxyAndConfirmationCompose(t *testing.T) {
 		t.Fatalf("Policy = proxy %v, selfHosted %q; want both", p.Proxy, p.SelfHostedHost)
 	}
 }
+
+// TestAConfirmationReachedThroughAProxyValidates is the record for the source
+// that resolves to nothing here (measured 2026-09-20: a mesh name, a public
+// resolver, and no TUN device for the VPN to install one with).
+func TestAConfirmationReachedThroughAProxyValidates(t *testing.T) {
+	src := proxiedSource("http://zima.example", "http://localhost:1055")
+	src.SelfHosted = &theme.SelfHosted{
+		ViaProxy:    true,
+		ConfirmedAt: time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC),
+	}
+	if err := proxyRegistry().Validate(src); err != nil {
+		t.Fatalf("a proxy-confirmed source does not validate: %v", err)
+	}
+	// No address is recorded, and none is invented.
+	if src.SelfHosted.ConfirmedAddr != "" {
+		t.Errorf("ConfirmedAddr = %q, want nothing recorded", src.SelfHosted.ConfirmedAddr)
+	}
+	p, err := src.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SelfHostedHost != "zima.example" || p.Proxy == nil {
+		t.Fatalf("policy = selfHosted %q, proxy %v; want both", p.SelfHostedHost, p.Proxy)
+	}
+
+	// Take the proxy away and the confirmation has nothing left to stand on.
+	// This is the shape a hand-edited flag would have, and it is refused.
+	src.Proxy = ""
+	if err := proxyRegistry().Validate(src); err == nil {
+		t.Error("Validate accepted a proxy-confirmation with no proxy")
+	}
+	if _, err := src.Policy(); err == nil {
+		t.Error("Policy() accepted a proxy-confirmation with no proxy")
+	}
+}

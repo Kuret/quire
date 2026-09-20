@@ -61,13 +61,22 @@
       "type": "object",
       "description": "Present only when the user has confirmed this source is a service on their own network, which is what lets its host resolve into a private or CGNAT range that the fetch guard would otherwise refuse (PLAN §7.4). The guard refuses those ranges because scraped pages supply URLs Quire fetches unattended -- a cover URL is extracted from a listing and fetched with nobody watching -- so a hostile source can otherwise aim Quire at the user's own network; an unauthenticated /api/restart on a self-hosted service is the measured case. This exemption is scoped to this source's own host, matched exactly: no other host, no subdomain, no redirect target and no allowedHosts entry gets it, and content-supplied URLs pointing anywhere else stay refused. It is never inferred -- a probe, a theme or a redirect cannot produce it -- and a record without a usable confirmedAddr is a validation error rather than a flag that is quietly ignored.",
       "additionalProperties": false,
-      "required": ["confirmedAddr", "confirmedAt"],
+      "required": ["confirmedAt"],
+      "anyOf": [
+        { "required": ["confirmedAddr"] },
+        { "required": ["viaProxy"], "properties": { "viaProxy": { "const": true } } }
+      ],
       "properties": {
         "confirmedAddr": {
           "type": "string",
-          "description": "The address the source's host resolved to when the user approved it, recorded so the entry shows what was agreed. Must be a private (RFC 1918 / ULA) or CGNAT (RFC 6598, where a tailnet lives) address: a public one needs no confirmation, and loopback, link-local and multicast are addresses no confirmation can cover. It is evidence, not a live check -- addresses on a home network move with a DHCP lease, and the host scoping is what does the constraining.",
+          "description": "The address the source's host resolved to when the user approved it, recorded so the entry shows what was agreed. Must be a private (RFC 1918 / ULA) or CGNAT (RFC 6598, where a tailnet lives) address: a public one needs no confirmation, and loopback, link-local and multicast are addresses no confirmation can cover. It is evidence, not a live check -- addresses on a home network move with a DHCP lease, and the host scoping is what does the constraining. Absent only when viaProxy is set, because there was nothing to resolve.",
           "minLength": 2,
           "maxLength": 45
+        },
+        "viaProxy": {
+          "type": "boolean",
+          "description": "Set when the user confirmed this source by supplying a proxy to reach it through, because its host does not resolve on this device at all. Measured 2026-09-20: a mesh VPN's names exist only inside the mesh, the tablet's resolver is public DNS, and the kernel has no TUN device so a userspace VPN installs no resolver -- the name never resolves here and never needs to, because the proxy resolves it. No address is recorded and none is invented; resolving through the proxy just to have a value would be a second unguarded lookup recorded as though the user had agreed to it. It is evidence of the same kind as an address -- a proxy is something the user typed during the probe -- and it is refused unless the source actually carries that proxy, so it cannot become a bare 'let this one through' flag.",
+          "const": true
         },
         "confirmedAt": { "type": "string", "format": "date-time" }
       }
