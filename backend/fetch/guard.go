@@ -30,6 +30,19 @@ type GuardError struct {
 	URL    string
 	Reason string
 	Kind   error // ErrInvalidURL or ErrBlockedAddress
+
+	// Unresolved marks the one refusal that is not a judgement about the site:
+	// the host could not be looked up at all.
+	//
+	// It is a field rather than a third Kind because it is still an invalid_url
+	// verdict and callers matching on Kind must keep working. The probe reads it
+	// to tell "this name does not resolve *here*" apart from "this address is
+	// one Quire refuses", because on the device those need different questions
+	// — measured 2026-09-20, a MagicDNS name on the owner's mesh does not
+	// resolve on the tablet at all (its resolver is public DNS, and a userspace
+	// VPN installs none), and the proxy that can reach it is exactly what the
+	// user would be offered.
+	Unresolved bool
 }
 
 func (e *GuardError) Error() string {
@@ -186,6 +199,36 @@ func (g *Guard) checkAddress(ctx context.Context, u *url.URL, p *Policy) error {
 	host := u.Hostname()
 	exempt := selfHosted(u, p)
 
+	// A confirmed host reached through the source's own proxy is not resolved
+	// here at all, and its addresses are not checked.
+	//
+	// This is not the address rules being relaxed; it is an admission that they
+	// were never meaningful for such a request. With a proxy, **name resolution
+	// and connection both happen at the proxy** — nothing Quire resolves here is
+	// what gets connected to, so checking it would be a check of a fact about
+	// somebody else's resolver, dressed up as a safety property. Pretending
+	// otherwise is worse than being explicit.
+	//
+	// It is also the only thing that makes the measured case work. On the
+	// owner's tablet (2026-09-20) `nslookup zima.<mesh>.ts.net` fails against
+	// public DNS while `http_proxy=localhost:1055 wget .../api/health` returns
+	// {"status":"ok"}: the name exists only inside the mesh, the kernel has no
+	// TUN device and so the VPN installs no resolver, and that name will never
+	// resolve on this device. A probe that insisted on resolving it first would
+	// refuse a source that works.
+	//
+	// **Three conditions, all of them the user's own doing, and none of them
+	// content's.** The URL's host must be the source's own host (so no scraped
+	// URL, no allowedHosts entry and no redirect target can be here), the source
+	// must carry a proxy the user typed, and the user must have confirmed this
+	// source is theirs. A proxy alone does not buy it: an unconfirmed source is
+	// resolved and address-checked exactly as before, so a proxy cannot become a
+	// way to stop looking. The scheme and domain checks run before this and are
+	// untouched.
+	if exempt && proxiedOwnHost(u, p) {
+		return nil
+	}
+
 	if addr, err := netip.ParseAddr(host); err == nil {
 		if reason := g.addrReason(addr, exempt); reason != "" {
 			return &GuardError{URL: u.Redacted(), Reason: reason, Kind: ErrBlockedAddress}
@@ -201,10 +244,16 @@ func (g *Guard) checkAddress(ctx context.Context, u *url.URL, p *Policy) error {
 	}
 	ips, err := resolve(ctx, host)
 	if err != nil {
-		return &GuardError{URL: u.Redacted(), Reason: fmt.Sprintf("cannot resolve %q: %v", host, err), Kind: ErrInvalidURL}
+		return &GuardError{
+			URL: u.Redacted(), Reason: fmt.Sprintf("cannot resolve %q: %v", host, err),
+			Kind: ErrInvalidURL, Unresolved: true,
+		}
 	}
 	if len(ips) == 0 {
-		return &GuardError{URL: u.Redacted(), Reason: fmt.Sprintf("%q resolves to no addresses", host), Kind: ErrInvalidURL}
+		return &GuardError{
+			URL: u.Redacted(), Reason: fmt.Sprintf("%q resolves to no addresses", host),
+			Kind: ErrInvalidURL, Unresolved: true,
+		}
 	}
 	for _, ip := range ips {
 		addr, ok := netip.AddrFromSlice(ip)

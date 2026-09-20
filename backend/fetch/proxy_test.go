@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -306,5 +308,187 @@ func TestParseProxyURLNormalisesTheScheme(t *testing.T) {
 	}
 	if u.Scheme != "http" {
 		t.Errorf("scheme = %q, want %q", u.Scheme, "http")
+	}
+}
+
+// countingResolver wraps a stub resolver and records which hosts it was asked
+// about. The assertion these tests are really making is about a *call that must
+// not happen*, and the only way to make that observable is to count.
+type countingResolver struct {
+	mu    sync.Mutex
+	asked []string
+	table map[string][]string
+}
+
+func (c *countingResolver) lookup(ctx context.Context, host string) ([]net.IP, error) {
+	c.mu.Lock()
+	c.asked = append(c.asked, host)
+	c.mu.Unlock()
+	return stubResolve(c.table)(ctx, host)
+}
+
+func (c *countingResolver) askedAbout(host string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, h := range c.asked {
+		if h == host {
+			return true
+		}
+	}
+	return false
+}
+
+func countingClient(t *testing.T, table map[string][]string) (*fetch.Client, *countingResolver) {
+	t.Helper()
+	res := &countingResolver{table: table}
+	opts := fetch.WithStubResolver(fetch.Options{Version: "test"}, res.lookup)
+	opts.Sleep = func(context.Context, time.Duration) error { return nil }
+	return fetch.NewClient(fetch.AllowLoopback(opts)), res
+}
+
+// TestAProxiedConfirmedHostIsNeverResolvedHere is the device case, and the
+// reason the address check moved out of the way rather than being argued with.
+//
+// Measured on the tablet, 2026-09-20: `nslookup zima.<mesh>.ts.net` fails
+// against public DNS, while `http_proxy=localhost:1055 wget .../api/health`
+// answers {"status":"ok"}. The name exists only inside the mesh, the kernel has
+// no TUN device so the userspace VPN installs no resolver, and that name will
+// never resolve on this device. Insisting on resolving it first refuses a
+// source that works.
+func TestAProxiedConfirmedHostIsNeverResolvedHere(t *testing.T) {
+	t.Parallel()
+	proxy := newProxySpy(t, "through the proxy")
+	// Deliberately empty: nothing here resolves, exactly as on the device.
+	c, res := countingClient(t, map[string][]string{})
+	p := proxyPolicy(t, proxy.url())
+
+	resp, err := c.Get(context.Background(), p, "http://"+proxiedHost+"/api/health")
+	if err != nil {
+		t.Fatalf("a proxied, confirmed host failed: %v", err)
+	}
+	if got := string(resp.Body); got != "through the proxy" {
+		t.Errorf("body = %q, want the proxy's answer", got)
+	}
+	if res.askedAbout(proxiedHost) {
+		t.Fatalf("the resolver was asked about %s; the proxy resolves it, and here it never can", proxiedHost)
+	}
+	if proxy.lastURL() != "http://"+proxiedHost+"/api/health" {
+		t.Errorf("the proxy was asked for %q, want the name verbatim", proxy.lastURL())
+	}
+}
+
+// TestAProxyDoesNotLetAnUnconfirmedSourceSkipResolution is the negative that
+// matters most. A proxy says how to reach a host; only the user's confirmation
+// says the host is theirs. Without one the request is resolved and
+// address-checked exactly as it always was, so "set a proxy" can never become
+// "stop looking".
+func TestAProxyDoesNotLetAnUnconfirmedSourceSkipResolution(t *testing.T) {
+	t.Parallel()
+	proxy := newProxySpy(t, "through the proxy")
+	c, res := countingClient(t, map[string][]string{proxiedHost: {"100.79.171.1"}})
+	p := proxyPolicy(t, proxy.url())
+	p.SelfHostedHost = "" // the proxy stays; the confirmation is withdrawn
+
+	_, err := c.Get(context.Background(), p, "http://"+proxiedHost+"/")
+	if !errors.Is(err, fetch.ErrBlockedAddress) {
+		t.Fatalf("err = %v, want ErrBlockedAddress", err)
+	}
+	if !res.askedAbout(proxiedHost) {
+		t.Error("an unconfirmed source was not resolved; a proxy must not be a way to stop looking")
+	}
+	if n := proxy.hits.Load(); n != 0 {
+		t.Fatalf("the proxy carried %d requests for a host the guard refused", n)
+	}
+}
+
+// TestAContentSuppliedURLIsStillResolvedWithAProxySet: the skip is scoped to
+// the source's own host, so a URL a page chose is resolved and guarded exactly
+// as before — which is the whole reason the skip is safe.
+func TestAContentSuppliedURLIsStillResolvedWithAProxySet(t *testing.T) {
+	t.Parallel()
+	proxy := newProxySpy(t, "through the proxy")
+	c, res := countingClient(t, map[string][]string{
+		proxiedHost: {"100.79.171.1"},
+		// A cover URL pointing at another box on the same private network:
+		// the attack fetch.Guard's comment is about.
+		"nas.zima.example": {"192.168.1.11"},
+	})
+	p := proxyPolicy(t, proxy.url())
+
+	_, err := c.Get(context.Background(), p, "http://nas.zima.example/api/restart")
+	if !errors.Is(err, fetch.ErrBlockedAddress) {
+		t.Fatalf("err = %v, want ErrBlockedAddress for a content-supplied URL", err)
+	}
+	if !res.askedAbout("nas.zima.example") {
+		t.Error("a content-supplied URL was not resolved; only the source's own host skips that")
+	}
+	if n := proxy.hits.Load(); n != 0 {
+		t.Fatalf("the proxy carried %d requests for a content-supplied URL", n)
+	}
+}
+
+// TestAConfirmedHostWithNoProxyIsStillResolved keeps the other half honest: the
+// skip needs both assertions, so a confirmed source on a real interface is
+// resolved and its address checked as it always was.
+//
+// Asserted against the guard rather than the client, because the point is the
+// lookup and not the connection: dialling a CGNAT address from a test would be
+// a minute of waiting for an answer nobody needs.
+func TestAConfirmedHostWithNoProxyIsStillResolved(t *testing.T) {
+	t.Parallel()
+	res := &countingResolver{table: map[string][]string{proxiedHost: {"100.79.171.1"}}}
+	g := fetch.NewGuard(res.lookup)
+	p := proxyPolicy(t, "") // confirmed, no proxy
+
+	u, err := url.Parse("http://" + proxiedHost + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.CheckURL(context.Background(), u, p); err != nil {
+		t.Fatalf("a confirmed host was refused: %v", err)
+	}
+	if !res.askedAbout(proxiedHost) {
+		t.Error("a confirmed source with no proxy skipped resolution")
+	}
+}
+
+// TestAnUnresolvableHostSaysSo pins the signal the probe's question hangs on. A
+// lookup that failed is not a judgement about the site, and the refusal has to
+// be distinguishable from one that is.
+func TestAnUnresolvableHostSaysSo(t *testing.T) {
+	t.Parallel()
+	g := fetch.NewGuard(stubResolve(map[string][]string{
+		"public.example.test": {"93.184.216.34"},
+		"home.example.test":   {"192.168.1.10"},
+	}))
+
+	u, err := url.Parse("http://nowhere.example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = g.CheckURL(context.Background(), u, &fetch.Policy{BaseURL: u})
+	var ge *fetch.GuardError
+	if !errors.As(err, &ge) {
+		t.Fatalf("err = %v, want a GuardError", err)
+	}
+	if !ge.Unresolved {
+		t.Errorf("a host that does not resolve was not marked unresolved: %+v", ge)
+	}
+	if !errors.Is(err, fetch.ErrInvalidURL) {
+		t.Errorf("err = %v, want it to stay an invalid_url refusal", err)
+	}
+
+	// A private address is a judgement about the address, not a failed lookup,
+	// and the two must not be confused: they get different questions.
+	priv, err := url.Parse("http://home.example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = g.CheckURL(context.Background(), priv, &fetch.Policy{BaseURL: priv})
+	if !errors.As(err, &ge) {
+		t.Fatalf("err = %v, want a GuardError", err)
+	}
+	if ge.Unresolved {
+		t.Errorf("a resolved private address was marked unresolved: %+v", ge)
 	}
 }

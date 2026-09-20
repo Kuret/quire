@@ -136,10 +136,26 @@ func proxyFor(req *http.Request) *url.URL {
 	if p == nil || p.Proxy == nil || p.BaseURL == nil {
 		return nil
 	}
-	if !sameHostname(req.URL.Hostname(), p.BaseURL.Hostname()) {
+	if !proxiedOwnHost(req.URL, p) {
 		return nil
 	}
 	return p.Proxy
+}
+
+// proxiedOwnHost reports whether u is the source's own host *and* the source
+// has a proxy — the exact scope described above.
+//
+// It is one function because two places depend on the same answer and they must
+// not drift: this file decides which requests go through the proxy, and
+// guard.go decides which requests are therefore pointless to resolve locally. A
+// URL that got one without the other would either be resolved here and
+// connected elsewhere, or skipped here and connected here — both of which are
+// the confusion this feature has to avoid.
+func proxiedOwnHost(u *url.URL, p *Policy) bool {
+	if u == nil || p == nil || p.Proxy == nil || p.BaseURL == nil {
+		return false
+	}
+	return sameHostname(u.Hostname(), p.BaseURL.Hostname())
 }
 
 // transportProxy is what http.Transport.Proxy is set to. The per-source proxy
