@@ -11,6 +11,7 @@ package theme
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -349,6 +350,13 @@ type Source struct {
 	// AllowedHosts are extra hosts a redirect may land on (PLAN §7.4).
 	AllowedHosts []string `json:"allowedHosts,omitempty"`
 
+	// SelfHosted records that the user told Quire this source is a service on
+	// their own network, and is what lets its base host resolve into a private
+	// or CGNAT range that fetch.Guard would otherwise refuse. Nil — the normal
+	// case, and the case for every source anyone adds from the web — means the
+	// address rules apply unchanged.
+	SelfHosted *SelfHosted `json:"selfHosted,omitempty"`
+
 	// RateLimit narrows the global politeness caps; it can never widen them.
 	RateLimit *fetch.RateLimit `json:"rateLimit,omitempty"`
 
@@ -373,6 +381,76 @@ type Source struct {
 	// (PLAN §6 M7) so a site that switched themes is reported as such rather
 	// than as "no results found".
 	LastProbe *ProbeResult `json:"lastProbe,omitempty"`
+}
+
+// SelfHosted is a user's confirmation that a source runs on their own network.
+//
+// # Why this is a record and not a boolean
+//
+// fetch.Guard refuses private, loopback, link-local and CGNAT addresses because
+// a scraped page supplies URLs Quire then fetches unattended — see the comment
+// on fetch.Guard for the measured case, an unauthenticated `/api/restart` on
+// the owner's own tailnet. The one thing that reasoning does not cover is a
+// host the *user themselves typed*, and this is that exception, written down.
+//
+// So it carries the evidence of the act rather than just its outcome:
+// ConfirmedAddr is the address the host resolved to when the user agreed, and
+// ConfirmedAt is when. Validate refuses the whole source if that evidence is
+// missing or does not describe an address the exemption could ever cover
+// (fetch.SelfHostableAddr), which is what makes the flag impossible to set
+// *implicitly*: there is nothing here a probed page, a theme, a redirect or a
+// one-word edit to sources.json can produce by accident, and no code path in
+// Quire writes it except state.Store.ConfirmSelfHosted, which a person has to
+// call with an address in hand.
+//
+// **It is not re-checked against the live resolution at fetch time.** That was
+// considered and rejected: addresses on a home network move with a DHCP lease
+// or a tailnet re-key, and pinning to the recorded one would turn the feature
+// into a support burden for no gain the host scoping does not already give —
+// the exemption is already confined to one host, so hostile DNS for it can
+// only reach what the user pointed Quire at in the first place. The record's
+// job is to show what was agreed, not to be the check.
+type SelfHosted struct {
+	// ConfirmedAddr is the address the source's host resolved to at the moment
+	// the user approved it, as text ("192.168.1.10", "fd00::1", "100.100.0.1").
+	ConfirmedAddr string `json:"confirmedAddr"`
+
+	// ConfirmedAt is when the user approved it.
+	ConfirmedAt time.Time `json:"confirmedAt"`
+}
+
+// validateSelfHosted checks the confirmation record on s, if there is one. A
+// source whose record does not hold up is refused outright rather than having
+// the exemption quietly dropped: a half-legible record of consent to reach the
+// local network is not something to interpret generously.
+func (s *Source) validateSelfHosted() error {
+	if s.SelfHosted == nil {
+		return nil
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(s.SelfHosted.ConfirmedAddr))
+	if err != nil {
+		return fmt.Errorf("theme: source %q: selfHosted.confirmedAddr %q is not an IP address: %w",
+			s.ID, s.SelfHosted.ConfirmedAddr, err)
+	}
+	if !fetch.SelfHostableAddr(addr) {
+		// Either the address needs no confirmation (it is public), or it is one
+		// no confirmation can cover (loopback, link-local, multicast). Both are
+		// a record of something other than "this is my server", so neither is
+		// accepted as one.
+		return fmt.Errorf("theme: source %q: selfHosted.confirmedAddr %s is not an address a source can be confirmed on; "+
+			"only private and CGNAT addresses can be", s.ID, addr)
+	}
+	if s.SelfHosted.ConfirmedAt.IsZero() {
+		return fmt.Errorf("theme: source %q: selfHosted.confirmedAt is missing; a confirmation records when it was given", s.ID)
+	}
+	// When the user typed an address rather than a name there is nothing to
+	// resolve, so the record can be checked against the source outright.
+	if u, err := url.Parse(s.BaseURL); err == nil {
+		if host, hErr := netip.ParseAddr(u.Hostname()); hErr == nil && host.Unmap() != addr.Unmap() {
+			return fmt.Errorf("theme: source %q: selfHosted.confirmedAddr %s is not baseUrl's address %s", s.ID, addr, host)
+		}
+	}
+	return nil
 }
 
 // ProbeResult is the stored outcome of PLAN §7.5.
@@ -423,7 +501,27 @@ func (s *Source) Policy() (*fetch.Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("theme: source %q: parse baseUrl: %w", s.ID, err)
 	}
-	return &fetch.Policy{BaseURL: u, AllowedHosts: s.AllowedHosts, RateLimit: s.RateLimit}, nil
+	p := &fetch.Policy{BaseURL: u, AllowedHosts: s.AllowedHosts, RateLimit: s.RateLimit}
+	if s.SelfHosted != nil {
+		// Checked here as well as in Registry.Validate, and it fails the whole
+		// Policy rather than dropping the field: this is the last point before
+		// the guard, and it is reached by sources that arrived from an import or
+		// a hand-edited file as well as from Add.
+		if err := s.validateSelfHosted(); err != nil {
+			return nil, err
+		}
+		// The exemption covers the source's own host and only that host, taken
+		// from BaseURL rather than stored as a second copy of the name — one
+		// name that can disagree with the other is worse than none.
+		//
+		// The corollary, for whoever adds the re-point PLAN §7.2 keeps hinting
+		// at: **re-pointing a confirmed source must clear SelfHosted**, because
+		// the confirmation was given for the host that is being replaced.
+		// Nothing re-points a source today, and the IP-literal check in
+		// validateSelfHosted catches the case where the host is an address.
+		p.SelfHostedHost = u.Hostname()
+	}
+	return p, nil
 }
 
 // Resolve turns a possibly relative href from a page into an absolute URL

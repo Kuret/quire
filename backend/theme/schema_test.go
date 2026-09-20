@@ -119,6 +119,18 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 			},
 		},
 		{
+			name: "a source the user confirmed is on their own network",
+			src: theme.Source{
+				ID: "shelfmark", Name: "Shelfmark", Lang: "en",
+				Theme: "madara", BaseURL: "http://shelfmark.internal.invalid:8084",
+				AddedAt: at,
+				SelfHosted: &theme.SelfHosted{
+					ConfirmedAddr: "100.100.0.1",
+					ConfirmedAt:   at,
+				},
+			},
+		},
+		{
 			name: "the generic escape hatch carries selectors and a script",
 			src: theme.Source{
 				ID: "user-added-03", Name: "One-off", Lang: "en",
@@ -188,6 +200,28 @@ func TestSchemaRejectsWhatGoValidationRejects(t *testing.T) {
 			name: "a missing required field",
 			raw:  `{"id":"a","name":"A","lang":"en","theme":"madara"}`,
 		},
+		{
+			// A confirmation with no address recorded is the shape a bare
+			// "let this one through" flag would have, and the schema refuses
+			// it for the same reason Registry.Validate does.
+			name: "a self-hosted confirmation with nothing recorded",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://shelfmark.internal.invalid","addedAt":"2026-09-15T00:00:00Z",
+			       "selfHosted":{}}`,
+		},
+		{
+			name: "a self-hosted confirmation with no date",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://shelfmark.internal.invalid","addedAt":"2026-09-15T00:00:00Z",
+			       "selfHosted":{"confirmedAddr":"192.168.1.10"}}`,
+		},
+		{
+			name: "an unknown property inside the confirmation",
+			raw: `{"id":"a","name":"A","lang":"en","theme":"madara",
+			       "baseUrl":"http://shelfmark.internal.invalid","addedAt":"2026-09-15T00:00:00Z",
+			       "selfHosted":{"confirmedAddr":"192.168.1.10","confirmedAt":"2026-09-15T00:00:00Z",
+			                     "allowedHosts":["nas.internal.invalid"]}}`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -215,7 +249,7 @@ func TestSourceOmitsEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe"} {
+	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe", "selfHosted"} {
 		if strings.Contains(string(b), `"`+unwanted+`"`) {
 			t.Errorf("a bare source exported %q; it should be omitted:\n%s", unwanted, b)
 		}

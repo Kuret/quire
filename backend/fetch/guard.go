@@ -41,6 +41,24 @@ func (e *GuardError) Unwrap() error { return e.Kind }
 // Guard implements the PLAN §7.4 SSRF guard. It runs on the initial URL and,
 // via http.Client.CheckRedirect, on every redirect hop — because a guard that
 // only checks the URL the user typed is not a guard.
+//
+// # What the address rules are actually for
+//
+// Quire scrapes sites it does not trust, and **those sites' content supplies
+// URLs Quire then fetches with nobody watching**: theme.SeriesStub.CoverURL is
+// pulled out of a scraped listing page and fetched automatically to draw the
+// series grid. A hostile or compromised source can therefore aim Quire at the
+// user's own network and read the result's timing, size and success.
+//
+// The concrete case this was measured against, on 2026-09-20: the owner runs
+// Shelfmark on their tailnet, and `GET /api/restart` on it answers **with no
+// authentication at all**. A source returning a cover URL of
+// `http://<their-shelfmark>:8084/api/restart` would restart that service every
+// time a listing was rendered. No credential is stolen and no reply is needed
+// — the request *is* the attack. That is what refusing private, loopback,
+// link-local and CGNAT addresses buys, and it is why the exemption below is
+// scoped to one host the user named rather than to a source, a network or a
+// theme.
 type Guard struct {
 	// resolve is injectable so tests can exercise every rejection branch
 	// without a resolver, a network, or a name that has to exist.
@@ -61,7 +79,7 @@ func (g *Guard) CheckURL(ctx context.Context, u *url.URL, p *Policy) error {
 	if err := g.checkDomain(u, p); err != nil {
 		return err
 	}
-	return g.checkAddress(ctx, u)
+	return g.checkAddress(ctx, u, p)
 }
 
 func (g *Guard) checkScheme(u *url.URL) error {
@@ -161,11 +179,15 @@ func RegistrableDomain(host string) string {
 // resolves to is one we refuse. Checking every address rather than the first
 // is deliberate: a DNS name that returns one public and one private address is
 // a rebinding attempt, not a multihomed server worth accommodating.
-func (g *Guard) checkAddress(ctx context.Context, u *url.URL) error {
+//
+// p is consulted for one thing only: whether u's host is the single host the
+// user confirmed is their own (selfHosted below).
+func (g *Guard) checkAddress(ctx context.Context, u *url.URL, p *Policy) error {
 	host := u.Hostname()
+	exempt := selfHosted(u, p)
 
 	if addr, err := netip.ParseAddr(host); err == nil {
-		if reason := g.addrReason(addr); reason != "" {
+		if reason := g.addrReason(addr, exempt); reason != "" {
 			return &GuardError{URL: u.Redacted(), Reason: reason, Kind: ErrBlockedAddress}
 		}
 		return nil
@@ -189,7 +211,7 @@ func (g *Guard) checkAddress(ctx context.Context, u *url.URL) error {
 		if !ok {
 			return &GuardError{URL: u.Redacted(), Reason: "unparseable resolved address", Kind: ErrBlockedAddress}
 		}
-		if reason := g.addrReason(addr.Unmap()); reason != "" {
+		if reason := g.addrReason(addr.Unmap(), exempt); reason != "" {
 			return &GuardError{URL: u.Redacted(), Reason: reason, Kind: ErrBlockedAddress}
 		}
 	}
@@ -201,7 +223,7 @@ func (g *Guard) checkAddress(ctx context.Context, u *url.URL) error {
 // public internet".
 var extraBlocked = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"
-	netip.MustParsePrefix("100.64.0.0/10"),   // CGNAT
+	cgnat,                                    // CGNAT; see SelfHostableAddr
 	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
 	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
 	netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
@@ -213,12 +235,79 @@ var extraBlocked = []netip.Prefix{
 	netip.MustParsePrefix("100::/64"),        // discard-only
 }
 
+// cgnat is the shared address space of RFC 6598. It is called out by name
+// because it is where a tailnet lives, which makes it the range a self-hosted
+// service the user reaches over Tailscale is actually on — and it is still in
+// extraBlocked, because a *scraped* URL pointing into it is exactly the attack
+// on Guard's doc comment.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// SelfHostableAddr reports whether addr is one the guard refuses by default
+// but a user may confirm as a service of their own: the RFC 1918 and ULA
+// private ranges, and CGNAT.
+//
+// It is deliberately narrower than "everything addrReason refuses", and the
+// blanket version was rejected:
+//
+//   - loopback is the reMarkable itself, never a service on the user's
+//     network, so confirming a host that resolves there says something the
+//     user cannot have meant;
+//   - link-local covers 169.254.169.254, the cloud metadata service, which is
+//     the single most valuable SSRF target there is;
+//   - multicast, the unspecified address and the reserved/documentation ranges
+//     are not hosts anyone runs a server on.
+//
+// Exported because theme.Source's stored confirmation is validated against it:
+// the set of addresses a confirmation may record and the set the guard will
+// honour have to be the same set, and two copies of it would drift.
+func SelfHostableAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	addr = addr.Unmap()
+	return addr.IsPrivate() || cgnat.Contains(addr)
+}
+
+// selfHosted reports whether u names the one host the user confirmed is theirs.
+//
+// The match is on the host and nothing else — exact, case-folded, trailing dot
+// removed. It deliberately does not reuse hostMatches: a subdomain of the
+// approved host is not the approved host, and a registrable-domain match would
+// hand a whole domain's worth of names an address exemption the user agreed to
+// for one.
+//
+// Because the match is per-URL rather than per-source, it survives the two
+// places content gets to choose a URL. A cover URL scraped from a page is
+// checked as itself, so a cover pointing at any other address on the same
+// private network is refused however the source was configured; and a redirect
+// is re-checked on every hop with the same policy, so an exemption cannot be
+// carried off the approved host by a 302. Redirect targets are content, and an
+// exemption that survived one would be precisely the hole this is avoiding.
+func selfHosted(u *url.URL, p *Policy) bool {
+	if p == nil || p.SelfHostedHost == "" || u == nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	approved := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.SelfHostedHost)), ".")
+	return host != "" && host == approved
+}
+
 // addrReason returns a plain-language reason to refuse addr, or "" to allow it.
-func (g *Guard) addrReason(addr netip.Addr) string {
+//
+// selfHosted is true only when the caller has already established that this
+// URL's host is the one host the user confirmed is a service on their own
+// network. It lifts the refusal for the SelfHostableAddr ranges and for
+// nothing else — including the 6to4 recursion below, which asks about an
+// embedded address rather than the one the user agreed to and so is never
+// exempt.
+func (g *Guard) addrReason(addr netip.Addr, selfHosted bool) string {
 	if !addr.IsValid() {
 		return "invalid IP address"
 	}
 	addr = addr.Unmap()
+	if selfHosted && SelfHostableAddr(addr) {
+		return ""
+	}
 	switch {
 	case addr.IsUnspecified():
 		return "0.0.0.0 and :: are not routable destinations"
@@ -247,7 +336,7 @@ func (g *Guard) addrReason(addr netip.Addr) string {
 		// Anything with an embedded v4 address gets the v4 rules too.
 		if v4 := addr.As16(); v4[0] == 0x20 && v4[1] == 0x02 { // 2002::/16, 6to4
 			embedded := netip.AddrFrom4([4]byte{v4[2], v4[3], v4[4], v4[5]})
-			if r := g.addrReason(embedded); r != "" {
+			if r := g.addrReason(embedded, false); r != "" {
 				return fmt.Sprintf("6to4 address embedding %s: %s", embedded, r)
 			}
 		}

@@ -181,6 +181,13 @@ func (r *Registry) Validate(s *Source) error {
 		}
 	}
 
+	// Before the theme gets a say, because a source claiming to be on the
+	// user's own network is a claim about the fetch layer's address rules and
+	// has nothing to do with which theme drives it.
+	if err := s.validateSelfHosted(); err != nil {
+		return err
+	}
+
 	if !validSplitStrips(s.SplitStrips) {
 		return fmt.Errorf("theme: source %q: splitStrips must be one of %s, got %q",
 			s.ID, strings.Join(SplitStripsValues, ", "), s.SplitStrips)

@@ -108,6 +108,24 @@ type Policy struct {
 	// on. Image CDNs are the usual reason.
 	AllowedHosts []string
 
+	// SelfHostedHost is the one host — exactly one, matched exactly — that the
+	// user has confirmed is a service on their own network, so the address
+	// rules let it resolve into a private or CGNAT range (guard.go,
+	// SelfHostableAddr). Empty, which is the normal case, means no exemption.
+	//
+	// It is a single host rather than a list, and it is *not* merged into
+	// AllowedHosts, because the two answer different questions and must not
+	// become one field: AllowedHosts widens the registrable-domain boundary for
+	// hosts a *theme* names, and PLAN §7.4 promises it can never reach the
+	// local network. This widens the address rules for a host the *user* typed
+	// and confirmed, and it widens nothing else.
+	//
+	// theme.Source.Policy is the only thing that sets it, and only from a
+	// stored confirmation that carries the address the host resolved to when
+	// the user agreed to it. Nothing a page, a theme or a redirect supplies can
+	// reach it.
+	SelfHostedHost string
+
 	// RateLimit narrows the global caps. It can never widen them.
 	RateLimit *RateLimit
 }

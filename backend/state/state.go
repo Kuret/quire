@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/theme"
 )
 
@@ -291,6 +293,67 @@ func (s *Store) Rename(id, name string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// ErrBadSelfHosted means the address offered with a confirmation is not one a
+// source can be confirmed on.
+var ErrBadSelfHosted = errors.New("state: a source can only be confirmed on a private or CGNAT address")
+
+// ConfirmSelfHosted records that the user says this source is a service on
+// their own network, and is the *only* way that ever gets recorded.
+//
+// It takes the address the source's host resolved to, because the record is of
+// what the user agreed to and an agreement to reach "whatever this name points
+// at" is not one worth keeping. The caller has to have resolved the host and
+// have the answer in hand; there is deliberately no variant that resolves it
+// here and confirms whatever comes back, since that would be Quire deciding
+// rather than the user.
+//
+// Everything about why this exists is on theme.SelfHosted and fetch.Guard. The
+// short version: the address rules exist because scraped content chooses URLs
+// Quire then fetches unattended, and a host the user typed themselves is the
+// one case that reasoning does not cover.
+func (s *Store) ConfirmSelfHosted(id, addr string) error {
+	parsed, err := netip.ParseAddr(strings.TrimSpace(addr))
+	if err != nil || !fetch.SelfHostableAddr(parsed) {
+		return fmt.Errorf("%w (got %q)", ErrBadSelfHosted, addr)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			was := src.SelfHosted
+			src.SelfHosted = &theme.SelfHosted{ConfirmedAddr: parsed.String(), ConfirmedAt: time.Now().UTC()}
+			// Validated after being set rather than before, so the check is on
+			// the source as it would be stored — in particular the baseUrl/
+			// address agreement, which this function cannot see on its own.
+			if err := s.reg.Validate(src); err != nil {
+				src.SelfHosted = was
+				return fmt.Errorf("state: %w", err)
+			}
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
+// RevokeSelfHosted takes the confirmation back. A permission that cannot be
+// withdrawn is not one the user is in charge of, and unlike ConfirmSelfHosted
+// this direction needs no evidence: it only ever makes the guard stricter.
+func (s *Store) RevokeSelfHosted(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			if src.SelfHosted == nil {
+				return nil
+			}
+			src.SelfHosted = nil
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // SetProbe records a new probe result against a source (PLAN §6 M7 re-probes an
 // existing source, and the UI shows the last result per source).
 func (s *Store) SetProbe(id string, r *theme.ProbeResult) error {
@@ -451,6 +514,10 @@ func copySource(src *theme.Source) *theme.Source {
 	if src.RateLimit != nil {
 		v := *src.RateLimit
 		out.RateLimit = &v
+	}
+	if src.SelfHosted != nil {
+		v := *src.SelfHosted
+		out.SelfHosted = &v
 	}
 	if src.LastProbe != nil {
 		v := *src.LastProbe
