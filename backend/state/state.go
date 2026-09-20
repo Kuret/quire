@@ -379,6 +379,49 @@ func (s *Store) SetProxy(id, raw string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// ErrNoProxyToConfirm means a source was offered as "confirmed by the proxy
+// that reaches it" without having a proxy.
+var ErrNoProxyToConfirm = errors.New("state: a source confirmed through a proxy has to have one")
+
+// ConfirmSelfHostedViaProxy records the confirmation for the source whose host
+// does not resolve on this device at all.
+//
+// It is a second method rather than ConfirmSelfHosted with an empty address,
+// because the two record different evidence and each has a precondition worth
+// stating: that one needs an address the caller resolved, and this one needs
+// the source to already carry the proxy the user typed. A single function
+// taking "" would have neither precondition and would be the easiest way to end
+// up with a confirmation standing on nothing.
+//
+// The order matters and is the caller's to get right: SetProxy first, then
+// this. It is checked rather than assumed — a source with no proxy is refused
+// here, and validation refuses the same shape again on the way to disk.
+//
+// Why there is no address: measured 2026-09-20, the owner's source is a
+// MagicDNS name on their mesh. The tablet resolves against public DNS, the
+// kernel has no TUN device so the userspace VPN installs no resolver, and the
+// name never resolves here — the proxy resolves it. Resolving through the proxy
+// just to have a value to store was rejected; see theme.SelfHosted.ViaProxy.
+func (s *Store) ConfirmSelfHostedViaProxy(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			if strings.TrimSpace(src.Proxy) == "" {
+				return fmt.Errorf("%w (%q)", ErrNoProxyToConfirm, id)
+			}
+			was := src.SelfHosted
+			src.SelfHosted = &theme.SelfHosted{ViaProxy: true, ConfirmedAt: time.Now().UTC()}
+			if err := s.reg.Validate(src); err != nil {
+				src.SelfHosted = was
+				return fmt.Errorf("state: %w", err)
+			}
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // RevokeSelfHosted takes the confirmation back. A permission that cannot be
 // withdrawn is not one the user is in charge of, and unlike ConfirmSelfHosted
 // this direction needs no evidence: it only ever makes the guard stricter.

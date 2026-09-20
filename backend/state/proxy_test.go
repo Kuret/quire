@@ -92,3 +92,52 @@ func TestSetProxyOnAMissingSource(t *testing.T) {
 		t.Errorf("SetProxy on an unknown source = %v, want ErrNotFound", err)
 	}
 }
+
+// TestConfirmSelfHostedViaProxyNeedsTheProxy. The confirmation that records no
+// address stands on the proxy being there; without one it is the bare "let this
+// one through" flag that theme.SelfHosted exists to refuse.
+func TestConfirmSelfHostedViaProxyNeedsTheProxy(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Zima", "http://zima.example:8084"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ConfirmSelfHostedViaProxy(added.ID); !errors.Is(err, state.ErrNoProxyToConfirm) {
+		t.Fatalf("ConfirmSelfHostedViaProxy with no proxy = %v, want ErrNoProxyToConfirm", err)
+	}
+	if got, _ := s.Get(added.ID); got.SelfHosted != nil {
+		t.Fatal("a confirmation was recorded with nothing to stand on")
+	}
+
+	// With the proxy on it, the same call records what was agreed.
+	if err := s.SetProxy(added.ID, "http://localhost:1055"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConfirmSelfHostedViaProxy(added.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(added.ID)
+	if got.SelfHosted == nil || !got.SelfHosted.ViaProxy {
+		t.Fatalf("stored confirmation = %+v", got.SelfHosted)
+	}
+	if got.SelfHosted.ConfirmedAddr != "" {
+		t.Errorf("ConfirmedAddr = %q; nothing resolved, so nothing may be recorded", got.SelfHosted.ConfirmedAddr)
+	}
+	if got.SelfHosted.ConfirmedAt.IsZero() {
+		t.Error("ConfirmedAt is zero; the record should say when consent was given")
+	}
+
+	// And taking the proxy away takes the ground out from under it, so the
+	// store refuses rather than leaving a confirmation standing on nothing.
+	if err := s.SetProxy(added.ID, ""); err == nil {
+		t.Error("clearing the proxy left a proxy-confirmation behind it")
+	}
+	if still, _ := s.Get(added.ID); still.Proxy != "http://localhost:1055" {
+		t.Errorf("proxy = %q, want the refused change rolled back", still.Proxy)
+	}
+}
