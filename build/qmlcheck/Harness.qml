@@ -591,6 +591,20 @@ Window {
     }
     PagerBar    { id: lonePager;   width: 1620 }
 
+    // A standalone tile grid, isolated from any screen, for the tile
+    // subtitle's geometry: hasSubtitles is a plain property here, so setting
+    // it directly is reliable, unlike going through a screen's own computed
+    // binding (which only re-evaluates when the thing it actually reads
+    // changes — see the search-results section below for that end-to-end
+    // wiring instead).
+    ListModel { id: subtitleTilesModel }
+    CoverGrid {
+        id: subtitleTiles
+        objectName: "subtitleTiles"
+        width: 1620; height: 2160
+        model: subtitleTilesModel
+    }
+
     // Both keyboard layouts, so the URL one can be inspected without driving a
     // screen into its search state.
     Keyboard {
@@ -611,12 +625,15 @@ Window {
     Component.onCompleted: {
         for (var i = 0; i < 40; ++i)
             // Every role Main.qml's fillSeries fills, including `watched`,
-            // which the long-press menu's Watch / Stop watching line reads. A
-            // ListModel fixes its roles on the first append, so a fixture
-            // without it could never be given one later.
+            // which the long-press menu's Watch / Stop watching line reads,
+            // and `authors`, which the row's subtitle reads. A ListModel
+            // fixes its roles on the first append, so a fixture without one
+            // could never be given it later — see the authors-role-missing
+            // case below, which uses a plain object rather than this model
+            // for exactly that reason.
             seriesModel.append({"seriesId": "x" + i, "title": "Series " + i,
                                 "coverUrl": "https://example.invalid/c.jpg", "coverPath": "",
-                                "watched": false})
+                                "watched": false, "authors": ""})
         for (var j = 0; j < 55; ++j)
             chaptersModel.append({"chapterId": "c" + j, "title": "Chapter " + j, "number": j,
                                   "published": "2026-01-01", "scanlator": "Group",
@@ -2471,8 +2488,42 @@ Window {
         seriesModel.setProperty(0, "coverPath", "")
 
         seriesGrid.sourceName = "Example Reader"
-        win.want("a row says where the result came from",
-                 win.findChild(seriesGrid, "seriesRowSubtitle").text, "Example Reader")
+        // findChildren rather than findChild from here on: once the rows stop
+        // being identical, the first Text depth-first traversal happens to
+        // find is not necessarily row 0's, and this is about row 0 in
+        // particular (the row setProperty(0, ...) below reaches).
+        win.want("a row with no authors says only where the result came from",
+                 win.findChildren(seriesGrid, "seriesRowSubtitle", [])[0].text, "Example Reader")
+
+        seriesModel.setProperty(0, "authors", "Frank Herbert")
+        win.want("a row with both says the authors, then the source",
+                 win.findChildren(seriesGrid, "seriesRowSubtitle", [])[0].text,
+                 "Frank Herbert · Example Reader")
+
+        seriesGrid.sourceName = ""
+        win.want("with no source name it is the authors alone, no stray separator",
+                 win.findChildren(seriesGrid, "seriesRowSubtitle", [])[0].text, "Frank Herbert")
+
+        seriesModel.setProperty(0, "authors", "")
+        win.want("with neither, the line is empty rather than an empty parenthetical",
+                 win.findChildren(seriesGrid, "seriesRowSubtitle", [])[0].text, "")
+
+        // Restored before the role-missing check below, which needs a
+        // non-empty source name to tell "fell back to it" from "returned
+        // nothing".
+        seriesGrid.sourceName = "Example Reader"
+        seriesModel.setProperty(0, "authors", "")
+
+        // The role-missing case itself: a plain object, as a row from a
+        // model that never appended "authors" at all would read back
+        // (seriesModel above cannot demonstrate this directly any more, now
+        // that its fixture carries the role like Main.qml's fillSeries
+        // always does — so this calls the delegate's own composing function
+        // with exactly the shape a ListModel would hand it: authors absent
+        // as a property, not present-and-empty). Must not throw, and must
+        // fall back to the source name alone.
+        win.want("a row whose model never had the role at all still renders",
+                 seriesGrid.seriesRowSubtitle({"title": "Untitled"}), "Example Reader")
 
         win.seriesOpens = 0
         var seriesRowAreas = win.findChildren(seriesGrid, "seriesRowArea", [])
@@ -2480,6 +2531,59 @@ Window {
         seriesRowAreas[1].clicked(null)
         win.want("tapping a row opens once", win.seriesOpens, 1)
         win.want("the series that row names", win.seriesOpenedId, "x1")
+
+        // ---- the tile grid's own subtitle line, and its geometry -----------
+        //
+        // A standalone grid (see its declaration above): hasSubtitles is a
+        // plain property on CoverGrid, so setting it directly here is
+        // reliable and does not depend on any screen's own wiring.
+
+        for (var st = 0; st < 6; ++st)
+            subtitleTilesModel.append({"seriesId": "t" + st, "title": "Tile " + st,
+                                       "coverUrl": "", "coverPath": "", "authors": ""})
+        win.findChild(subtitleTiles, "coverTiles").forceLayout()
+
+        var geometryBefore = {
+            captionHeight: subtitleTiles.captionHeight,
+            cellHeight: subtitleTiles.cellHeight,
+            pageSize: subtitleTiles.pageSize
+        }
+        win.want("with nothing to show, no tile carries a visible subtitle",
+                 win.findChildren(subtitleTiles, "coverSubtitle", [])[0].visible, false)
+
+        subtitleTiles.hasSubtitles = true
+        win.findChild(subtitleTiles, "coverTiles").forceLayout()
+        win.want("turning hasSubtitles on grows the caption",
+                 subtitleTiles.captionHeight > geometryBefore.captionHeight, true)
+        win.want("which grows the cell", subtitleTiles.cellHeight > geometryBefore.cellHeight, true)
+        win.want("and so holds fewer per page",
+                 subtitleTiles.pageSize <= geometryBefore.pageSize, true)
+
+        subtitleTilesModel.setProperty(0, "authors", "Frank Herbert")
+        win.want("a tile with an author shows the subtitle",
+                 win.findChildren(subtitleTiles, "coverSubtitle", [])[0].visible, true)
+        win.want("naming it", win.findChildren(subtitleTiles, "coverSubtitle", [])[0].text,
+                 "Frank Herbert")
+
+        subtitleTiles.hasSubtitles = false
+        win.want("turning hasSubtitles back off restores the caption",
+                 subtitleTiles.captionHeight, geometryBefore.captionHeight)
+        win.want("and the cell with it", subtitleTiles.cellHeight, geometryBefore.cellHeight)
+        win.want("and a tile's subtitle goes with it, even though it has an author",
+                 win.findChildren(subtitleTiles, "coverSubtitle", [])[0].visible, false)
+
+        // A model whose rows never carried "authors" at all — the missing
+        // role, not merely an empty one (CoverGrid's own roleOf comment).
+        var noAuthorsModel = Qt.createQmlObject(
+            'import QtQuick 2.5; ListModel {}', subtitleTiles, "noAuthorsModel")
+        noAuthorsModel.append({"seriesId": "n0", "title": "No Role", "coverUrl": "", "coverPath": ""})
+        subtitleTiles.model = noAuthorsModel
+        subtitleTiles.hasSubtitles = true
+        win.findChild(subtitleTiles, "coverTiles").forceLayout()
+        win.want("a tile whose model never had the role at all still renders",
+                 win.findChildren(subtitleTiles, "coverSubtitle", [])[0].text, "")
+        subtitleTiles.model = subtitleTilesModel
+        subtitleTiles.hasSubtitles = false
 
         seriesGrid.view = "grid"
         seriesGrid.busy = false
@@ -3185,6 +3289,12 @@ Window {
             "matches": [
                 {"sourceId": "src-s", "sourceName": "Shelfmark", "seriesId": "/book/dune"},
                 {"sourceId": "src-t", "sourceName": "Other Shelf", "seriesId": "/b/dune"}]}
+        var duneWithAuthors = {
+            "key": "dune messiah", "title": "Dune Messiah", "kind": "book",
+            "coverUrl": "", "authors": ["Frank Herbert"],
+            "matches": [
+                {"sourceId": "src-s", "sourceName": "Shelfmark",
+                 "seriesId": "/book/dune-messiah", "coverUrl": ""}]}
 
         win.want("a group carries its kind onto the row",
                  Grouping.groupRow(duneGroup).kind, "book")
@@ -3206,6 +3316,27 @@ Window {
                  Grouping.badgeFor(twoSiteBook), "Book · 2 sources")
         win.want("and a manga tile's badge is untouched",
                  Grouping.badgeFor(lanternGroup), "2 sources")
+
+        // ---- authors on the combined-search row and tile --------------------
+
+        win.want("a group with authors leads with them",
+                 Grouping.subtitleLine(duneWithAuthors), "Frank Herbert · Book · Shelfmark")
+        win.want("a group with none is exactly as it always was, no stray separator",
+                 Grouping.subtitleLine(duneGroup), "Book · Shelfmark")
+        win.want("authors alone when there is nothing else to say",
+                 Grouping.subtitleLine({"authors": ["Ann Leckie"], "matches": []}), "Ann Leckie")
+        win.want("and nothing at all when there is neither",
+                 Grouping.subtitleLine({"matches": []}), "")
+        win.want("the row is filled with the same composed line",
+                 Grouping.groupRow(duneWithAuthors).sources, "Frank Herbert · Book · Shelfmark")
+        // The tile's subtitle is authors alone — the sources stay on the
+        // badge, which multiple authors joined with ", " would be lost among.
+        win.want("the tile role carries authors alone, not the composed line",
+                 Grouping.groupRow(duneWithAuthors).authors, "Frank Herbert")
+        win.want("a group with none carries an empty string for it",
+                 Grouping.groupRow(duneGroup).authors, "")
+        win.want("and the badge is unaffected by any of this",
+                 Grouping.badgeFor(duneWithAuthors), "Book")
 
         // Filling one page through the filter. **Nothing is re-fetched**: the
         // groups are the ones already in hand, so a filter cannot fail and
@@ -3236,6 +3367,47 @@ Window {
                  Grouping.matchesFor(mangaIndex, "dune messiah").length, 1)
         win.want("as they do unfiltered",
                  Grouping.matchesFor(allIndex, "the lantern keeper").length, 2)
+
+        // ---- authors, rendered on the combined screen's own tiles and rows -
+
+        Grouping.fill(searchAllModel, {"groups": [duneWithAuthors, duneGroup], "sourceErrors": []}, Kinds.ALL)
+        searchAll.visible = true
+        searchAll.view = "grid"
+        var authorTiles = win.findChild(searchAll, "searchAllTiles")
+        win.findChild(authorTiles, "coverTiles").forceLayout()
+        win.want("a page with an author grows the tile's caption",
+                 authorTiles.hasSubtitles, true)
+        var authorSubtitles = win.findChildren(authorTiles, "coverSubtitle", [])
+        win.want("the tile names the author", authorSubtitles[0].text, "Frank Herbert")
+        win.want("a tile with none shows nothing", authorSubtitles[1].text, "")
+        var authorBadgeText = win.findChildren(authorTiles, "coverBadgeText", [])
+        win.want("the badge still marks what it always did, unmoved by any of this",
+                 authorBadgeText[0].text, "Book")
+        win.want("for both tiles", authorBadgeText[1].text, "Book")
+
+        searchAll.view = "list"
+        var authorRows = win.findChild(searchAll, "searchAllRows")
+        authorRows.forceLayout()
+        var authorRowSources = win.findChildren(authorRows, "searchAllRowSources", [])
+        win.want("the row leads with the author, then what it is, then the source",
+                 authorRowSources[0].text, "Frank Herbert · Book · Shelfmark")
+        win.want("and a group with no author is exactly what it always was",
+                 authorRowSources[1].text, "Book · Shelfmark")
+
+        // A page with nothing but manga must not grow the tile at all — the
+        // geometry a search for a comic sees is untouched by this feature.
+        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []}, Kinds.ALL)
+        searchAll.view = "grid"
+        win.findChild(authorTiles, "coverTiles").forceLayout()
+        win.want("a page with no authors at all keeps the tile as it always was",
+                 authorTiles.hasSubtitles, false)
+
+        // Changing the tile geometry above changes pageSize, which the
+        // screen's own onPageSizeChanged reacts to by asking for the page
+        // again (screen.query was still set from an earlier test) — settle
+        // that before it is mistaken for a real result below.
+        searchAll.busy = false
+        searchAll.pendingPage = 0
 
         // ---- the filter, as a control --------------------------------------
         //

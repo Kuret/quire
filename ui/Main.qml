@@ -657,6 +657,15 @@ Rectangle {
                 "title": list[i].title,
                 "coverUrl": list[i].coverUrl ? list[i].coverUrl : "",
                 "coverPath": "",
+                // Comma-joined rather than carried as a list: a ListModel role
+                // cannot reliably hold an array (append stores it, but reading
+                // .length or an index back off it does not work), and most
+                // sources have none of this to give anyway (SeriesGrid.qml).
+                // The role is written on every row, empty string included, for
+                // the same reason "watched" below is — a ListModel fixes its
+                // roles on the first append and drops keys added later.
+                "authors": (list[i].authors && list[i].authors.length > 0)
+                    ? list[i].authors.join(", ") : "",
                 // What this result is — absent means manga (ui/Kinds.js). One
                 // source is one kind, so this screen draws no filter; it is
                 // here because opening a result is what tells the series screen

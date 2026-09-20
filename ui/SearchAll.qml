@@ -16,7 +16,10 @@
 //     normalised title, so one row can stand for the same book on three sites.
 //     The list layout puts their names on the subtitle line that screen
 //     already keeps for one source's name; the grid marks the tile with
-//     CoverGrid's badge, because a tile has no room for a line of names.
+//     CoverGrid's badge, because a tile has no room for a line of names. That
+//     reasoning is about *source names* specifically — an author is one short
+//     name, not a list of them, so it gets CoverGrid's subtitle line instead
+//     (the same one SeriesGrid's tiles use), and the badge is unchanged.
 //   - **No long-press menu.** Tap opens; the series screen carries the
 //     actions. "Watch" on a *group* would have to pick a source silently, and
 //     watch records, downloads and the downloaded overview are all keyed by
@@ -60,6 +63,22 @@ Item {
     // own count during a layout pass, so anything derived from it lags by a
     // frame — and a frame on this panel is a repaint.
     readonly property int rowCount: screen.model ? screen.model.count : 0
+
+    // Whether the current page has any authors worth a tile subtitle —
+    // CoverGrid's captionHeight only grows when this is true, so a page of
+    // manga (none of these) keeps today's density exactly (ui/CoverGrid.qml,
+    // ui/SeriesGrid.qml's own screen.anyAuthors does the same thing).
+    // Recomputed whenever rowCount changes, which is every time a page is
+    // (re)filled.
+    readonly property bool anyAuthors: {
+        var n = screen.rowCount
+        for (var i = 0; i < n; ++i) {
+            var row = screen.model.get(i)
+            if (row.authors !== undefined && row.authors !== null && String(row.authors).length > 0)
+                return true
+        }
+        return false
+    }
 
     // Which sources did not answer, composed in Grouping.js from the reply's
     // sourceErrors. Empty when they all did, and empty is what is shown: a
@@ -412,10 +431,13 @@ Item {
             // starts at the top of it.
             firstIndex: 0
             // The badge corner is how a group found in more than one source is
-            // marked here: the tile has no subtitle line, and the slot is
-            // already drawn and already legible on this panel (Grouping.js
-            // badgeFor).
+            // marked here: a tile has no room for a line of *source names*,
+            // and the slot is already drawn and already legible on this panel
+            // (Grouping.js badgeFor). An author is one short name rather than
+            // a list of them, so it gets the ordinary subtitle line instead —
+            // see hasSubtitles below, and ui/SeriesGrid.qml's identical wiring.
             badges: true
+            hasSubtitles: screen.anyAuthors
             onTapped: screen.open(index)
             // `held` is deliberately not connected. There is no menu on a
             // group: see the note at the top of this file.
@@ -489,14 +511,14 @@ Item {
                         color: Style.ink
                     }
 
-                    // What it is and which sources have it, in the user's own
-                    // source order — the line SeriesGrid keeps for the one
-                    // source it is showing. A book says so here in a word
-                    // (Grouping.subtitleLine): its cover, title and author line
-                    // all arrive through the same fields a comic's do, so
-                    // nothing else on the row would tell them apart. The height
-                    // is kept even when it is empty, so a page holds the same
-                    // number of rows either way.
+                    // The authors, what it is, and which sources have it, in
+                    // that order — the line SeriesGrid keeps for the one
+                    // source it is showing, here composed from all three
+                    // (Grouping.subtitleLine). A book says so in a word before
+                    // its sources, because "Shelfmark" is a source name like
+                    // any other and nothing else on the row would tell a novel
+                    // from a comic. The height is kept even when it is empty,
+                    // so a page holds the same number of rows either way.
                     Text {
                         objectName: "searchAllRowSources"
                         width: parent.width

@@ -60,8 +60,20 @@ Item {
         return value === undefined || value === null ? "" : String(value)
     }
 
-    // The room under each tile for its title. Two short lines at Style.smallSize.
-    readonly property int captionHeight: 56
+    // Whether the current listing has authors worth a subtitle line at all.
+    // The screen that owns the model sets this from whether any row on the
+    // page carries a non-empty `authors` — a search across manga sites has
+    // none of them, and every tile on such a page must stay exactly the size
+    // it always was, not grow a blank line nobody asked for. GridView cannot
+    // vary one cell's height from another's, so this is page-wide rather than
+    // per-tile: a book listing costs one row per page, uniformly.
+    property bool hasSubtitles: false
+
+    // The room under each tile for its title. Two short lines at
+    // Style.smallSize, plus a third — this one at Style.smallSize too, for the
+    // authors — only when hasSubtitles says the listing has any to show.
+    readonly property int subtitleLineHeight: 20
+    readonly property int captionHeight: tiles.hasSubtitles ? 56 + tiles.subtitleLineHeight : 56
 
     readonly property int cellWidth: grid.cellWidth
     readonly property int cellHeight: grid.cellHeight
@@ -107,6 +119,10 @@ Item {
             readonly property string coverPath: tiles.roleOf(model.coverPath)
             readonly property string caption: tiles.roleOf(model.title)
             readonly property string badge: tiles.badges ? tiles.roleOf(model.badge) : ""
+            // roleOf guards this the same way as the rest: most sources have
+            // no authors to give at all, so the role may be entirely absent
+            // from this model rather than present-and-empty (see roleOf).
+            readonly property string subtitle: tiles.roleOf(model.authors)
 
             Rectangle {
                 id: tile
@@ -184,6 +200,7 @@ Item {
             }
 
             Text {
+                id: caption
                 objectName: "coverCaption"
                 anchors {
                     top: tile.bottom; topMargin: 6
@@ -194,8 +211,31 @@ Item {
                 font.pointSize: Style.smallSize
                 color: Style.ink
                 elide: Text.ElideRight
+                // Never cut to one line to make room for the subtitle below —
+                // a truncated title is a worse trade than a shorter page.
                 maximumLineCount: 2
                 wrapMode: Text.WordWrap
+            }
+
+            // The authors, when the listing has any and the tile has room
+            // reserved for them (tiles.hasSubtitles). Invisible and
+            // zero-height rather than just invisible when there is nothing to
+            // show, so a manga listing's geometry is byte-for-byte what it
+            // always was — see tiles.captionHeight.
+            Text {
+                objectName: "coverSubtitle"
+                anchors {
+                    top: caption.bottom
+                    left: parent.left; right: parent.right
+                    leftMargin: Style.gap / 2; rightMargin: Style.gap / 2
+                }
+                text: cell.subtitle
+                font.pointSize: Style.smallSize
+                color: Style.muted
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                visible: tiles.hasSubtitles
+                height: visible ? implicitHeight : 0
             }
 
             // One area for both gestures, so a tile cannot end up opening the

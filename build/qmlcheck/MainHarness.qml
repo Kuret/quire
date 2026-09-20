@@ -180,8 +180,14 @@ Window {
     function seriesReply(page, totalPages, hasMore) {
         return {
             "series": [
+                // Two authors, to prove fillSeries joins a list rather than
+                // just carrying the first name or the array itself (a
+                // ListModel role cannot reliably hold one — see Main.qml).
                 {"id": "/manga/lantern/", "title": "The Lantern Keeper",
-                 "coverUrl": "https://example.invalid/a.jpg"},
+                 "coverUrl": "https://example.invalid/a.jpg",
+                 "authors": ["Frank Herbert", "Brian Herbert"]},
+                // No authors at all, which is every comic source's reply
+                // today and must produce an empty string, not a thrown error.
                 {"id": "/manga/orphan/", "title": "An Orphan", "coverUrl": ""}],
             "page": page, "totalPages": totalPages, "hasMore": hasMore}
     }
@@ -556,6 +562,15 @@ Window {
         win.want("titled as they arrived", seriesGrid.model.get(0).title,
                  "The Lantern Keeper")
         win.want("with no cover on disk yet", seriesGrid.model.get(0).coverPath, "")
+        // fillSeries joins multiple authors with ", " into one string, since a
+        // ListModel role cannot reliably hold a list.
+        win.want("multiple authors are comma-joined",
+                 seriesGrid.model.get(0).authors, "Frank Herbert, Brian Herbert")
+        // A row with no authors at all gets the role anyway, empty — a
+        // ListModel fixes its roles on the first append, so the second row
+        // could never be given one later if the first had skipped it.
+        win.want("a row with no authors carries an empty string, not undefined",
+                 seriesGrid.model.get(1).authors, "")
         win.want("the page is where the backend says", seriesGrid.page, 2)
         win.want("the total is the backend's too", seriesGrid.totalPages, 5)
         win.want("and whether there is more", seriesGrid.hasMore, true)

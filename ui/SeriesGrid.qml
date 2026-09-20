@@ -52,6 +52,21 @@ Item {
     // and a frame on this panel is a repaint.
     readonly property int rowCount: screen.model ? screen.model.count : 0
 
+    // Whether the current page has any authors worth a tile subtitle — the
+    // tile grid's captionHeight only grows when this is true (CoverGrid.qml),
+    // so a manga listing (none of these) keeps today's density exactly and a
+    // book listing (Shelfmark) costs one row per page, uniformly. Recomputed
+    // whenever rowCount changes, which is every time a page is (re)filled.
+    readonly property bool anyAuthors: {
+        var n = screen.rowCount
+        for (var i = 0; i < n; ++i) {
+            var row = screen.model.get(i)
+            if (row.authors !== undefined && row.authors !== null && String(row.authors).length > 0)
+                return true
+        }
+        return false
+    }
+
     // The source this listing came from, shown on each row of the list layout.
     // It is the same for every row today; when a search across every source
     // lands (Msg.SearchAll) it is the line the sources go on.
@@ -186,6 +201,28 @@ Item {
     // about the covers.
     onViewChanged: screen.requestVisibleCovers()
 
+    // seriesRowSubtitle composes the one line under a row's title: the row's
+    // authors and the source name, in that order, joined by " · " when both
+    // are there. Author strings arrive already comma-joined (Main.qml's
+    // fillSeries does that, since a ListModel role cannot reliably hold a
+    // list — see its comment) so this only has to compose the two halves.
+    //
+    // A ListModel fixes its roles on the first append, so a listing whose
+    // rows never carried "authors" at all — every source but Shelfmark today
+    // — reads back as an *absent* property rather than an empty string, and
+    // reading .length off that throws (CoverGrid's roleOf records the same
+    // trap). Guarded here the same defensive way, so a source with nothing to
+    // say about authors renders exactly as it always has: the source name
+    // alone, no stray separator, no empty parenthetical.
+    function seriesRowSubtitle(row) {
+        var authors = row.authors === undefined || row.authors === null ? "" : String(row.authors)
+        if (authors.length > 0 && screen.sourceName.length > 0)
+            return authors + " · " + screen.sourceName
+        if (authors.length > 0)
+            return authors
+        return screen.sourceName
+    }
+
     function turnTo(page) {
         screen.pendingPage = page
         screen.busy = true
@@ -314,6 +351,7 @@ Item {
             // The model holds this page and only this page, so the window
             // starts at the top of it.
             firstIndex: 0
+            hasSubtitles: screen.anyAuthors
             onTapped: {
                 var row = screen.model.get(index)
                 screen.openRequested(row.seriesId, row.title)
@@ -394,15 +432,15 @@ Item {
                         color: Style.ink
                     }
 
-                    // Where the result came from. The line keeps its height
-                    // when there is nothing to put on it, so that a listing
-                    // without one does not hold a different number of rows per
-                    // page than a listing with one.
+                    // The authors and where the result came from. The line
+                    // keeps its height when there is nothing to put on it, so
+                    // that a listing without one does not hold a different
+                    // number of rows per page than a listing with one.
                     Text {
                         objectName: "seriesRowSubtitle"
                         width: parent.width
                         elide: Text.ElideRight
-                        text: screen.sourceName
+                        text: screen.seriesRowSubtitle(model)
                         font.pointSize: Style.smallSize
                         color: Style.muted
                     }

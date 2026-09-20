@@ -63,22 +63,40 @@ function sourceLine(group) {
     return names.join(SEPARATOR)
 }
 
-// subtitleLine is the whole of a row's second line: what the group *is*, then
-// where it was found.
+// authorsLine names a group's authors, comma-joined — the same shape
+// SeriesGrid's row carries (Main.qml's fillSeries), and for the same reason:
+// a ListModel role cannot reliably hold a list, so the join happens once,
+// here, rather than in the delegate.
+function authorsLine(group) {
+    var authors = group && group.authors ? group.authors : []
+    return authors.join(", ")
+}
+
+// subtitleLine is the whole of a row's second line: the authors, if any, then
+// what the group *is*, then where it was found.
 //
 // A book says so in a word before its sources, because "Shelfmark" is a source
 // name like any other and nothing else on the row distinguishes a novel from a
-// comic — the title, the cover and the author line all arrive through the same
-// fields. Manga says nothing extra: every row wearing a mark is a mark nobody
-// reads, which is the rule the multi-source badge already keeps.
+// comic — the title and the cover arrive through the same fields. Manga says
+// nothing extra: every row wearing a mark is a mark nobody reads, which is the
+// rule the multi-source badge already keeps.
 function subtitleLine(group) {
     var mark = Kinds.mark(group)
     var sources = sourceLine(group)
+    var rest
     if (mark.length === 0)
-        return sources
-    if (sources.length === 0)
-        return mark
-    return mark + SEPARATOR + sources
+        rest = sources
+    else if (sources.length === 0)
+        rest = mark
+    else
+        rest = mark + SEPARATOR + sources
+
+    var authors = authorsLine(group)
+    if (authors.length === 0)
+        return rest
+    if (rest.length === 0)
+        return authors
+    return authors + SEPARATOR + rest
 }
 
 // badgeFor marks a group that was found in more than one source, for the grid
@@ -133,6 +151,10 @@ function groupRow(group) {
         "seriesId": first.seriesId ? first.seriesId : "",
         "sources": subtitleLine(group),
         "sourceCount": matches.length,
+        // Authors alone, for the tile view's subtitle (ui/CoverGrid.qml),
+        // which has no room for the source names the row's "sources" line
+        // above carries — those stay on the badge (badgeFor).
+        "authors": authorsLine(group),
         // What this group is. Carried on the row rather than looked up again
         // later: the series screen is told what it is showing by the row that
         // opened it, and the filter reads it off the model it is filtering.
