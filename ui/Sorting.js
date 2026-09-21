@@ -79,8 +79,17 @@ function sortDocuments(api, req) {
             // create() says *why* when it knows — a folder at the wrong parent
             // is a different fact from a call that threw, and the second
             // sentence must not overwrite the first.
+            //
+            // This fallback fires only when createFolder returned falsy
+            // *without* throwing and *without* landing at the wrong parent —
+            // both of those are reported above. On the one device this has
+            // been measured against, that combination means createCollection
+            // ran and made the folder anyway; only the id could not be read
+            // back from it. "could not create ...; left where it is" said the
+            // opposite of what happened and is why the folder was never
+            // found and moved into: say plainly that it exists.
             if (!out.detail)
-                out.detail = "could not create " + (req.comicsName || "Comics") + "; left where it is"
+                out.detail = (req.comicsName || "Comics") + " was created but its id could not be read"
             return out
         }
         under = comicsId
@@ -90,7 +99,7 @@ function sortDocuments(api, req) {
         out.folderId = create(api, under, out.folderName, out)
         if (!out.folderId) {
             if (!out.detail)
-                out.detail = "could not create the folder " + out.folderName + "; left where it is"
+                out.detail = "the folder " + out.folderName + " was created but its id could not be read"
             return out
         }
     }
