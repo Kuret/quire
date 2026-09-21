@@ -257,7 +257,7 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		return nil, err
 	}
 
-	var out []theme.SeriesStub
+	var candidates []searchCandidate
 	// Search results render as tab items; a few skins use the same inner
 	// markup inside a plain .row, so match on the inner .post-title anchor
 	// rather than on the container.
@@ -267,16 +267,40 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if !ok {
 			return
 		}
-		id := t.seriesID(s, href)
+		id := t.relativeID(s, href)
 		if id == "" {
 			return
 		}
-		out = append(out, theme.SeriesStub{
-			ID:       id,
-			Title:    theme.Text(link),
-			CoverURL: theme.ImageURL(sel.Find("img").First()),
+		candidates = append(candidates, searchCandidate{
+			id:    id,
+			title: theme.Text(link),
+			cover: theme.ImageURL(sel.Find("img").First()),
 		})
 	})
+
+	// A search results page also links to tags, genres and authors from inside
+	// the very same markup this loop matches — .post-title is not unique to a
+	// series link. mangaSubPath used to be trusted to say which segment is the
+	// real one, but that default ("manga") is only ever right for a site that
+	// never renamed it, and two real installs (toonily.com's "/serie/",
+	// allporncomic.com's "/porncomic/") rename it to something a fixed default
+	// or a per-host guess could never anticipate, discarding every result and
+	// making a working search read as "this site has nothing" (found live,
+	// 2026-09-21).
+	//
+	// The fix asks the page itself rather than the config: whichever first path
+	// segment the majority of candidates share *is* the site's series segment,
+	// evidence found fresh on every request rather than assumed once. A tag or
+	// author link mixed into the same batch is outvoted, because a real result
+	// page has many more series links than decoys.
+	seg := dominantSegment(candidates)
+	var out []theme.SeriesStub
+	for _, c := range candidates {
+		if seg != "" && firstSegment(c.id) != seg {
+			continue
+		}
+		out = append(out, theme.SeriesStub{ID: c.id, Title: c.title, CoverURL: c.cover})
+	}
 	return out, nil
 }
 

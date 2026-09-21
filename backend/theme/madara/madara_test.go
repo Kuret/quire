@@ -130,6 +130,46 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+// The failure the real prober found on 2026-09-21: two live madara installs
+// fingerprinted confidently and then searched to zero results, because their
+// series links sit under a path segment ("/serie/", "/porncomic/") that is
+// neither the "manga" default nor a documented common rename, and no
+// override exists yet to tell a fresh probe what it is. Search must work
+// this out from the response itself rather than from a preconfigured guess.
+func TestSearchFindsResultsWhenTheSubPathIsRenamedWithNoOverrideSet(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /": {File: "search-renamed-subpath.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+
+	// siteA carries no mangaSubPath override, so the resolved default is
+	// "manga" — which does not appear anywhere in this fixture.
+	got, err := th.Search(context.Background(), siteA(), "lantern", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/toons/the-lantern-keeper/",
+		"/toons/salt-and-cedar/",
+		"/toons/paper-lanterns-of-the-ninth-ward/",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d results, want %d: %+v", len(got), len(want), got)
+	}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("result %d ID = %q, want %q", i, got[i].ID, id)
+		}
+	}
+	// The taxonomy decoy under the sibling segment "/toons-genre/" must lose
+	// the vote and never appear.
+	for _, r := range got {
+		if strings.HasPrefix(r.ID, "/toons-genre/") {
+			t.Errorf("taxonomy decoy leaked into results: %+v", r)
+		}
+	}
+}
+
 func TestSearchBuildsTheWordPressQuery(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /":        {File: "search.html"},

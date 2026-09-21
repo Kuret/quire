@@ -38,23 +38,50 @@ func (t *Theme) seriesPath(s *theme.Source, id string) string {
 	return "/" + o.PathSegment(KeyMangaSubPath) + "/" + strings.Trim(id, "/") + "/"
 }
 
-// seriesID converts a link found on a page into a stored series ID, rejecting
-// anything that does not look like a series permalink on this site.
-func (t *Theme) seriesID(s *theme.Source, href string) string {
-	rel := t.relativeID(s, href)
-	if rel == "" {
-		return ""
+// searchCandidate is a search result before the dominant-segment filter has
+// had a chance to say whether it is a series or a decoy (a tag, genre or
+// author link the same markup also carries).
+type searchCandidate struct {
+	id    string
+	title string
+	cover string
+}
+
+// firstSegment returns the first path segment of a site-relative ID, or ""
+// for a bare "/".
+func firstSegment(id string) string {
+	trimmed := strings.TrimPrefix(id, "/")
+	if i := strings.IndexByte(trimmed, '/'); i >= 0 {
+		return trimmed[:i]
 	}
-	o, err := spec.Resolve(s.Overrides)
-	if err != nil {
-		return rel
+	return trimmed
+}
+
+// dominantSegment picks the path segment the most candidates agree on, which
+// is the theme's evidence-based stand-in for "the site's series path" — see
+// the long comment at Search's call site for why a configured or guessed
+// default cannot do this job. Ties keep whichever segment was seen first, so
+// the result is deterministic for a given response.
+func dominantSegment(candidates []searchCandidate) string {
+	counts := map[string]int{}
+	var order []string
+	for _, c := range candidates {
+		seg := firstSegment(c.id)
+		if seg == "" {
+			continue
+		}
+		if _, seen := counts[seg]; !seen {
+			order = append(order, seg)
+		}
+		counts[seg]++
 	}
-	// A search page also links to chapters, authors and tags. Requiring the
-	// series segment is what keeps those out of the results.
-	if seg := o.PathSegment(KeyMangaSubPath); seg != "" && !strings.HasPrefix(rel, "/"+seg+"/") {
-		return ""
+	best, bestN := "", 0
+	for _, seg := range order {
+		if counts[seg] > bestN {
+			best, bestN = seg, counts[seg]
+		}
 	}
-	return rel
+	return best
 }
 
 // relativeID reduces an href to a site-relative path, or "" if it points off

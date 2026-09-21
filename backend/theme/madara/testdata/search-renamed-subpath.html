@@ -1,0 +1,126 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the *other* search skin the plugin ships: a
+  .page-listing-item wrapping several .page-item-detail cards, rather than
+  the .c-tabs-item__content list in testdata/search.html. Real installs use
+  either shape depending on the theme skin layered on top of the plugin.
+
+  It also reproduces a second, separate fact found live on 2026-09-21 while
+  investigating a "recognised the site, then searched to zero results" report
+  (PLAN §9): two real installs answer this query with their series links under
+  a path segment that is neither the "manga" default nor one of the documented
+  common renames ("series", "comics") — one used "/serie/", the other
+  "/porncomic/". mangaSubPath exists precisely for this, but a probe has no
+  override configured yet, so Search() cannot be told the answer in advance;
+  it has to work it out from the response in front of it. This fixture's
+  series links all sit under "/toons/", invented here the same way every
+  other path in this file is, to prove that guess is unnecessary: the segment
+  the majority of candidates agree on wins, and the one item under a
+  different segment — a decoy exactly like the "manga-tag" one in
+  testdata/search.html, just spelled to match this fixture's renamed
+  vocabulary — loses the vote and is dropped, with no mangaSubPath override
+  set at all.
+
+  Why synthetic: see testdata/search.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search Results for "lantern" &#8211; Example Reader</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/madara/css/style.css">
+</head>
+<body class="search search-results post-type-archive-wp-manga">
+<div class="wrap">
+  <div class="site-content">
+    <div class="tab-content-wrap">
+      <div class="c-tabs-item">
+        <div class="page-content-listing">
+          <div class="page-listing-item">
+            <div class="row row-eq-height">
+
+              <div class="col-6 col-sm-3 col-lg-2">
+                <div class="page-item-detail manga">
+                  <div class="item-thumb c-image-hover">
+                    <a href="https://example.invalid/toons/the-lantern-keeper/" title="The Lantern Keeper">
+                      <img width="175" height="238"
+                           src="https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-175x238.jpg"
+                           class="img-responsive" alt="The Lantern Keeper">
+                    </a>
+                  </div>
+                  <div class="item-summary">
+                    <div class="post-title">
+                      <h3 class="h5">
+                        <a href="https://example.invalid/toons/the-lantern-keeper/">The Lantern Keeper</a>
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-6 col-sm-3 col-lg-2">
+                <div class="page-item-detail manga">
+                  <div class="item-thumb c-image-hover">
+                    <a href="https://example.invalid/toons/salt-and-cedar/" title="Salt and Cedar">
+                      <img width="175" height="238"
+                           src="https://example.invalid/wp-content/uploads/2026/02/salt-cedar-175x238.jpg"
+                           class="img-responsive" alt="Salt and Cedar">
+                    </a>
+                  </div>
+                  <div class="item-summary">
+                    <div class="post-title">
+                      <h3 class="h5">
+                        <a href="https://example.invalid/toons/salt-and-cedar/">Salt and Cedar</a>
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-6 col-sm-3 col-lg-2">
+                <div class="page-item-detail manga">
+                  <div class="item-thumb c-image-hover">
+                    <a href="https://example.invalid/toons/paper-lanterns-of-the-ninth-ward/" title="Paper Lanterns of the Ninth Ward">
+                      <img width="175" height="238"
+                           src="https://example.invalid/wp-content/uploads/2026/03/ninth-ward-175x238.jpg"
+                           class="img-responsive" alt="Paper Lanterns of the Ninth Ward">
+                    </a>
+                  </div>
+                  <div class="item-summary">
+                    <div class="post-title">
+                      <h3 class="h5">
+                        <a href="https://example.invalid/toons/paper-lanterns-of-the-ninth-ward/">Paper Lanterns of the Ninth Ward</a>
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- A taxonomy archive under a sibling segment this same rename
+                   produced ("toons-genre", the way "manga" becomes
+                   "manga-genre" in testdata/search.html). It is the minority
+                   segment and must be filtered out without any override
+                   telling Search() so. -->
+              <div class="col-6 col-sm-3 col-lg-2">
+                <div class="page-item-detail manga">
+                  <div class="item-summary">
+                    <div class="post-title">
+                      <h3 class="h5">
+                        <a href="https://example.invalid/toons-genre/fantasy/">Everything tagged Fantasy</a>
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
