@@ -222,18 +222,63 @@ QtObject {
                 // create() already rejects rather than to a plausible-
                 // looking wrong string.
                 var resolvedParent = parent === "" ? parent : handoff.entryId(parent)
-                var raw = Library.createCollection(resolvedParent, name)
+
+                // `createCollection`'s return value alone has never yielded a
+                // usable id on hardware (see the log this scaffolding
+                // produced: "with no id member"), even though the folder is
+                // genuinely created. `Library.collectionCreated` is the
+                // second route: a signal that looks like it is meant to
+                // carry the new collection. Qt signal connections made from
+                // QML/JS are direct connections when emitter and receiver
+                // share a thread, so a signal raised synchronously inside
+                // createCollection's own call stack fires this handler
+                // before createCollection returns — captured has already
+                // been set by the time the `finally` below disconnects it.
+                // Verified against Qt's own semantics rather than assumed;
+                // if a future OS ever made this emission queued/async
+                // instead, `captured` would simply stay unset here and this
+                // falls straight through to the existing (already-handled)
+                // failure path below — nothing here blocks or waits for it.
+                var captured
+                var haveCaptured = false
+                var onCollectionCreated = function (created) {
+                    haveCaptured = true
+                    captured = created
+                }
+                Library.collectionCreated.connect(onCollectionCreated)
+                var raw
+                try {
+                    raw = Library.createCollection(resolvedParent, name)
+                } finally {
+                    Library.collectionCreated.disconnect(onCollectionCreated)
+                }
+
                 var id = Sorting.extractId(raw)
+                if (!id && haveCaptured)
+                    id = Sorting.extractId(captured)
+
                 // TODO(scaffolding): remove once folder creation is confirmed
                 // working on 3.28. Two device round-trips have already gone
-                // into this call; this line is what will say, from the next
-                // one, whether extractId guessed the return shape right,
-                // instead of a third blind guess.
+                // into this call; these lines are what will say, from the
+                // next one, whether extractId guessed the return shape (and
+                // now the signal's shape) right, instead of a third blind
+                // guess. The member enumeration is the same technique that
+                // settled what Library itself exposes (docs/QMD-NOTES.md):
+                // if `raw`/`captured` is an object, list its own member
+                // names and their typeof rather than only noting "id" is
+                // missing, so the next log says what shape it actually is.
                 console.log("[quire] createCollection returned " + typeof raw +
                             (raw !== null && typeof raw === "object"
                                 ? (("id" in raw) ? " with an id member" : " with no id member")
                                 : "") +
                             "; extracted id=\"" + id + "\"")
+                console.log("[quire] createCollection return value members: " +
+                            handoff.describeMembers(raw))
+                console.log("[quire] collectionCreated " +
+                            (haveCaptured
+                                ? "delivered " + typeof captured + "; members: " +
+                                  handoff.describeMembers(captured)
+                                : "did not fire during the call"))
                 return id
             },
             // Both sides resolved, for the same reason: the destination is an
@@ -244,6 +289,30 @@ QtObject {
                                               handoff.entryId(folderId))
             }
         }, req)
+    }
+
+    // describeMembers lists an object's own member names and their typeof,
+    // the same technique the earlier `Library` probe used (`for (var k in
+    // value)`) to find what the shipped binary's meta-object table got
+    // wrong twice already. Guarded because enumerating an arbitrary device
+    // object is exactly the kind of thing that has surprised this project
+    // before, and a probe log line must never itself be what crashes the
+    // handoff.
+    //
+    // TODO(scaffolding): remove alongside the createFolder logging above
+    // once createCollection's and collectionCreated's shapes are confirmed
+    // on 3.28.
+    function describeMembers(value) {
+        if (value === undefined || value === null || typeof value !== "object")
+            return "(" + typeof value + ", not an object)"
+        try {
+            var out = []
+            for (var k in value)
+                out.push(k + ":" + typeof value[k])
+            return out.length ? out.join(", ") : "(no enumerable own members)"
+        } catch (e) {
+            return "(could not enumerate: " + String(e) + ")"
+        }
     }
 
     // entryIds maps document uuids to the ids the controller acts on.

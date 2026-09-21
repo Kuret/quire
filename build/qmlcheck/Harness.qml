@@ -1878,6 +1878,36 @@ Window {
         win.want("and the reason says where it landed",
                  res.detail.indexOf("rather than") >= 0, true)
 
+        // createFolder returning "" without throwing and without landing at
+        // the wrong parent — the shape the owner's device actually hit on
+        // 3.28.0.172: createCollection ran, the folder was genuinely made,
+        // but its id could not be read back. The old generic wording
+        // ("could not create ...; left where it is") said the opposite of
+        // what happened and is why an orphan folder was left behind on every
+        // retry. This is the wording fix, not a claim that createFolder
+        // itself changed — see ui/ReaderHandoff.qml for the device side,
+        // which this harness cannot load (it imports xofm.libs.library).
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, createReturnsNothing: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a bare empty return moves nothing", res.moved.length, 0)
+        win.want("the document stays in Comics", dev.parents["doc-1"], "comics")
+        win.want("and the reason says the folder was created",
+                 res.detail.indexOf("was created but its id could not be read") >= 0, true)
+        win.want("not the old could-not-create wording",
+                 res.detail.indexOf("could not create") >= 0, false)
+        win.want("not the old left-where-it-is wording",
+                 res.detail.indexOf("left where it is") >= 0, false)
+
+        // The same wording applies to the Comics folder itself, since both
+        // go through the same create() and the same fallback message.
+        dev = fakeDevice({ parents: { "doc-1": "" }, createReturnsNothing: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "", folderName: "Wandance",
+            createComics: true, comicsName: "Comics"})
+        win.want("Comics returning no id says the same thing",
+                 res.detail.indexOf("was created but its id could not be read") >= 0, true)
+
         // Nothing to sort is not an error.
         dev = fakeDevice({})
         res = Sorting.sortDocuments(dev, { documentUuids: [], folderName: "Wandance" })
