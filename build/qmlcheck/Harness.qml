@@ -1722,7 +1722,10 @@ Window {
             return {
                 log: [],
                 parents: parents,
-                parentOf: function (id) { return parents[id] === undefined ? "" : parents[id] },
+                parentOf: function (id) {
+                    if (o.parentOfThrows) throw new Error("gone")
+                    return parents[id] === undefined ? "" : parents[id]
+                },
                 createFolder: function (parent, name) {
                     this.log.push("create(" + parent + "," + name + ")")
                     if (o.createThrows) throw new Error("no")
@@ -1788,12 +1791,32 @@ Window {
         win.want("and the reason says where it landed",
                  res.detail.indexOf("rather than") >= 0, true)
 
-        // Creation refused outright.
+        // Creation refused outright. This is what the owner's device hit on
+        // 3.28: createFolder threw, and until now create()'s catch discarded
+        // the reason — the backend log had only the generic fallback and
+        // nobody could tell a throw from a folder landed at the wrong parent.
         dev = fakeDevice({ parents: { "doc-1": "comics" }, createThrows: true })
         res = Sorting.sortDocuments(dev, {
             documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
         win.want("a create that throws moves nothing", res.moved.length, 0)
         win.want("and leaves the document where it was", dev.parents["doc-1"], "comics")
+        win.want("and the reason names what the device threw",
+                 res.detail.indexOf("threw Error: no") >= 0, true)
+        win.want("not the generic fallback",
+                 res.detail.indexOf("left where it is") >= 0, false)
+
+        // The read-back after a create can itself throw — a second silent
+        // catch this file used to have. The thrown reason must win over the
+        // generic "left where it is" fallback, the same as a create() that
+        // throws outright.
+        dev = fakeDevice({ parents: { "doc-1": "comics" }, parentOfThrows: true })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "comics", folderName: "Wandance"})
+        win.want("a parent read-back that throws creates nothing usable", res.moved.length, 0)
+        win.want("and the reason names what the read-back threw",
+                 res.detail.indexOf("threw Error: gone") >= 0, true)
+        win.want("not the generic fallback either",
+                 res.detail.indexOf("left where it is") >= 0, false)
 
         // The move that returns quietly and changes nothing — the failure this
         // whole file is written around.

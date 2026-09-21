@@ -137,26 +137,45 @@ function create(api, parent, name, out) {
     try {
         id = api.createFolder(parent, name)
     } catch (e) {
+        // Previously discarded: the caller only saw the generic "could not
+        // create X; left where it is" fallback and never learned why. This is
+        // the case that hit the owner's device on 3.28 — createFolder threw,
+        // and the thrown reason is the one fact that was missing from the
+        // backend log.
+        out.detail = "creating " + name + " under " + describe(parent) +
+                     " threw " + String(e)
         return ""
     }
     if (!id)
         return ""
 
-    var landed = parentOf(api, id)
+    // parentOf can itself have recorded a thrown reason below; the "rather
+    // than" sentence is more specific whenever it applies, but must not paper
+    // over a read-back that threw with the same fallback wording it exists to
+    // replace.
+    var landed = parentOf(api, id, out)
     if (landed !== parent) {
-        out.detail = name + " was created under " + describe(landed) +
-                     " rather than " + describe(parent)
+        if (!out.detail)
+            out.detail = name + " was created under " + describe(landed) +
+                         " rather than " + describe(parent)
         return ""
     }
     out.created = true
     return id
 }
 
-function parentOf(api, id) {
+// `out` is optional: the per-document read-back in sortDocuments' verification
+// loop does not pass one, because that loop already assigns out.detail once,
+// unconditionally, after every document has been checked — a reason recorded
+// here would only be overwritten there, so it is not worth threading through
+// a call that cannot use it. See the comment above that loop.
+function parentOf(api, id, out) {
     try {
         var p = api.parentOf(id)
         return p === undefined || p === null ? "" : String(p)
     } catch (e) {
+        if (out && !out.detail)
+            out.detail = "reading " + id + "'s parent threw " + String(e)
         return ""
     }
 }
