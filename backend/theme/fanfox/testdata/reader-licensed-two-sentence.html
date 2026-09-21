@@ -1,0 +1,54 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the *other* wording this family's mobile reader uses for a
+  licensed series: two short sentences, rather than reader-licensed.html's
+  single connected phrase. Observed live against a real mangahere.cc chapter
+  on 2026-09-21; the series and site names below are placeholders, but the
+  two-sentence shape and its vocabulary are the site's own template, not
+  invented.
+
+  Deliberately not quoted verbatim up here in the comment: the words this
+  fixture exists to exercise appear once, in the body text below, so that a
+  regression in the regex that is supposed to find them there is what makes
+  the test in fanfox_test.go fail — not an accidental second copy sitting in
+  this comment.
+
+  This exists because licensedRE originally matched only the one-phrase form
+  and missed this one, which is exactly the failure the live probe hit: a
+  200 with an honest "no" that Pages() mis-reported as "no page images in
+  the reader" instead of recognising it as a licensing notice.
+
+  Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Salt and Cinder</title>
+</head>
+<body>
+
+<header>
+  <div class="mangaread-title">V01 Ch006</div>
+</header>
+
+<section class="main">
+  <div class="also-like">
+    <div>The series Salt and Cinder has been licensed. It's not available in Example Comics.</div>
+    <div class="also-list-title">You may also like</div>
+    <ul class="manga-list">
+      <li>
+        <div class="post">
+          <a href="//m.example.invalid/manga/the_lantern_keeper/">
+            <span class="cover"><img src="https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc" /></span>
+            <span class="title">The Lantern Keeper</span>
+          </a>
+        </div>
+      </li>
+    </ul>
+  </div>
+</section>
+
+</body>
+</html>

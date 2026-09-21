@@ -146,9 +146,19 @@ func (t *Theme) ID() string { return ID }
 // The wildcard form is the honest one here — the hosts are shard labels
 // (`zjcdn`, `fmcdn`) and the apexes serve nothing — and PLAN §1.3's exception
 // for image hosts is what permits naming them at all.
+//
+// Confirmed live on mangahere.cc on 2026-09-21: pages come from
+// `zjcdn.mangahere.org` and covers from `fmcdn.mangahere.com` — a different
+// pair of legacy apexes than `mangafox.me`/`mfcdn.net` reads. Those two are
+// kept rather than replaced: nothing here rules out another site in this
+// family still serving from them, and a host declaration can only be too
+// narrow, never too permissive in a way that matters — PLAN §7.4 already
+// refuses everything not on the list.
 var imageHosts = []string{
 	"*.mangafox.me",
 	"*.mfcdn.net",
+	"*.mangahere.com",
+	"*.mangahere.org",
 }
 
 // AllowedHosts implements theme.Theme.
@@ -456,7 +466,15 @@ func volumeAndNumber(path string) (volume string, number float64) {
 
 // licensedRE matches the notice a licensed series' reader serves in place of
 // its images.
-var licensedRE = regexp.MustCompile(`(?i)licensed and not available`)
+//
+// The wording has changed since this was first written — live in 2026-09 the
+// notice reads "has been licensed. It's not available in MangaHere." rather
+// than the older "licensed and not available" — so this matches "licensed"
+// followed, within a short span, by "not available" rather than one fixed
+// phrase. That covers both the sentence this theme originally shipped for and
+// the two-sentence form the site serves today without also matching an
+// unrelated page that happens to use one of the two words on its own.
+var licensedRE = regexp.MustCompile(`(?is)licensed.{0,120}?not available`)
 
 // Pages implements theme.Theme.
 //

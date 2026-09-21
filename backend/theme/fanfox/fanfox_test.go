@@ -310,6 +310,30 @@ func TestALicensedSeriesSaysSoRatherThanReturningNothing(t *testing.T) {
 	}
 }
 
+// The site's other wording for the same notice: two sentences ("has been
+// licensed" ... "not available") rather than reader-licensed.html's single
+// phrase. Observed live against mangahere.cc on 2026-09-21 — this is the
+// wording licensedRE originally missed, which is why Pages() reported the
+// generic "no page images" failure instead of recognising the licence
+// notice for what it was.
+func TestALicensedSeriesInTheOtherWordingSaysSoToo(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /roll_manga/salt_and_cinder/v01/c006/1.html": {File: "reader-licensed-two-sentence.html"},
+	})
+	th := fanfox.NewWithClock(f, clock)
+
+	_, err := th.Pages(context.Background(), site(), "/manga/salt_and_cinder/v01/c006/1.html")
+	if err == nil {
+		t.Fatal("Pages returned no error for a chapter the site serves no images for")
+	}
+	if !strings.Contains(err.Error(), "licensed") {
+		t.Errorf("error %q does not say why; the user cannot tell this from a bug", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "challenge") {
+		t.Errorf("error %q calls this a challenge; it is a 200 and an honest no", err)
+	}
+}
+
 // PLAN §7.6: the Referer must name a page this theme actually fetched — here
 // the mobile reader page, built by the same call Pages() uses.
 func TestPageRefererNamesTheReaderPageThatWasFetched(t *testing.T) {
@@ -347,6 +371,29 @@ func TestEveryDeclaredHostIsANarrowWildcard(t *testing.T) {
 		}
 		if strings.Count(h, ".") < 2 {
 			t.Errorf("host %q is too broad", h)
+		}
+	}
+}
+
+// The image CDN apexes confirmed live against mangahere.cc on 2026-09-21:
+// pages come from mangahere.org and covers from mangahere.com. Both are
+// distinct from mangafox.me/mfcdn.net, which this theme also still declares
+// (PLAN §7.4 only makes a list more permissive, never less, by adding to it),
+// so this only asserts the new pair is present rather than that the old pair
+// is gone.
+func TestDeclaredHostsIncludeTheLiveImageCDNs(t *testing.T) {
+	hosts := fanfox.New(nil).AllowedHosts()
+	want := []string{"*.mangahere.com", "*.mangahere.org"}
+	for _, w := range want {
+		found := false
+		for _, h := range hosts {
+			if h == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("AllowedHosts() = %v, missing %q", hosts, w)
 		}
 	}
 }
