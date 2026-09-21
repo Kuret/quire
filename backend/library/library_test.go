@@ -424,6 +424,76 @@ func TestPlaceWithoutComicsFallsBackAndSaysSo(t *testing.T) {
 	}
 }
 
+// A book goes flat into Books, exactly as a comic goes flat into Comics — but
+// there is no per-title nesting to prefer, because PlaceBook takes no title at
+// all. That absence is the point: nobody can hand PlaceBook a title expecting
+// a subfolder, because there is no parameter for one.
+func TestPlaceBookIsFlatIntoBooks(t *testing.T) {
+	f := newFake(library.Entry{ID: "books", Parent: "", Type: library.Collection, VisibleName: "Books"})
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	place, err := lib.PlaceBook(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !place.Complete() {
+		t.Fatalf("missing %v; Books must not need a subfolder to be complete", place.Missing)
+	}
+	if place.FolderID != "books" {
+		t.Errorf("folder %q, want books", place.FolderID)
+	}
+	if len(place.Path) != 1 || place.Path[0] != library.BooksFolder {
+		t.Errorf("path %v, want exactly [Books]", place.Path)
+	}
+	if place.Remedy() != "" {
+		t.Errorf("remedy %q, want none", place.Remedy())
+	}
+}
+
+// Even a folder living under Books that happens to share a book's title must
+// never be treated as its destination: PlaceBook resolves one name and stops,
+// so a per-title folder a user made by hand for some other reason is not
+// mistaken for where downloads go.
+func TestPlaceBookNeverNestsATitle(t *testing.T) {
+	f := newFake(
+		library.Entry{ID: "books", Parent: "", Type: library.Collection, VisibleName: "Books"},
+		library.Entry{ID: "novel", Parent: "books", Type: library.Collection, VisibleName: "An Example Book"},
+	)
+	lib := newLibrary(t, f, confWith(t, enabledConf))
+
+	place, err := lib.PlaceBook(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place.FolderID != "books" {
+		t.Errorf("folder %q, want books itself — never a subfolder under it", place.FolderID)
+	}
+	if len(place.Path) != 1 {
+		t.Errorf("path %v, want exactly one level", place.Path)
+	}
+}
+
+// No Books folder: the book still lands, at the top of My Files, and the user
+// is told the Books-specific way to fix it — never Comics' wording, and never
+// a refusal.
+func TestPlaceBookWithoutBooksFallsBackAndSaysSo(t *testing.T) {
+	lib := newLibrary(t, newFake(), confWith(t, enabledConf))
+
+	place, err := lib.PlaceBook(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place.FolderID != library.RootID {
+		t.Errorf("folder %q, want the root", place.FolderID)
+	}
+	if got := place.Missing; len(got) != 1 || got[0] != library.BooksFolder {
+		t.Fatalf("missing %v, want just Books", got)
+	}
+	if place.Remedy() != library.BooksRemedy {
+		t.Errorf("remedy %q, want the Books setup instruction", place.Remedy())
+	}
+}
+
 // The cap is on the multipart body and xochitl usually enforces it by resetting
 // the connection mid-transfer, so a body over it must never leave the process:
 // the alternative is wasting a 90 MB upload to learn what we already knew.

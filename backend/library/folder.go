@@ -33,6 +33,27 @@ const ComicsRemedy = "Quire keeps downloaded comics in a folder called " +
 	"My Files, make a folder called Comics and Quire will use it from then on. " +
 	"Until then downloads go to the top of My Files."
 
+// BooksFolder is where a downloaded book goes, flat — never a per-title
+// subfolder.
+//
+// A comic gets a per-series subfolder because one series can be dozens of
+// chapters; a book is one document, and a folder holding one document each is
+// not tidiness, it is a folder list as long as the library. So PlaceBook
+// resolves exactly this one level and nothing under it.
+const BooksFolder = "Books"
+
+// BooksRemedy is what the user is told when there is no Books folder and Quire
+// could not make one.
+//
+// Same shape as ComicsRemedy and for the same reason: it is no longer the
+// first thing they see, since Quire creates the folder itself, but it is still
+// the fallback for a creation that failed, and it is still something the user
+// can do on the tablet in a few seconds.
+const BooksRemedy = "Quire keeps downloaded books in a folder called " +
+	"“Books” on your reMarkable, and there isn’t one yet. On the tablet, in " +
+	"My Files, make a folder called Books and Quire will use it from then on. " +
+	"Until then downloads go to the top of My Files."
+
 // Placement is the answer to "where does this volume go".
 type Placement struct {
 	// FolderID is the deepest folder on the requested path that exists. It is
@@ -64,11 +85,17 @@ func (p Placement) Remedy() string {
 	if len(p.Path) > 0 {
 		where = "My Files → " + strings.Join(p.Path, " → ")
 	}
-	// The one case the user actually meets: they have not made Comics yet.
-	// Place never reports anything else missing, because the series subfolder
-	// is optional by design.
-	if len(p.Path) == 0 && len(p.Missing) == 1 && p.Missing[0] == ComicsFolder {
-		return ComicsRemedy
+	// The one case the user actually meets: they have not made Comics, or
+	// Books, yet. Place never reports anything else missing for a comic,
+	// because the series subfolder is optional by design, and PlaceBook never
+	// reports anything else at all, because a book has no second level.
+	if len(p.Path) == 0 && len(p.Missing) == 1 {
+		switch p.Missing[0] {
+		case ComicsFolder:
+			return ComicsRemedy
+		case BooksFolder:
+			return BooksRemedy
+		}
 	}
 	return fmt.Sprintf("The reMarkable has no folder %s yet. "+
 		"Create it on the tablet under %s and the next download will go there. "+
@@ -103,6 +130,23 @@ func (l *Library) Place(ctx context.Context, series string) (Placement, error) {
 		return nested, nil
 	}
 	return comics, nil
+}
+
+// PlaceBook decides where a downloaded book goes: flat into Books, and never
+// into a per-title subfolder — a book has no chapters to collect, so there is
+// nothing a subfolder would be for.
+//
+// It is Resolve of one name, not a parallel walk: Place's nesting (a second
+// Resolve for the series, falling back to the first) exists only because a
+// comic's subfolder is optional and worth preferring when it is there. A book
+// has no second level to prefer, so there is nothing here to duplicate.
+//
+// If Books itself is missing the book goes to the top of My Files and Remedy
+// says how to fix that for next time — the same non-refusal Place makes for a
+// comic, for the same reason: the file is already fetched, and a file in the
+// wrong place can be dragged into the right one.
+func (l *Library) PlaceBook(ctx context.Context) (Placement, error) {
+	return l.Resolve(ctx, BooksFolder)
 }
 
 // Resolve walks a folder path from the top level down, and reports how far it
