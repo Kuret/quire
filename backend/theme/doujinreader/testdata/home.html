@@ -1,0 +1,60 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape of this family's home/listing page, as read from three
+  live sites during development (see the package comment for what was
+  compared and what it showed). Every title, artist name and tag below is a
+  neutral placeholder invented for this fixture; the markup shape, attribute
+  names, class names, URL patterns and the ad-network snippet's own address
+  are the family's, unchanged, because those are what the parser is tested
+  against. Host is example.invalid (RFC 2606), and the site is otherwise
+  fictitious.
+
+  Deliberate variations exercised by the test:
+    - card #42 carries its title in a ".caption" element (the shape two of
+      the three real sites use)
+    - card #43 carries its title in a ".g_title" element instead, with an
+      empty alt on its thumbnail (the shape the third real site uses)
+    - card #43 also has a category anchor ("Doujinshi") ahead of the gallery
+      link, which must not be read as the gallery's own link or its title
+    - the ad-network snippet is the literal address the whole family embeds,
+      scored as a supporting signal rather than a decisive one
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Example Doujin Reader</title>
+</head>
+<body>
+  <form action="/search/?q=" method="GET">
+    <input type="text" name="q" value="">
+  </form>
+
+  <div class="listing">
+    <div class="gallery_item" data-tags="1 2 3" data-artists="9" data-languages="1" data-categories="1">
+      <a href="/g/42/">
+        <img class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/42/thumb.jpg" alt="">
+        <div class="caption">A Story About Nothing in Particular</div>
+      </a>
+    </div>
+    <div class="thumb" data-tags="4 5" data-artists="10" data-categories="1">
+      <div class="g_type">
+        <h3 class="g_cat"><a class="t_cat" href="/category/doujinshi/">Doujinshi</a></h3>
+      </div>
+      <div class="inner_thumb">
+        <a href="/g/43/"><img class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/43/thumb.jpg" alt="" /></a>
+      </div>
+      <div class="caption">
+        <h2 class="g_title"><a href="/g/43/">Second Sample Story, Side A</a></h2>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+  <!--//<![CDATA[
+    document.write ("<scr"+"ipt type='text/javascript' src='https://go.hentaigold.net/id/1/'><\/scr"+"ipt>");
+  //]]>-->
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. Reader page 3, the last
+  page of the same gallery as reader1.html. Uses img#gimg rather than #fimg —
+  the element ID one of the three sites compared uses, everything else about
+  it unchanged — so Pages() is exercised against both spellings across this
+  one gallery rather than only ever seeing one of them.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>A Story About Nothing in Particular - page 3</title></head>
+<body>
+  <div class="site-header">
+    <form action="/search/" method="GET">
+      <input type="text" name="q" value="">
+    </form>
+  </div>
+
+  <div class="full_image">
+    <input type="hidden" name="pages" id="pages" value="3" />
+    <a class="next_img"><img id="gimg" class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/42/3.png" alt="A Story About Nothing in Particular page 3 full" /></a>
+  </div>
+</body>
+</html>

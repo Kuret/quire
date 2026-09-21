@@ -37,6 +37,7 @@ import (
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/comick"
+	"github.com/rickl/quire/backend/theme/doujinreader"
 	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
@@ -505,6 +506,12 @@ func themeRegistry(client *fetch.Client) *theme.Registry {
 	reg.MustRegister(webtoons.New(client))
 	reg.MustRegister(fanfox.New(client))
 	reg.MustRegister(comick.New(client))
+	// A doujinshi/gallery-site family: one work is N images with no chapter
+	// list, so Chapters() answers with a single synthetic chapter holding
+	// every page. See the package comment for the live-site comparison that
+	// established this as one real family rather than three sites sharing a
+	// framework.
+	reg.MustRegister(doujinreader.New(client))
 	// The one theme whose chapters are finished files rather than page images
 	// (theme.FileTheme, 2026-09-20). It is registered exactly like the rest:
 	// what makes it different is downstream, in the download path — see

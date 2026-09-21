@@ -315,7 +315,7 @@ func TestEveryShippedThemeIsRegistered(t *testing.T) {
 
 	for _, id := range []string{
 		"madara", "mangathemesia", "mangakakalot", "mangadex", "weebcentral",
-		"webtoons", "fanfox", "comick", "generic",
+		"webtoons", "fanfox", "comick", "doujinreader", "generic",
 		// The file theme. A book source is unusable without it registered, and
 		// the symptom — "Quire doesn't recognise this site's layout" — names
 		// every other theme and gives no hint that this one exists.

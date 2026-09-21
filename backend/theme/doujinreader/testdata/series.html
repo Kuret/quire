@@ -1,0 +1,96 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. See home.html for the note
+  on placeholders and provenance.
+
+  Reproduces the gallery detail page: the single ".info" block carrying the
+  title and the whole taxonomy (tag/artist/group, each a link to
+  /{taxonomy}/{slug}/), the "load more thumbnails" AJAX contract
+  (load_id/load_dir, both real fields on all three sites compared), and a
+  cover image under ".cover".
+
+  Also carries the per-page thumbnail grid Pages() reads the reader's own
+  route from (see the package comment on why that route is discovered rather
+  than configured): every entry links straight to that page's reader.
+
+  Deliberate variations exercised by the test:
+    - a "Related Galleries" strip below carries its own /tag/ and /category/
+      links and its own data-tags card, which must not be picked up as this
+      gallery's own taxonomy or confused with the .info block
+    - the footer carries a sitewide "browse this tag" link, likewise outside
+      .info and likewise not this gallery's own tag
+    - one tag anchor nests a ".t_badge" count inside the same element the
+      family's "tag_btn" skin uses; another nests a ".tag_name" span the way
+      the family's other skin does — both must yield the bare name
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>A Story About Nothing in Particular - Example Doujin Reader</title>
+</head>
+<body>
+  <div class="site-header">
+    <form action="/search/" method="GET">
+      <input type="text" name="q" value="">
+    </form>
+  </div>
+
+  <div class="gallery_top">
+    <div class="gallery_left">
+      <div class="cover">
+        <img src="https://images.example.invalid/005/42/cover.jpg" alt="A Story About Nothing in Particular" />
+      </div>
+    </div>
+    <div class="gallery_right">
+      <div class="info">
+        <h1>A Story About Nothing in Particular</h1>
+        <ul class="tags">
+          <span class="i_text">Tags:</span>
+          <li><a class="tag_btn" href="/tag/placeholder-one/">placeholder one <span class="t_badge">100</span></a></li>
+          <li>
+            <a class="tag_btn" href="/tag/placeholder-two/">
+              <span class="tag_name">placeholder two</span>
+              <span class="tag_count">50</span>
+            </a>
+          </li>
+        </ul>
+        <ul class="artists">
+          <span class="i_text">Artists:</span>
+          <li><a class="tag_btn" href="/artist/sample-artist/">sample artist <span class="t_badge">3</span></a></li>
+        </ul>
+        <ul class="groups">
+          <span class="i_text">Group:</span>
+          <li><a class="tag_btn" href="/group/sample-circle/">sample circle <span class="t_badge">1</span></a></li>
+        </ul>
+        <input type="hidden" name="gallery_id" id="gallery_id" value="42" />
+        <input type="hidden" name="load_id" id="load_id" value="42" />
+        <input type="hidden" name="load_dir" id="load_dir" value="005" />
+        <input type="hidden" name="load_pages" id="load_pages" value="3" />
+      </div>
+    </div>
+  </div>
+
+  <div class="gallery_bottom">
+    <div class="gallery_thumb"><a href="/g/42/1/"><img data-src="https://images.example.invalid/005/42/1t.jpg" /></a></div>
+    <div class="gallery_thumb"><a href="/g/42/2/"><img data-src="https://images.example.invalid/005/42/2t.jpg" /></a></div>
+    <div class="gallery_thumb"><a href="/g/42/3/"><img data-src="https://images.example.invalid/005/42/3t.jpg" /></a></div>
+  </div>
+
+  <div class="related_galleries">
+    <h2 class="rlt_galleries">Related Galleries</h2>
+    <div class="rel_div">
+      <div class="thumb" data-tags="99" data-categories="1">
+        <a href="/g/999/"><img data-src="https://images.example.invalid/005/999/thumb.jpg" alt="Unrelated Other Story" /></a>
+      </div>
+    </div>
+    <a class="t_cat" href="/category/doujinshi/">Doujinshi</a>
+    <a href="/tag/unrelated-related-tag/">unrelated related tag</a>
+  </div>
+
+  <div class="bottom_footer">
+    <ul>
+      <li><a href="/tag/browse-everything/">Browse every tag</a></li>
+    </ul>
+  </div>
+</body>
+</html>

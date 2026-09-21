@@ -1,0 +1,44 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. See home.html for the note
+  on placeholders and provenance.
+
+  Deliberate variations exercised by the test:
+    - the single result card links to the gallery itself *and*, inside the
+      same card, to a page of it (a "keep reading" style link some skins add)
+      — the page link carries an extra numeric segment and must not be read
+      as a second, different gallery
+    - the card also carries a single-segment numeric link (a "#42" permalink
+      some skins add) ahead of the real one, which must not be read as a
+      gallery link either: a gallery link is always exactly two segments
+    - the thumbnail's own alt text is the title, and there is no .caption or
+      .g_title element at all, so the fallback path is what is exercised here
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Searching: sample - Example Doujin Reader</title>
+</head>
+<body>
+  <div class="site-header">
+    <form action="/search/" method="GET">
+      <input type="text" name="q" value="sample">
+    </form>
+  </div>
+
+  <div class="results">
+    <div class="preview_item" data-tags="1 6" data-artists="9" data-languages="1" data-categories="1">
+      <div class="cl">
+        <h3><a href="/category/doujinshi/">Doujinshi</a></h3>
+      </div>
+      <a href="/42/">#42</a>
+      <a href="/g/42/1/">Keep reading</a>
+      <div class="image">
+        <a href="/g/42/">
+          <img class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/42/thumb.jpg" alt="A Story About Nothing in Particular">
+        </a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

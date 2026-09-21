@@ -10,6 +10,7 @@ import (
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/comick"
+	"github.com/rickl/quire/backend/theme/doujinreader"
 	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
 	"github.com/rickl/quire/backend/theme/madara"
@@ -90,6 +91,12 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(comick.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// doujinreader is a gallery-site family: one work is N images with no chapter
+	// list. It must score 0 on every page below to ensure the fingerprint
+	// correctly distinguishes it from the other families.
+	if err := reg.Register(doujinreader.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	// shelfmark, added 2026-09-20, is the odd one out twice over: it drives a
 	// self-hosted book service rather than a comic site, and it is the only
 	// theme here whose instance can be at any address at all, so it has no
@@ -104,7 +111,7 @@ func newRegistry(t *testing.T) *theme.Registry {
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 9
+const scorers = 10
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -240,6 +247,26 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a comick home page",
 			file:       "comick/testdata/home.html",
 			wantWinner: comick.ID,
+		},
+		{
+			name:       "a doujinreader home page",
+			file:       "doujinreader/testdata/home.html",
+			wantWinner: doujinreader.ID,
+		},
+		{
+			name:       "a doujinreader series page",
+			file:       "doujinreader/testdata/series.html",
+			wantWinner: doujinreader.ID,
+		},
+		{
+			name:       "a doujinreader search page",
+			file:       "doujinreader/testdata/search.html",
+			wantWinner: doujinreader.ID,
+		},
+		{
+			name:       "a doujinreader reader page",
+			file:       "doujinreader/testdata/reader1.html",
+			wantWinner: doujinreader.ID,
 		},
 		{
 			name:       "a shelfmark instance's web shell",

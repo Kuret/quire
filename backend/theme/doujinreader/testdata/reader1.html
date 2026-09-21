@@ -1,0 +1,37 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. See home.html for the note
+  on placeholders and provenance.
+
+  Reader page 1 of a 3-page gallery: the full-resolution image lives in
+  img#fimg's data-src (lazy-loaded, so src itself is a placeholder), and the
+  gallery's total page count is repeated on every reader page in the same
+  input[name=pages] hidden field, which is where Pages() reads it from rather
+  than the gallery detail page.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>A Story About Nothing in Particular - page 1</title></head>
+<body>
+  <div class="site-header">
+    <form action="/search/" method="GET">
+      <input type="text" name="q" value="">
+    </form>
+  </div>
+
+  <div class="mid_rd">
+    <input type="hidden" name="pages" id="pages" value="3" />
+    <input type="hidden" name="image_dir" id="image_dir" value="005" />
+    <input type="hidden" name="gallery_id" id="gallery_id" value="42" />
+    <div class="reader_overlay preloader">
+      <div class="rd_fimg preloader">
+        <a class="fw_img">
+          <img id="fimg" class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/42/1.webp" alt="A Story About Nothing in Particular page 1 full">
+        </a>
+      </div>
+    </div>
+  </div>
+  <script type="text/javascript">
+  document.write ("<scr"+"ipt type='text/javascript' src='https://go.hentaigold.net/id/2/'><\/scr"+"ipt>");
+  </script>
+</body>
+</html>

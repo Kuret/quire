@@ -1,0 +1,29 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. See home.html for the note
+  on placeholders and provenance.
+
+  A minimal gallery detail page whose own reader lives under a *different*
+  path segment than the gallery itself — "/gallery/{id}/" for the detail page,
+  "/read/{id}/{n}/" for the reader — reproducing what was measured live on two
+  of the three real sites compared (each pairs its detail and reader routes
+  differently; see the package comment). Pages() has to read the reader's own
+  segment off this page's thumbnail grid rather than assume it matches.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>A Second Sample Gallery</title></head>
+<body>
+  <div class="info">
+    <h1>A Second Sample Gallery</h1>
+  </div>
+  <div class="related_galleries">
+    <!-- An unrelated gallery's own reader link, in a different segment, ahead
+         of this gallery's own grid — must not be mistaken for gallery 99's
+         reader route just because it is the first three-segment link seen. -->
+    <a href="/other/500/2/">Unrelated Other Gallery, page 2</a>
+  </div>
+  <div class="gallery_bottom">
+    <div class="gallery_thumb"><a href="/read/99/1/"><img data-src="https://images.example.invalid/007/99/1t.jpg" /></a></div>
+  </div>
+</body>
+</html>
