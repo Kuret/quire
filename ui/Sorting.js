@@ -1,14 +1,19 @@
 // Putting a finished download into its series folder — PLAN §6 M5, the
 // conclusion corrected 2026-09-17.
 //
-// The two calls this drives are xochitl's own, proven on hardware on both
-// 3.25 and 3.27:
+// The two calls this drives are xochitl's own. The create call has moved
+// twice: `Library.createCollectionWrapper` was proven on hardware on both
+// 3.25 and 3.27; on 3.28.0.172 it is gone outright (calling it throws
+// "is not a function", despite the name still sitting in that class's
+// meta-object table in the shipped binary — the binary misled twice, so a
+// live-object probe against the running device is what settled it).
+// `Library.createCollection` is what replaced it. Current as of 3.28:
 //
-//   Library.createCollectionWrapper(parentIdString, name)   -> new folder id
+//   Library.createCollection(parentIdString, name)   -> new folder id
 //   LibraryController.moveEntries([idString], destIdString)
 //
 // **Everything here is an id string, and an object where one belongs is
-// silently ignored.** An Entry in `createCollectionWrapper`'s parent slot puts
+// silently ignored.** An Entry in the create call's parent slot puts
 // the folder at the root — no throw, no complaint, just the wrong answer —
 // and `moveEntries([entry], entry)` moves nothing at all while returning
 // normally. That is why every folder made here has its parent read back before
@@ -182,6 +187,33 @@ function parentOf(api, id, out) {
 
 function describe(id) {
     return id === ROOT ? "the top of My Files" : id
+}
+
+// extractId pulls a usable id out of whatever a device create call handed
+// back. It is plain value-shape logic — no device types, so the offscreen
+// harness can drive it directly — even though the only caller today is
+// ReaderHandoff.qml's createFolder, translating createCollection's answer.
+//
+// The device's own return shape for a create call has moved before
+// (createCollectionWrapper answered with a plain uuid string on 3.25/3.27)
+// and createCollection's shape on 3.28 has never been observed on hardware:
+// a wrapper object exposing `id` — the convention this file already relies
+// on for entry ids — a bare string, or something else are all plausible.
+//
+// **An object with no usable `id` must not be stringified.** `String({})`
+// is `"[object Object]"` — truthy, plausible-looking, and wrong — and
+// create()'s only guard against a bad id is `if (!id) return ""`. So an
+// object is only ever read through its `id` member; anything else,
+// including an object without one, answers "" and lets that guard catch it.
+function extractId(value) {
+    if (value === undefined || value === null)
+        return ""
+    if (typeof value === "object") {
+        if (!("id" in value) || value.id === undefined || value.id === null)
+            return ""
+        return String(value.id)
+    }
+    return String(value)
 }
 
 // folderName is the series title as it will read on the tablet.

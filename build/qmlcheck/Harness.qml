@@ -1892,6 +1892,27 @@ Window {
                  Sorting.folderName(new Array(200).join("x")).length, 60)
         win.want("an empty title stays empty", Sorting.folderName(null), "")
 
+        // extractId: the defensive read of whatever a create call hands
+        // back. Not exercised through sortDocuments above, because by the
+        // time a fake device's createFolder returns, the value is already a
+        // string — this is the boundary ReaderHandoff.qml sits on, between
+        // the device's raw answer and the string create() requires.
+        win.want("a bare string passes through", Sorting.extractId("uuid-1"), "uuid-1")
+        win.want("an object's id member is taken", Sorting.extractId({ id: "uuid-2" }), "uuid-2")
+        // The wrapper convention this app already relies on elsewhere
+        // (entryIds/entryId): an id that is itself an object whose
+        // toString() is the uuid.
+        win.want("a wrapped id is stringified",
+                 Sorting.extractId({ id: { toString: function () { return "uuid-3" } } }),
+                 "uuid-3")
+        // The case mutation testing is aimed at: an object with no `id` at
+        // all must not fall through to String(value), which would produce
+        // the plausible-looking-but-wrong "[object Object]".
+        win.want("an object with no id member is unusable", Sorting.extractId({}), "")
+        win.want("an object with a null id is unusable", Sorting.extractId({ id: null }), "")
+        win.want("undefined is unusable", Sorting.extractId(undefined), "")
+        win.want("null is unusable", Sorting.extractId(null), "")
+
         // ---- reconciling with the tablet (PLAN §12.4) ----------------------
         //
         // The guard worth the most here is the one that says "I could not
