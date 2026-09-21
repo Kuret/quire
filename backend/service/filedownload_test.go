@@ -244,6 +244,13 @@ func TestABookIsUploadedWithoutTheImagePipeline(t *testing.T) {
 	th := &bookTheme{}
 	env := newBookService(t, th)
 
+	// Add a Books folder to the fake library for this test.
+	env.fake.mu.Lock()
+	env.fake.entries = append(env.fake.entries, library.Entry{
+		ID: "books", Parent: "", Type: library.Collection, VisibleName: "Books",
+	})
+	env.fake.mu.Unlock()
+
 	downloadTheBook(t, env.svc, env.rec)
 	done := waitForPhase(t, env.rec, "done")
 
@@ -322,15 +329,15 @@ func TestABookIsUploadedWithoutTheImagePipeline(t *testing.T) {
 		t.Errorf("record series title %q, want %q", got.SeriesTitle, bookTitle)
 	}
 
-	// It landed in the library like any other document.
+	// A book is filed flat into Books, not into Comics and not into a per-title subfolder.
 	parent := ""
 	for _, e := range entries {
 		if e.ID == got.DocumentUUID {
 			parent = e.Parent
 		}
 	}
-	if parent != "comics" {
-		t.Errorf("landed in %q, want the Comics folder", parent)
+	if parent != "books" {
+		t.Errorf("landed in %q, want the Books folder", parent)
 	}
 }
 

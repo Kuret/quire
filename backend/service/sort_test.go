@@ -19,6 +19,7 @@ type sortAsk struct {
 	ComicsName    string   `json:"comicsName"`
 	SourceID      string   `json:"sourceId"`
 	SeriesID      string   `json:"seriesId"`
+	Kind          string   `json:"kind"`
 }
 
 // downloadOneWith runs one chapter download against a library whose folders the

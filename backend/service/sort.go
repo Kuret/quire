@@ -25,6 +25,14 @@ type sortedRequest struct {
 	FolderName string `json:"folderName"`
 	Created    bool   `json:"created"`
 	Detail     string `json:"detail"`
+
+	// Kind is kindBook for the one-level Books ask (askToFileBook) and "" for
+	// an ordinary per-series ask (askToSort). Main.qml echoes it straight back
+	// off the request, the same way it already does sourceId and seriesId, so
+	// documentsSorted knows which shape of path to record without having to
+	// guess from folderName — a comic's series could, in principle, be titled
+	// "Books".
+	Kind string `json:"kind,omitempty"`
 }
 
 // maxFolderName caps the series title used as a folder name.
@@ -186,6 +194,41 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 	_ = send(out, appload.MessageSortDocuments, req)
 }
 
+// askToFileBook asks the frontend to put a downloaded book in the Books
+// folder, when the upload could not land it there directly because Books did
+// not exist yet.
+//
+// It is askToSort's Books equivalent and deliberately much smaller: a book
+// never gets a per-title subfolder (kindOf, library.PlaceBook), so there is
+// only the one level to ensure, no series lookup, and no folder id to
+// remember per series — once Books exists, PlaceBook resolves it by name on
+// the very next download and the upload lands there directly, with nothing
+// left to ask.
+func (s *Service) askToFileBook(ctx context.Context, out Sender, src, seriesID string,
+	uuids []string, place library.Placement) {
+
+	if s.library == nil || len(uuids) == 0 {
+		return
+	}
+	if place.Complete() {
+		// Books already existed, so the upload went straight into it. Nothing
+		// to move.
+		return
+	}
+
+	req := map[string]any{
+		"documentUuids": uuids,
+		"folderName":    library.BooksFolder,
+		"createUnder":   "",
+		"sourceId":      src,
+		"seriesId":      seriesID,
+		"kind":          kindBook,
+	}
+	s.log.Info("asking the frontend to make the Books folder", "series", seriesID)
+	s.markSorting(uuids)
+	_ = send(out, appload.MessageSortDocuments, req)
+}
+
 // documentsSorted records what the frontend managed to do.
 //
 // Only documents whose parent actually changed are recorded as being in the
@@ -199,7 +242,7 @@ func (s *Service) documentsSorted(req sortedRequest) error {
 
 	switch {
 	case len(req.Moved) == 0:
-		s.log.Info("a download was left in the Comics folder",
+		s.log.Info("a download was left where the upload landed it",
 			"series", req.SeriesID, "folder", req.FolderName, "why", req.Detail,
 			"documents", len(req.DocumentUUIDs))
 		return nil
@@ -207,6 +250,16 @@ func (s *Service) documentsSorted(req sortedRequest) error {
 		// Moved somewhere the frontend cannot name. Nothing to record, and
 		// nothing to be done about it from here.
 		s.log.Warn("documents moved into an unnamed folder", "series", req.SeriesID)
+		return nil
+	}
+
+	if req.Kind == kindBook {
+		// One level, not two: a book has no per-title subfolder, so its
+		// finished path is Books alone.
+		s.rememberFolder(req.Moved, req.FolderID, []string{library.BooksFolder})
+		s.log.Info("a downloaded book was filed into Books",
+			"id", req.FolderID, "moved", len(req.Moved), "of", len(req.DocumentUUIDs),
+			"created", req.Created, "detail", req.Detail)
 		return nil
 	}
 
@@ -263,7 +316,11 @@ func (s *Service) recordedFolder(sourceID, seriesID string) string {
 			continue
 		}
 		// Only a folder *inside* Comics counts. A record from before this
-		// existed points straight at Comics, which is not a series folder.
+		// existed points straight at Comics, which is not a series folder —
+		// and a filed book's path is Books alone, one name, so this also
+		// correctly says "no per-series folder" for a book without needing to
+		// ask what kind rec is. That is what keeps deleteSeries from ever
+		// treating the Books folder itself as a per-series folder to tidy up.
 		if rec.FolderUUID != "" && len(rec.FolderPath) == 2 {
 			return rec.FolderUUID
 		}
@@ -443,12 +500,26 @@ func (s *Service) pendingFor(uuids []string) chan struct{} {
 	return s.sorting[uuids[0]]
 }
 
-// sorted reports whether a record has a series folder recorded against it.
+// sorted reports whether a record is in its finished place and never needs
+// filing again.
 //
-// A record from before sorting existed points at Comics itself, with a path of
-// one name, and is not sorted. Two names mean Comics/<series>.
+// A comic's finished path is two names, Comics/<series>; a record from before
+// sorting existed points at Comics itself, one name, and is not sorted. A
+// book's finished path is one name, Books, and *is* sorted — matched by name
+// and not just by length, because both are one-element paths and only the
+// name says which is which. resortOnAttach only ever reaches a book through
+// this check if a future caller feeds it Books' own listing the way it feeds
+// Comics' today; until then inComics already excludes a book that landed
+// where it belongs. This is the second guard, not the only one.
 func sorted(rec library.Record) bool {
-	return rec.FolderUUID != "" && len(rec.FolderPath) == 2
+	switch len(rec.FolderPath) {
+	case 1:
+		return rec.FolderUUID != "" && rec.FolderPath[0] == library.BooksFolder
+	case 2:
+		return rec.FolderUUID != ""
+	default:
+		return false
+	}
 }
 
 // seriesTitleOf is the series name for a record, or "" when it cannot be known.

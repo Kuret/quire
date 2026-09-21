@@ -134,7 +134,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	}
 
 	step(phaseStoring, fmt.Sprintf("Putting %s in your reMarkable library…", name))
-	res, place, err := s.storeFile(ctx, series.Title, name, file)
+	res, place, err := s.storeFile(ctx, name, file)
 	if err != nil {
 		if cancelled(err) {
 			stopped()
@@ -177,8 +177,10 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	s.log.Info("book stored", "document", res.DocumentUUID, "folder", res.FolderUUID,
 		"name", res.VisibleName, "bytes", len(file))
 
-	// Into the series folder, by the same route a volume takes.
-	s.askToSort(ctx, out, src.ID, req.SeriesID, series.Title, []string{res.DocumentUUID}, place)
+	// A book has no per-title subfolder — see kindOf and library.PlaceBook —
+	// so the only thing left to ask the frontend for is the Books folder
+	// itself, and only when the upload could not land in it directly.
+	s.askToFileBook(ctx, out, src.ID, req.SeriesID, []string{res.DocumentUUID}, place)
 
 	p.DocumentUUID = res.DocumentUUID
 	p.FolderPath = place.Path
@@ -244,14 +246,16 @@ func (s *Service) fetchFile(ctx context.Context, src *theme.Source, rawurl strin
 // It is storeVolume for a document Quire did not build, and it is deliberately
 // the same in every respect that is not about the PDF: the same
 // not-cancellable-once-posted rule (see storeVolume for why abandoning the
-// read-back orphans a document), the same folder placement, the same timeout.
+// read-back orphans a document), the same timeout — except the folder
+// placement, which is PlaceBook rather than Place, because a book has no
+// per-title subfolder to prefer (see kindOf and library.PlaceBook).
 //
 // **The name is passed through verbatim.** library.Upload's own comment records
 // that xochitl appends ".pdf" only when the uploaded filename has no extension,
 // so "An Example Book (1970).epub" stays an epub — which is what makes the
 // device's reader paginate it (measured 2026-09-20). Anything that "tidied" the
 // extension here would turn a working book into a PDF that is not one.
-func (s *Service) storeFile(ctx context.Context, seriesTitle, name string, file []byte) (
+func (s *Service) storeFile(ctx context.Context, name string, file []byte) (
 	library.Result, library.Placement, error) {
 
 	ctx, release := context.WithTimeout(context.WithoutCancel(ctx), 3*library.DefaultTimeout)
@@ -260,7 +264,7 @@ func (s *Service) storeFile(ctx context.Context, seriesTitle, name string, file 
 	if err := s.library.EnsureReachable(ctx); err != nil {
 		return library.Result{}, library.Placement{}, err
 	}
-	place, err := s.library.Place(ctx, seriesTitle)
+	place, err := s.library.PlaceBook(ctx)
 	if err != nil {
 		return library.Result{}, library.Placement{}, err
 	}

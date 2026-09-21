@@ -113,6 +113,13 @@ func (s *Service) considerEmptyFolder(ctx context.Context, out Sender, sourceID,
 // record from before series folders existed points straight at Comics, and
 // Comics is never a series folder. folderVerdict guards that again by id; this
 // is the cheaper check that gets there first.
+//
+// A book's finished path is Books alone — one name, the same length as an
+// unfiled comic's — so this returns "" for a book exactly as it does for an
+// unsorted comic, and considerEmptyFolder never runs on the Books folder at
+// all. That is the guard PLAN's Books design relies on: there is no per-title
+// folder to ever be found empty, so the sweep never has an id to check
+// folderVerdict's "never Comics"-shaped guard against.
 func seriesFolderOf(rec library.Record) string {
 	if rec.FolderUUID != "" && len(rec.FolderPath) == 2 {
 		return rec.FolderUUID
