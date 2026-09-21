@@ -112,7 +112,7 @@ func TestStageFiveImageFetchIsGuarded(t *testing.T) {
 	res, err := prober.New(prober.Options{
 		Fetcher: client, Registry: reg, Guard: allowGuard{}, Now: clock,
 		NewID: func() string { return "src-test" },
-	}).Run(context.Background(), srv.URL, &recordUI{answers: []string{"continue", "continue"}})
+	}).Run(context.Background(), srv.URL, &recordUI{answers: []string{"cancel"}})
 	if err != nil {
 		t.Fatalf("probe returned an error: %v", err)
 	}

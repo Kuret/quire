@@ -2,6 +2,7 @@ package prober
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -313,7 +314,12 @@ func (r *run) capabilitySearch(ctx context.Context, th theme.Theme, src *theme.S
 // stageCapability exercises the whole path. Every step is attempted even after
 // an earlier one fails where that is still meaningful, so the report can say
 // what does work rather than only where it stopped.
-func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.Source) capability {
+//
+// It returns an error only when asking the user went wrong (a cancelled
+// context, a UI that went away) — the same meaning an error carries from every
+// other stage. A "no" answer to a question raised in here is not an error; it
+// is recorded on cap and read back through failure() like any other refusal.
+func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.Source) (capability, error) {
 	var cap capability
 	_, cap.fileBased = th.(theme.FileTheme)
 
@@ -324,14 +330,14 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	// theme, which is a question worth nothing until this one says yes.
 	cap.Confirm, cap.strongConfirmed = r.confirmTheme(ctx, th, src)
 	if !cap.Confirm.OK {
-		return cap
+		return cap, nil
 	}
 
 	stubs, note, searchEmpty := r.capabilitySearch(ctx, th, src)
 	if note != "" {
 		cap.Search.Note = note
 		cap.searchEmpty = searchEmpty
-		return cap
+		return cap, nil
 	}
 	cap.Search.OK = true
 	cap.Search.Count = len(stubs)
@@ -352,7 +358,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	if len(candidates) == 0 {
 		cap.Search.OK = false
 		cap.Search.Note = "the results had no titles Quire could follow."
-		return cap
+		return cap, nil
 	}
 
 	if cap.fileBased {
@@ -398,7 +404,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 
 			if cap.Chapters.OK {
 				cap.Release = fileSteps(chapters)
-				return cap
+				return cap, nil
 			}
 		}
 		// None of the candidates tried had anything. fileEmpty is only set
@@ -406,7 +412,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		// fetch failure along the way is a different problem and stays a
 		// plain refusal (see addableEmptyReleases).
 		cap.fileEmpty = allEmptyNoError
-		return cap
+		return cap, nil
 	}
 
 	// Page-based themes keep the single-candidate behaviour stage 5 has always
@@ -434,7 +440,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		cap.Chapters.Count = len(chapters)
 	}
 	if !cap.Chapters.OK {
-		return cap
+		return cap, nil
 	}
 
 	// The *newest* chapter, which is the last one now that PLAN §7.2 has
@@ -467,7 +473,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 		}
 	}
 	if !cap.Pages.OK {
-		return cap
+		return cap, nil
 	}
 
 	// One image, not a chapter. Proportionate — stage 5 already costs several
@@ -480,8 +486,8 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 			break
 		}
 	}
-	cap.Image, cap.Challenge, cap.ImageHost = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
-	return cap
+	cap.Image, cap.Challenge, cap.ImageHost, err = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
+	return cap, err
 }
 
 // confirmTheme runs theme.Confirmer's strong check, or passes when the theme
@@ -574,21 +580,23 @@ func fileSteps(chapters []theme.Chapter) stepResult {
 // "the probe's crawl" there without qualification: the user asked to add a
 // site, not for this image, and the probe is automated from the moment it
 // starts.
-func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.Source, chapterID, rawurl string) (stepResult, *challengeSignal, string) {
+//
+// One refusal is a question rather than a plain failure (added 2026-09-21):
+// the image host is off the source's registrable domain and was not already
+// declared — fetch.GuardError.OffDomain, set nowhere else. Most Madara sites
+// serve pages from a separate CDN and this was measured against one,
+// toonily.com: the fingerprint, search and series steps all pass and stage 5
+// then failed at the last step with no way for the user to say the CDN is
+// expected. See offerImageHost for the scope of what a "yes" buys.
+func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.Source, chapterID, rawurl string) (stepResult, *challengeSignal, string, error) {
 	var step stepResult
 	if rawurl == "" {
 		step.Note = "the chapter's image addresses were not usable."
-		return step, nil, ""
+		return step, nil, "", nil
 	}
 	host := ""
 	if u, err := url.Parse(rawurl); err == nil {
 		host = u.Hostname()
-	}
-
-	pol, err := src.Policy()
-	if err != nil {
-		step.Note = plainError(err)
-		return step, nil, host
 	}
 
 	// The Referer of the chapter page this image address came out of, when the
@@ -604,39 +612,111 @@ func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.
 		// A theme naming a page address Quire cannot use is a theme bug. Say
 		// so in the step note rather than inventing a substitute.
 		step.Note = plainError(err)
-		return step, nil, host
+		return step, nil, host, nil
 	}
 
-	resp, err := r.p.fetch.GetFrom(ctx, pol, rawurl, from)
+	// Tried up to twice: once as declared, and once more if the only reason it
+	// failed was the off-domain question above and the user said yes. asked
+	// stops a "yes" from being asked for twice were the second attempt to fail
+	// the same way, which fetch.Guard's re-run of CheckURL cannot do once the
+	// host is on src.AllowedHosts, but a defensive stop is one line and cheap.
+	asked := false
+	for {
+		pol, err := src.Policy()
+		if err != nil {
+			step.Note = plainError(err)
+			return step, nil, host, nil
+		}
+
+		resp, err := r.p.fetch.GetFrom(ctx, pol, rawurl, from)
+		if err != nil {
+			var ge *fetch.GuardError
+			if !asked && errors.As(err, &ge) && ge.OffDomain {
+				asked = true
+				granted, askErr := r.offerImageHost(ctx, host)
+				if askErr != nil {
+					return step, nil, host, askErr
+				}
+				if granted {
+					// Scoped to this one host, on this one source: appended to
+					// the draft's own AllowedHosts (theme.Source.Policy reads
+					// it fresh above), never widened to the CDN's registrable
+					// domain and never touched by any other source's guard.
+					// Lower-cased because that is the only form
+					// schema/source.schema.json's allowedHosts pattern
+					// accepts, and hostMatches already compares case-folded.
+					src.AllowedHosts = append(src.AllowedHosts, strings.ToLower(host))
+					continue
+				}
+			}
+			// The SSRF guard lives here, and its refusal is reported as
+			// itself — including a decline of the question just asked, which
+			// leaves this exact refusal standing rather than a generic
+			// "stopped" (see offerImageHost). A theme extracting images from
+			// a host it never declared in AllowedHosts is a theme bug, and
+			// naming the host is what makes it one someone can fix —
+			// guessing "challenge" instead would send the reader looking for
+			// a CAPTCHA that does not exist.
+			step.Note = plainError(err)
+			return step, nil, host, nil
+		}
+
+		page := probe.NewPage(nil, nil, resp.StatusCode, resp.Header, resp.Body)
+		if sig, found := r.challengeSignalFor(page, false); found {
+			return step, &sig, host, nil
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			// Not a bare code: a status the user can act on (PLAN §6 M3). The
+			// challenge check above has already run, so this is a plain refusal.
+			step.Note = fetch.StatusSentence("the image host", resp.StatusCode) + "."
+			return step, nil, host, nil
+		}
+		if !looksLikeImage(resp.Header.Get("Content-Type"), resp.Body) {
+			step.Note = "the image address returned a page, not an image."
+			return step, nil, host, nil
+		}
+
+		step.OK = true
+		step.Count = len(resp.Body)
+		return step, nil, host, nil
+	}
+}
+
+// offerImageHost is stage 5's other question (PLAN §7.5, added 2026-09-21):
+// a page image refused for exactly one reason, fetch.GuardError.OffDomain —
+// its host is a perfectly ordinary address, just outside the source's
+// registrable domain and not already in its declared allowedHosts.
+//
+// **A "yes" here is scoped to this one host, on this one source, and nothing
+// wider.** The caller appends the exact host string to the draft's own
+// AllowedHosts — not "*.host" and not the CDN's own registrable domain, so it
+// buys only what schema/source.schema.json documents an exact entry as
+// buying, matched by fetch's hostMatches. It is never read by any other
+// source's policy, and it never reaches checkAddress: the guard still refuses
+// a private, loopback, link-local or reserved address however the host that
+// carries it was named, because that check runs unconditionally after this
+// one and does not consult allowedHosts at all.
+//
+// A "no" leaves the refusal already in force standing, reported as itself —
+// the same choice offerSelfHosted makes for the same reason: nothing has been
+// granted, so nothing should be said to have happened beyond the refusal that
+// was always going to be reported.
+func (r *run) offerImageHost(ctx context.Context, host string) (bool, error) {
+	ans, err := r.ui.Ask(ctx, Question{
+		Kind: "imagehost",
+		Text: fmt.Sprintf("This site keeps its page images on a different address, %s, rather than its own. "+
+			"That's normal for sites that use a separate image server. Let Quire fetch images from %s for this source?",
+			host, host),
+		Options: []Option{
+			{ID: "cancel", Label: "No, stop"},
+			{ID: "continue", Label: "Yes, allow it"},
+		},
+	})
 	if err != nil {
-		// The SSRF guard lives here, and its refusal is reported as itself.
-		// A theme extracting images from a host it never declared in
-		// AllowedHosts is a theme bug, and naming the host is what makes it
-		// one someone can fix — guessing "challenge" instead would send the
-		// reader looking for a CAPTCHA that does not exist.
-		step.Note = plainError(err)
-		return step, nil, host
+		return false, err
 	}
-
-	page := probe.NewPage(nil, nil, resp.StatusCode, resp.Header, resp.Body)
-	if sig, found := r.challengeSignalFor(page, false); found {
-		return step, &sig, host
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// Not a bare code: a status the user can act on (PLAN §6 M3). The
-		// challenge check above has already run, so this is a plain refusal.
-		step.Note = fetch.StatusSentence("the image host", resp.StatusCode) + "."
-		return step, nil, host
-	}
-	if !looksLikeImage(resp.Header.Get("Content-Type"), resp.Body) {
-		step.Note = "the image address returned a page, not an image."
-		return step, nil, host
-	}
-
-	step.OK = true
-	step.Count = len(resp.Body)
-	return step, nil, host
+	return ans.ID == "continue", nil
 }
 
 // looksLikeImage trusts the declared type when there is one and sniffs when

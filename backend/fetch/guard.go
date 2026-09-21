@@ -43,6 +43,22 @@ type GuardError struct {
 	// VPN installs none), and the proxy that can reach it is exactly what the
 	// user would be offered.
 	Unresolved bool
+
+	// OffDomain marks the one ErrBlockedAddress refusal that checkDomain
+	// raises rather than checkAddress: the URL's host is a perfectly ordinary
+	// address, just not one within the source's registrable domain or its
+	// declared allowedHosts.
+	//
+	// It exists so a caller can tell this refusal apart from every other
+	// ErrBlockedAddress by structure rather than by matching Reason's text —
+	// text is for the person reading it, not for a caller deciding whether to
+	// offer a question, and a caller that matched on it would break the
+	// moment the wording changed. The probe uses it to raise its "allow this
+	// image host" question (PLAN §7.5 stage 5) for exactly this refusal and
+	// no other: a private, loopback or link-local address is never OffDomain,
+	// however it was named, because checkAddress runs after this check and is
+	// not consulted here at all.
+	OffDomain bool
 }
 
 func (e *GuardError) Error() string {
@@ -148,9 +164,10 @@ func (g *Guard) checkDomain(u *url.URL, p *Policy) error {
 		}
 	}
 	return &GuardError{
-		URL:    u.Redacted(),
-		Reason: fmt.Sprintf("leaves the source's domain %q; add it to allowedHosts if that is intended", RegistrableDomain(base)),
-		Kind:   ErrBlockedAddress,
+		URL:       u.Redacted(),
+		Reason:    fmt.Sprintf("leaves the source's domain %q; add it to allowedHosts if that is intended", RegistrableDomain(base)),
+		Kind:      ErrBlockedAddress,
+		OffDomain: true,
 	}
 }
 

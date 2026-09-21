@@ -121,10 +121,11 @@ type Progress struct {
 
 // Question is a point where PLAN §7.5 requires the user to decide rather than
 // the probe guessing: a redirect that left the domain they typed, two themes
-// too close to call, or an address that is only reachable if this is a service
-// of the user's own.
+// too close to call, an address that is only reachable if this is a service
+// of the user's own, or a page image served from a different domain than the
+// source itself.
 type Question struct {
-	// Kind is "redirect", "theme" or "selfhosted".
+	// Kind is "redirect", "theme", "selfhosted" or "imagehost".
 	Kind string `json:"kind"`
 
 	// Text is the whole question, in plain language.
@@ -440,7 +441,10 @@ func (r *run) exec(ctx context.Context, rawurl string) (Result, error) {
 	// Stage 5 — capability check.
 	r.start(StageCapability)
 	draft := r.draft(base, th)
-	cap := r.stageCapability(ctx, th, draft)
+	cap, err := r.stageCapability(ctx, th, draft)
+	if err != nil {
+		return Result{}, err
+	}
 	r.done(StageCapability, cap.summary())
 
 	// Stage 6 — accept.
