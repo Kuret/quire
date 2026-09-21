@@ -468,7 +468,35 @@ func (s *Service) resortOnAttach(ctx context.Context, out Sender) {
 			return
 		}
 		g := groups[key]
-		s.askToSort(ctx, out, g.source, g.series, g.title, g.uuids, library.Placement{})
+
+		switch s.kindForSource(g.source) {
+		case kindBook:
+			// askToFileBook only refuses to ask when place.Complete() — the
+			// upload landed straight in Books, nothing to move. Here the
+			// document is definitely *not* in Books (sorted() excluded that
+			// case before this group was ever built), so a zero-value
+			// Placement would be the wrong signal: Missing is nil, so
+			// Complete() reads true and the ask would be skipped, leaving
+			// the book stuck exactly where this pass exists to unstick it.
+			// A non-empty Missing is what tells askToFileBook there is
+			// still filing to do.
+			s.askToFileBook(ctx, out, g.source, g.series, g.uuids,
+				library.Placement{Missing: []string{library.BooksFolder}})
+		case kindManga:
+			s.askToSort(ctx, out, g.source, g.series, g.title, g.uuids, library.Placement{})
+		default:
+			// kindForSource returns "" when the source has been removed —
+			// see its own comment. Nothing left can say whether this was a
+			// book or a comic, and guessing wrong is worse than doing
+			// nothing either way: guessing comic reproduces today's exact
+			// bug for a book, and guessing book would take an unfinished
+			// multi-volume comic and hide it in a folder that offers no
+			// per-series grouping. Leaving the document where it is cannot
+			// make an already-orphaned record worse — it stays exactly as
+			// readable as it was — so that is the choice made here.
+			s.log.Info("leaving a download unfiled; its source is gone", "series", g.series)
+			continue
+		}
 
 		// Read *after* the ask: the mark is made by the ask, and asking is also
 		// where a group can be declined — no folder name, no library — in which

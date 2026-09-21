@@ -7,6 +7,7 @@ import (
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/service"
 )
 
 // attachWith builds a service whose library holds exactly these entries, puts
@@ -357,4 +358,190 @@ func TestARecordWithoutATitleStillUsesTheFilename(t *testing.T) {
 	if ask := waitForSort(t, rec); ask.FolderName != "The Lantern Keeper" {
 		t.Errorf("folderName %q, want the name split off the filename", ask.FolderName)
 	}
+}
+
+// unsortedBookRecord is a book download that landed before Books existed as a
+// concept: like every other download of that era it went into Comics flat,
+// which is exactly what makes it eligible for this pass \u2014 a record whose
+// FolderPath is Comics alone is "never sorted" regardless of what kind of
+// document it names (see sorted()).
+func unsortedBookRecord(uuid, name string) library.Record {
+	return library.Record{
+		Key:          library.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Volume: "abc123"},
+		DocumentUUID: uuid,
+		FolderUUID:   "comics",
+		FolderPath:   []string{"Comics"},
+		VisibleName:  name,
+	}
+}
+
+// attachWithBook is attachWith, but with a book source registered instead of
+// the manga one, since kindForSource has to find a real theme to answer
+// "book" rather than falling through to the manga default. It returns the
+// whole environment, not just the store, because a follow-up assertion needs
+// the service to answer the ask.
+func attachWithBook(t *testing.T, entries []library.Entry, recs ...library.Record) bookEnv {
+	t.Helper()
+	env := newBookService(t, &bookTheme{})
+	env.fake.mu.Lock()
+	env.fake.entries = append([]library.Entry(nil), entries...)
+	env.fake.mu.Unlock()
+
+	for _, rec := range recs {
+		if err := env.libStore.Put(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := env.svc.FrontendAttached(env.rec); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+// This is the bug from the field report: a book downloaded before books had
+// their own folder must be filed flat into Books on this pass, never asked
+// for a per-title subfolder the way a comic is.
+func TestAttachFilesABookThatWasNeverSortedIntoBooksFlat(t *testing.T) {
+	env := attachWithBook(t,
+		comicsWith(doc("d1", "An Example Book.epub", "comics")),
+		unsortedBookRecord("d1", "An Example Book.epub"))
+
+	ask := waitForSort(t, env.rec)
+	if ask.Kind != "book" {
+		t.Fatalf("kind %q, want book", ask.Kind)
+	}
+	if ask.FolderName != library.BooksFolder {
+		t.Errorf("folderName %q, want %q \u2014 a book gets no per-title subfolder",
+			ask.FolderName, library.BooksFolder)
+	}
+	if len(ask.DocumentUUIDs) != 1 || ask.DocumentUUIDs[0] != "d1" {
+		t.Errorf("asked about %v, want [d1]", ask.DocumentUUIDs)
+	}
+
+	// Answering as the frontend would for a book records the flat path, not a
+	// per-title one \u2014 this is documentsSorted's kindBook branch, exercised
+	// through the same pass that found the bug.
+	handle(t, env.svc, &recorder{}, appload.MessageDocumentsSorted, `{
+		"sourceId":"`+ask.SourceID+`","seriesId":"`+ask.SeriesID+`",
+		"documentUuids":["d1"],"moved":["d1"],"folderId":"books","folderName":"Books",
+		"created":true,"detail":"moved","kind":"book"}`)
+
+	for _, r := range env.libStore.List() {
+		if r.DocumentUUID != "d1" {
+			continue
+		}
+		if len(r.FolderPath) != 1 || r.FolderPath[0] != library.BooksFolder {
+			t.Errorf("recorded folder path %v, want [%s]", r.FolderPath, library.BooksFolder)
+		}
+	}
+}
+
+// The comic path on this exact pass must not have changed at all: a comic
+// still gets asked for Comics/<series>, never Books.
+func TestAttachStillFilesAComicIntoItsSeriesFolderOnThisPass(t *testing.T) {
+	_, rec := attachWith(t,
+		comicsWith(doc("d1", "The Lantern Keeper \u2014 Ch 0001.pdf", "comics")),
+		unsortedRecord("d1", "1", "The Lantern Keeper \u2014 Ch 0001.pdf"))
+
+	ask := waitForSort(t, rec)
+	if ask.Kind == "book" {
+		t.Fatalf("a comic was asked for as kind %q", ask.Kind)
+	}
+	if ask.FolderName != "The Lantern Keeper" {
+		t.Errorf("folderName %q, want the series title", ask.FolderName)
+	}
+	if ask.CreateUnder != "comics" {
+		t.Errorf("createUnder %q, want comics", ask.CreateUnder)
+	}
+}
+
+// A mixed batch \u2014 one book, one comic, both never sorted \u2014 must file each
+// through its own path in the same pass. The pass does one group at a time
+// (TestAttachFilesEachSeriesSeparately pins that), so the first group is
+// answered before the second is ever sent.
+func TestAttachFilesAMixedBatchEachThroughItsOwnPath(t *testing.T) {
+	env := newBookService(t, &bookTheme{})
+	env.fake.mu.Lock()
+	env.fake.entries = comicsWith(
+		doc("d1", "An Example Book.epub", "comics"),
+		doc("d2", "The Lantern Keeper \u2014 Ch 0001.pdf", "comics"))
+	env.fake.mu.Unlock()
+	addSource(t, env.store) // the manga source, alongside the book one newBookService added
+
+	comic := unsortedRecord("d2", "1", "The Lantern Keeper \u2014 Ch 0001.pdf")
+	for _, r := range []library.Record{unsortedBookRecord("d1", "An Example Book.epub"), comic} {
+		if err := env.libStore.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := env.svc.FrontendAttached(env.rec); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[string]sortAsk{}
+
+	first := waitForSort(t, env.rec)
+	seen[first.DocumentUUIDs[0]] = first
+	answerAsk(t, env.svc, first)
+
+	// The second group only appears once the first has been answered.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(seen) < 2 {
+		env.rec.mu.Lock()
+		for _, f := range env.rec.sent {
+			if f.Type != appload.MessageSortDocuments {
+				continue
+			}
+			var a sortAsk
+			if err := json.Unmarshal(f.Payload, &a); err == nil && len(a.DocumentUUIDs) == 1 {
+				seen[a.DocumentUUIDs[0]] = a
+			}
+		}
+		env.rec.mu.Unlock()
+		if len(seen) < 2 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("saw asks for %d document(s), want 2", len(seen))
+	}
+	if got := seen["d1"]; got.Kind != "book" || got.FolderName != library.BooksFolder {
+		t.Errorf("book asked for kind=%q folder=%q, want book/%s", got.Kind, got.FolderName, library.BooksFolder)
+	}
+	if got := seen["d2"]; got.Kind == "book" || got.FolderName != "The Lantern Keeper" {
+		t.Errorf("comic asked for kind=%q folder=%q, want comic/The Lantern Keeper", got.Kind, got.FolderName)
+	}
+}
+
+// answerAsk sends the documentsSorted reply an obedient frontend would give
+// for this ask, book or comic alike, so a test can move a resort pass on to
+// its next group without caring which shape this one was.
+func answerAsk(t *testing.T, svc *service.Service, ask sortAsk) {
+	t.Helper()
+	kind := ""
+	if ask.Kind == "book" {
+		kind = `,"kind":"book"`
+	}
+	handle(t, svc, &recorder{}, appload.MessageDocumentsSorted, `{
+		"sourceId":"`+ask.SourceID+`","seriesId":"`+ask.SeriesID+`",
+		"documentUuids":`+jsonList(ask.DocumentUUIDs)+`,
+		"moved":`+jsonList(ask.DocumentUUIDs)+`,
+		"folderId":"made-1","folderName":"`+ask.FolderName+`","created":true,"detail":"moved"`+kind+`}`)
+}
+
+// A record whose source has been removed has no kind left to ask about
+// (kindForSource returns "" \u2014 see its own comment). This pass's decision:
+// leave the document exactly where it is rather than guess. Guessing comic
+// reproduces the field bug for a book; guessing book would hide an
+// unfinished multi-volume comic in a folder with no per-series grouping.
+// Leaving it alone cannot make an already-orphaned record worse.
+func TestAttachLeavesARecordAloneWhenItsSourceIsGone(t *testing.T) {
+	vanished := unsortedRecord("d1", "1", "Some Vanished Source \u2014 Ch 0001.pdf")
+	vanished.Source = "no-such-source-anymore"
+
+	_, rec := attachWith(t, comicsWith(doc("d1", vanished.VisibleName, "comics")), vanished)
+
+	noSortSent(t, rec)
 }
