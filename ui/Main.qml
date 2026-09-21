@@ -301,6 +301,11 @@ Rectangle {
         var answer = Answers.sorted(root.bridge(), msg)
         answer.sourceId = msg.sourceId
         answer.seriesId = msg.seriesId
+        // Echoed straight off the request, the same as sourceId and seriesId:
+        // it says which of the two shapes of ask this was (a per-series
+        // folder, or the one-level Books folder), and Sorting.js has no reason
+        // to know or care about that distinction itself.
+        answer.kind = msg.kind ? msg.kind : ""
         root.send(Msg.DocumentsSorted, answer)
     }
 

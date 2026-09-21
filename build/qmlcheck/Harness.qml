@@ -1730,7 +1730,14 @@ Window {
                     var id = "made-" + (++made)
                     // The silent failure the device really has: an unusable
                     // parent is ignored and the folder lands at the root.
-                    parents[id] = o.createIgnoresParent ? "" : parent
+                    // createLandsAt says exactly where instead, for the case
+                    // where "ignored" and "root" are the same value and so
+                    // cannot stand for each other — asking for a folder under
+                    // ROOT itself.
+                    if (o.createLandsAt !== undefined)
+                        parents[id] = o.createLandsAt
+                    else
+                        parents[id] = o.createIgnoresParent ? "" : parent
                     return id
                 },
                 // One call, named documents, no selection: the library-level
@@ -1821,6 +1828,32 @@ Window {
         win.want("Comics is created when it is missing", dev.log[0], "create(,Comics)")
         win.want("and the series folder goes inside it", dev.log[1], "create(made-1,Wandance)")
         win.want("and the document lands in the series folder", dev.parents["doc-1"], "made-2")
+
+        // ---- the one-level Books folder (no per-title subfolder) -----------
+        //
+        // A book never gets a per-title subfolder, so there is no createComics
+        // step and no second create: Books is made straight under ROOT — the
+        // parent read-back check is the same create() used for every other
+        // folder, exercised here at the root rather than under Comics.
+        dev = fakeDevice({ parents: { "doc-1": "" } })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "", folderName: "Books"})
+        win.want("Books is created straight under the root", dev.log[0], "create(,Books)")
+        win.want("with no second create for a per-title folder", dev.log.length, 2)
+        win.want("and the document lands in Books", dev.parents["doc-1"], "made-1")
+
+        // The same silent failure as the series-folder case, but at the root:
+        // a Books folder the device put somewhere else must be refused, and
+        // nothing may be moved into it. Landed at "elsewhere" rather than at
+        // "" — the root and "ignored" would otherwise be the same value and
+        // the check would pass by accident.
+        dev = fakeDevice({ parents: { "doc-1": "" }, createLandsAt: "elsewhere" })
+        res = Sorting.sortDocuments(dev, {
+            documentUuids: ["doc-1"], folderId: "", createUnder: "", folderName: "Books"})
+        win.want("a Books folder at the wrong parent is not used", res.moved.length, 0)
+        win.want("the document stays where it was", dev.parents["doc-1"], "")
+        win.want("and the reason says where it landed",
+                 res.detail.indexOf("rather than") >= 0, true)
 
         // Nothing to sort is not an error.
         dev = fakeDevice({})
