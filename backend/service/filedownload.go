@@ -180,7 +180,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	// A book has no per-title subfolder — see kindOf and library.PlaceBook —
 	// so the only thing left to ask the frontend for is the Books folder
 	// itself, and only when the upload could not land in it directly.
-	s.askToFileBook(ctx, out, src.ID, req.SeriesID, []string{res.DocumentUUID}, place)
+	s.askToFileBook(ctx, out, src.ID, req.SeriesID, []string{res.DocumentUUID}, place, true)
 
 	p.DocumentUUID = res.DocumentUUID
 	p.FolderPath = place.Path

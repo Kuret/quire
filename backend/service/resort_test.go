@@ -531,6 +531,89 @@ func answerAsk(t *testing.T, svc *service.Service, ask sortAsk) {
 		"folderId":"made-1","folderName":"`+ask.FolderName+`","created":true,"detail":"moved"`+kind+`}`)
 }
 
+// The reported bug, pinned directly: Books already exists, so the re-filing
+// pass must never ask the frontend to create it. This is the regression test
+// for the duplicate "Books" folder created on every app open — the pass used
+// to fabricate a Placement saying Books was missing without ever checking.
+func TestAttachNeverAsksToCreateBooksWhenItAlreadyExists(t *testing.T) {
+	env := attachWithBook(t,
+		append(comicsWith(doc("d1", "An Example Book.epub", "comics")), booksFolder()),
+		unsortedBookRecord("d1", "An Example Book.epub"))
+
+	ask := waitForSort(t, env.rec)
+	if ask.CreateComics {
+		t.Error("asked to create Comics for a book")
+	}
+	if ask.CreateUnder != "" {
+		t.Errorf("createUnder %q, want empty — Books already exists, nothing is being created", ask.CreateUnder)
+	}
+	if ask.FolderID != "books" {
+		t.Errorf("folderId %q, want books — the document should be moved into the existing folder", ask.FolderID)
+	}
+	if ask.FolderName != library.BooksFolder {
+		t.Errorf("folderName %q, want %q", ask.FolderName, library.BooksFolder)
+	}
+}
+
+// The other half: Books genuinely does not exist yet, and the re-filing pass
+// must still ask for it to be created — the fix for the duplicate-folder bug
+// must not go so far as to silently skip a library with no Books at all.
+func TestAttachAsksToCreateBooksWhenItGenuinelyDoesNotExist(t *testing.T) {
+	env := attachWithBook(t,
+		comicsWith(doc("d1", "An Example Book.epub", "comics")),
+		unsortedBookRecord("d1", "An Example Book.epub"))
+
+	ask := waitForSort(t, env.rec)
+	if ask.FolderID != "" {
+		t.Errorf("folderId %q, want empty — there is nothing to move into yet", ask.FolderID)
+	}
+	if ask.CreateUnder != "" {
+		t.Errorf("createUnder %q, want empty — Books is never nested", ask.CreateUnder)
+	}
+	if ask.FolderName != library.BooksFolder {
+		t.Errorf("folderName %q, want %q", ask.FolderName, library.BooksFolder)
+	}
+}
+
+// A book whose document is sitting in Comics while Books already exists must
+// be asked to move, not skipped forever. Before this fix, askToFileBook's
+// place.Complete() early return conflated "the upload already landed there"
+// (true on the download path) with "Books exists" (true here too, but the
+// document is not in it) and silently dropped every such book.
+func TestAttachMovesABookIntoAnExistingBooksFolderRatherThanSkippingIt(t *testing.T) {
+	env := attachWithBook(t,
+		append(comicsWith(doc("d1", "An Example Book.epub", "comics")), booksFolder()),
+		unsortedBookRecord("d1", "An Example Book.epub"))
+
+	ask := waitForSort(t, env.rec)
+	if len(ask.DocumentUUIDs) != 1 || ask.DocumentUUIDs[0] != "d1" {
+		t.Fatalf("asked about %v, want [d1] — the book must not be skipped", ask.DocumentUUIDs)
+	}
+	if ask.Kind != "book" {
+		t.Errorf("kind %q, want book", ask.Kind)
+	}
+	if ask.FolderID != "books" {
+		t.Errorf("folderId %q, want books — the ask must name the folder that already exists", ask.FolderID)
+	}
+
+	// Answering as a real move would confirms the record ends up filed.
+	handle(t, env.svc, &recorder{}, appload.MessageDocumentsSorted, `{
+		"sourceId":"`+ask.SourceID+`","seriesId":"`+ask.SeriesID+`",
+		"documentUuids":["d1"],"moved":["d1"],"folderId":"books","folderName":"Books",
+		"created":false,"detail":"moved","kind":"book"}`)
+
+	for _, r := range env.libStore.List() {
+		if r.DocumentUUID != "d1" {
+			continue
+		}
+		if len(r.FolderPath) != 1 || r.FolderPath[0] != library.BooksFolder {
+			t.Errorf("recorded folder path %v, want [%s]", r.FolderPath, library.BooksFolder)
+		}
+		return
+	}
+	t.Fatal("no record for the book that moved")
+}
+
 // A record whose source has been removed has no kind left to ask about
 // (kindForSource returns "" \u2014 see its own comment). This pass's decision:
 // leave the document exactly where it is rather than guess. Guessing comic

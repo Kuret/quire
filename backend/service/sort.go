@@ -194,9 +194,8 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 	_ = send(out, appload.MessageSortDocuments, req)
 }
 
-// askToFileBook asks the frontend to put a downloaded book in the Books
-// folder, when the upload could not land it there directly because Books did
-// not exist yet.
+// askToFileBook asks the frontend to put a book in the Books folder, either
+// by creating it or, when it already exists, by moving the book into it.
 //
 // It is askToSort's Books equivalent and deliberately much smaller: a book
 // never gets a per-title subfolder (kindOf, library.PlaceBook), so there is
@@ -204,13 +203,27 @@ func (s *Service) askToSort(ctx context.Context, out Sender, src, seriesID, seri
 // remember per series — once Books exists, PlaceBook resolves it by name on
 // the very next download and the upload lands there directly, with nothing
 // left to ask.
+//
+// uploadedDirectly says whether place was just resolved immediately before an
+// upload that used it (storeFile's path): if so, place.Complete() means the
+// upload already landed in Books and there is nothing left to do. On the
+// re-filing pass this is always false, because that pass only ever reaches a
+// book that is *not* in Books yet — its own listing excluded that case before
+// this was ever called — so a complete placement there means "Books exists,
+// but this document is sitting somewhere else" and must still be asked for,
+// as a move into the folder that already exists rather than a request to
+// create one. Conflating the two — treating every complete placement as
+// "nothing to do" — is exactly what left a re-filed book stuck outside Books
+// forever; treating every incomplete one as "ask", including a fabricated
+// placement that never checked, is what asked to create Books on every
+// attach even though it already existed.
 func (s *Service) askToFileBook(ctx context.Context, out Sender, src, seriesID string,
-	uuids []string, place library.Placement) {
+	uuids []string, place library.Placement, uploadedDirectly bool) {
 
 	if s.library == nil || len(uuids) == 0 {
 		return
 	}
-	if place.Complete() {
+	if place.Complete() && uploadedDirectly {
 		// Books already existed, so the upload went straight into it. Nothing
 		// to move.
 		return
@@ -224,7 +237,16 @@ func (s *Service) askToFileBook(ctx context.Context, out Sender, src, seriesID s
 		"seriesId":      seriesID,
 		"kind":          kindBook,
 	}
-	s.log.Info("asking the frontend to make the Books folder", "series", seriesID)
+
+	if place.Complete() {
+		// Books exists but this document is not in it. Naming the folder id
+		// is what tells Sorting.js to move rather than create — it only
+		// creates when folderId comes back empty.
+		req["folderId"] = place.FolderID
+		s.log.Info("asking the frontend to move a book into the existing Books folder", "series", seriesID)
+	} else {
+		s.log.Info("asking the frontend to make the Books folder", "series", seriesID)
+	}
 	s.markSorting(uuids)
 	_ = send(out, appload.MessageSortDocuments, req)
 }
@@ -459,6 +481,17 @@ func (s *Service) resortOnAttach(ctx context.Context, out Sender) {
 
 	s.log.Info("filing downloads that were never sorted", "series", len(order))
 
+	// Resolved once for the whole pass, not once per group: Books is a single
+	// folder, so its placement does not vary from one book group to the next.
+	// This is the real answer to "does Books exist", which is what fixes the
+	// bug of asking to create it on every attach even when it already did —
+	// a fabricated Placement{Missing: [...]} used to stand in here instead
+	// and never actually checked.
+	booksPlace, booksErr := s.library.PlaceBook(ctx)
+	if booksErr != nil {
+		s.log.Info("could not check the Books folder on attach", "err", booksErr)
+	}
+
 	for _, key := range order {
 		if ctx.Err() != nil {
 			// The frontend went away. A request nobody is there to answer is
@@ -471,17 +504,20 @@ func (s *Service) resortOnAttach(ctx context.Context, out Sender) {
 
 		switch s.kindForSource(g.source) {
 		case kindBook:
-			// askToFileBook only refuses to ask when place.Complete() — the
-			// upload landed straight in Books, nothing to move. Here the
-			// document is definitely *not* in Books (sorted() excluded that
-			// case before this group was ever built), so a zero-value
-			// Placement would be the wrong signal: Missing is nil, so
-			// Complete() reads true and the ask would be skipped, leaving
-			// the book stuck exactly where this pass exists to unstick it.
-			// A non-empty Missing is what tells askToFileBook there is
-			// still filing to do.
-			s.askToFileBook(ctx, out, g.source, g.series, g.uuids,
-				library.Placement{Missing: []string{library.BooksFolder}})
+			if booksErr != nil {
+				// Could not even ask whether Books exists. Neither guess —
+				// "it does" or "it doesn't" — is honest, so this group is
+				// left for the next attach to try again, the same way a
+				// missing Comics folder leaves the whole pass for later.
+				s.log.Info("leaving a book unfiled; could not check Books", "series", g.series)
+				continue
+			}
+			// uploadedDirectly is false here: this pass only ever reaches a
+			// book that is *not* in Books yet (sorted() excluded that case
+			// before this group was ever built). So a complete booksPlace
+			// means "Books exists, move the document in", not "nothing to
+			// do" — see askToFileBook's doc comment.
+			s.askToFileBook(ctx, out, g.source, g.series, g.uuids, booksPlace, false)
 		case kindManga:
 			s.askToSort(ctx, out, g.source, g.series, g.title, g.uuids, library.Placement{})
 		default:
