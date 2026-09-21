@@ -180,7 +180,27 @@ QtObject {
                 return Library.parentIdForId(id)
             },
             createFolder: function (parent, name) {
-                return String(Library.createCollectionWrapper(parent, name))
+                // The same object-vs-string trap as entryIds/entryId below,
+                // confirmed against xochitl's own 3.28 QML: create-notebook-
+                // window.qml passes `currentFolderId` (the wrapper object)
+                // straight through to createDocument, and .toString()s it
+                // only where a string is wanted elsewhere in the same file.
+                // Sorting.js's parent is a plain uuid string — ROOT's own
+                // sentinel, "" — so it has to be resolved here the same way
+                // entryId() resolves a move destination, and the root
+                // sentinel must pass through unresolved: it does not name an
+                // entry, and there is nothing for entryId() to look up.
+                //
+                // Whether a root-level create (parent "") works at all on
+                // 3.28 is NOT verified. Every call site in xochitl's own QML
+                // requires a real parentFolderId and refuses to open without
+                // one (create-collection-window.qml:19-23), so there is no
+                // proof either way from the device's own code — only that
+                // xochitl itself never exercises this case. The exception
+                // recorded in Sorting.js's create() is what will say, from
+                // the next device log, whether this fails too.
+                var resolvedParent = parent === "" ? parent : handoff.entryId(parent)
+                return String(Library.createCollectionWrapper(resolvedParent, name))
             },
             // Both sides resolved, for the same reason: the destination is an
             // id the controller has to recognise too, and a folder uuid string
