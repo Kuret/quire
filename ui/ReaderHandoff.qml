@@ -156,9 +156,19 @@ QtObject {
     // sort puts a finished download in its series folder, and answers with what
     // actually happened.
     //
-    // The two calls are xochitl's, proven on hardware on 3.25 and again on 3.27:
+    // The create call has moved twice now. `Library.createCollectionWrapper`
+    // was proven on hardware on 3.25 and again on 3.27. On 3.28.0.172 it is
+    // gone outright — calling it throws `TypeError: ... is not a function`,
+    // even though the name still sits in that class's meta-object table in
+    // the shipped binary. A live-object probe run against the device (not
+    // the binary, which misled twice already) found `createCollection` in
+    // its place. That is a third distinct way this API has moved: first the
+    // module path (3.28, see the file comment), then an id's object-vs-
+    // string shape (below), and now the method's name disappearing under a
+    // name that still reads as present in static analysis. The two calls,
+    // current as of 3.28:
     //
-    //   Library.createCollectionWrapper(parentIdString, name)
+    //   Library.createCollection(parentIdString, name)
     //   LibraryController.moveEntries([idString], destinationIdString)
     //
     // **Everything is an id string, and an object where one belongs is accepted
@@ -199,8 +209,32 @@ QtObject {
                 // xochitl itself never exercises this case. The exception
                 // recorded in Sorting.js's create() is what will say, from
                 // the next device log, whether this fails too.
+                //
+                // `createCollection` replaces `createCollectionWrapper`
+                // (gone outright on 3.28.0.172; see the comment on sort()
+                // above). Its return shape has never been observed on
+                // hardware — a Collection*, a wrapper object, an id object,
+                // or a plain string are all plausible — so it is not
+                // stringified directly. Sorting.extractId takes an object's
+                // `id` member when there is one and the value itself
+                // otherwise, and answers "" for anything it cannot make
+                // sense of, so an unrecognised shape degrades to the id
+                // create() already rejects rather than to a plausible-
+                // looking wrong string.
                 var resolvedParent = parent === "" ? parent : handoff.entryId(parent)
-                return String(Library.createCollectionWrapper(resolvedParent, name))
+                var raw = Library.createCollection(resolvedParent, name)
+                var id = Sorting.extractId(raw)
+                // TODO(scaffolding): remove once folder creation is confirmed
+                // working on 3.28. Two device round-trips have already gone
+                // into this call; this line is what will say, from the next
+                // one, whether extractId guessed the return shape right,
+                // instead of a third blind guess.
+                console.log("[quire] createCollection returned " + typeof raw +
+                            (raw !== null && typeof raw === "object"
+                                ? (("id" in raw) ? " with an id member" : " with no id member")
+                                : "") +
+                            "; extracted id=\"" + id + "\"")
+                return id
             },
             // Both sides resolved, for the same reason: the destination is an
             // id the controller has to recognise too, and a folder uuid string
