@@ -133,7 +133,7 @@ func TestWifiDroppingMidVolumeLeavesNothingBroken(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 
 	failed := waitForPhase(t, rec, "failed")
 	if msg, _ := failed["message"].(string); msg == "" {
@@ -181,7 +181,7 @@ func TestASiteChangingShapeMidSeriesFailsHonestly(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 
 	failed := waitForPhase(t, rec, "failed")
 	msg, _ := failed["message"].(string)
@@ -244,7 +244,7 @@ func TestDeletingOnePartLeavesTheOthersReadable(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	fake.mu.Lock()

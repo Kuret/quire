@@ -31,7 +31,7 @@ func doneMessage(t *testing.T, mode string) map[string]any {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	return waitForPhase(t, rec, "done")
 }
 
@@ -74,7 +74,7 @@ func TestAnUnsplitDownloadSaysNothingAboutSplitting(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 
 	msg, _ := done["message"].(string)

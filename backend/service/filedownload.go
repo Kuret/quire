@@ -50,7 +50,11 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	th theme.Theme, ft theme.FileTheme, src *theme.Source) {
 
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-		Grouping: req.grouping()}
+		// Always "library": a book is unaffected by Destination (see
+		// downloadRequest.Destination and runDownload's dispatch to this
+		// path), so the echo says what actually happened rather than the
+		// wire value, which for an old frontend is empty.
+		Grouping: req.grouping(), Destination: destinationLibrary}
 
 	// The same helpers runDownload has, with one difference that matters: the
 	// cancelled wording. "The pages already downloaded are kept, so starting

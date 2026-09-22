@@ -224,7 +224,7 @@ func TestDownloadedPutsTheNewestSeriesFirst(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	// An older download of a different series.

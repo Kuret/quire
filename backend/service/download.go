@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/assemble"
@@ -19,6 +20,7 @@ import (
 	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/theme"
 )
 
@@ -65,6 +67,36 @@ type downloadRequest struct {
 	// hundred megabytes is not the UI saying what it is doing (PLAN §6 M3), so
 	// the first send answers with a question instead of starting work.
 	Confirmed bool `json:"confirmed"`
+
+	// Destination is "quire" or "library"; empty means "quire" (the design
+	// doc's default, reversed from the old always-upload behaviour). It is
+	// ignored for a theme.FileTheme source, which always goes to the library
+	// — a book is a document xochitl's own reader already handles, and Quire's
+	// reader is image-only.
+	Destination string `json:"destination,omitempty"`
+}
+
+// destinationQuire and destinationLibrary are the two values Destination may
+// carry over the wire. They are strings, not an enum with its own JSON
+// marshalling, because the wire contract pins the exact spelling and nothing
+// here needs more than a plain comparison.
+const (
+	destinationQuire   = "quire"
+	destinationLibrary = "library"
+)
+
+// destination is the request's destination with the default filled in: an
+// empty or unrecognised value resolves to Quire's own storage, never to the
+// library. That default is deliberate two ways round — an older frontend
+// that has never heard of the field must land its downloads exactly where
+// today's default says they go, and a value neither side named must not be
+// read as "upload it", which is the one destination a private source is
+// never allowed to reach silently.
+func (r downloadRequest) destination() string {
+	if r.Destination == destinationLibrary {
+		return destinationLibrary
+	}
+	return destinationQuire
 }
 
 // grouping is the request's grouping with the default filled in.
@@ -96,6 +128,19 @@ type downloadProgress struct {
 
 	// Message is ready to display, in plain language.
 	Message string `json:"message"`
+
+	// Destination echoes the request's resolved destination, "quire" or
+	// "library" (never empty, never the unresolved wire value) — so a row
+	// that asked for one can tell its own progress frames from another
+	// download's, and so the reader overlay knows which action to keep
+	// offering.
+	Destination string `json:"destination,omitempty"`
+
+	// Saved is true on the final "done" of a "quire" download: the chapter is
+	// in Quire's own storage, readable from OpenSaved, and never touched
+	// xochitl's library. Omitted (so it reads as absent, not false) on every
+	// other phase and on a "library" download.
+	Saved bool `json:"saved,omitempty"`
 
 	Series string `json:"series,omitempty"`
 	Title  string `json:"title,omitempty"`
@@ -137,6 +182,16 @@ type downloadProgress struct {
 	// can say "Volume 3" where the site does.
 	VolumeLabel string `json:"volumeLabel,omitempty"`
 }
+
+// PrivateSourceLibraryRefusal is what a private source is told when it asks
+// for the library destination.
+//
+// A private source exists so its content never reaches somewhere a family
+// member or a repair technician might browse — xochitl's library, above all.
+// "Send to library" is exactly that route, so it is refused outright rather
+// than merely not offered: a replayed message or an older frontend must not
+// be able to reach it either.
+const PrivateSourceLibraryRefusal = "Private sources are never put in your reMarkable library."
 
 // downloadJob is one queued request and the connection that asked for it.
 type downloadJob struct {
@@ -188,9 +243,10 @@ func (s *Service) cancelDownload(out Sender, req downloadRequest) error {
 
 	return send(out, appload.MessageDownloadProgress, downloadProgress{
 		SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-		Grouping: req.grouping(),
-		Phase:    phaseCancelled,
-		Message:  "Stopped.",
+		Grouping:    req.grouping(),
+		Destination: req.destination(),
+		Phase:       phaseCancelled,
+		Message:     "Stopped.",
 	})
 }
 
@@ -297,12 +353,44 @@ func claimKey(path string) string {
 // volume in the wrong folder. The queue is what makes "Enqueue" in the message
 // name true.
 func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadRequest) error {
-	if s.library == nil || s.libStore == nil {
-		return s.sendError(out, "unavailable",
-			"This build of Quire cannot save to the reMarkable's library.")
-	}
 	if req.SourceID == "" || req.SeriesID == "" || req.VolumeID == "" {
 		return s.sendError(out, "bad_request", "Quire needs a source, a series and a chapter to download.")
+	}
+
+	// A book always goes to the library, whatever the request asked for (see
+	// downloadRequest.Destination); everything else takes the destination the
+	// request named, defaulting to Quire's own storage. Looked up here, not
+	// only in runDownload, because it decides which of the two backing
+	// stores has to exist for this request to make sense at all.
+	th, src, err := s.themeFor(req.SourceID)
+	if err != nil {
+		return s.sendError(out, "not_found", plain(err))
+	}
+	_, isBook := th.(theme.FileTheme)
+	dest := req.destination()
+	if isBook {
+		dest = destinationLibrary
+	}
+
+	switch dest {
+	case destinationLibrary:
+		if s.library == nil || s.libStore == nil {
+			return s.sendError(out, "unavailable",
+				"This build of Quire cannot save to the reMarkable's library.")
+		}
+		// A private source is never put in the library, silently or
+		// otherwise (see the package comment and PLAN §2): the whole point
+		// of marking a source private is that nothing it names ever reaches
+		// xochitl's library, which the user's family or a repair technician
+		// can browse.
+		if src.IsPrivate() {
+			return s.sendError(out, "private_library", PrivateSourceLibraryRefusal)
+		}
+	default:
+		if s.shelfStore == nil || s.savedDir == "" {
+			return s.sendError(out, "unavailable",
+				"This build of Quire cannot save chapters in its own storage.")
+		}
 	}
 
 	if !req.Confirmed {
@@ -337,9 +425,10 @@ func (s *Service) offerToQueue(ctx context.Context, out Sender, req downloadRequ
 	case s.dlQueue <- downloadJob{out: out, req: req}:
 		_ = send(out, appload.MessageDownloadProgress, downloadProgress{
 			SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-			Grouping: req.grouping(),
-			Phase:    phaseQueued,
-			Message:  "Queued.",
+			Grouping:    req.grouping(),
+			Destination: req.destination(),
+			Phase:       phaseQueued,
+			Message:     "Queued.",
 		})
 		return true
 	default:
@@ -360,7 +449,7 @@ func (s *Service) offerToQueue(ctx context.Context, out Sender, req downloadRequ
 // was written for.
 func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequest) {
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-		Grouping: req.grouping()}
+		Grouping: req.grouping(), Destination: req.destination()}
 
 	th, src, err := s.themeFor(req.SourceID)
 	if err != nil {
@@ -467,8 +556,9 @@ func (s *Service) downloadWorker(ctx context.Context) {
 				_ = send(job.out, appload.MessageDownloadProgress, downloadProgress{
 					SourceID: job.req.SourceID, SeriesID: job.req.SeriesID,
 					VolumeID: job.req.VolumeID, Grouping: job.req.grouping(),
-					Phase:   phaseCancelled,
-					Message: "Stopped before it started.",
+					Destination: job.req.destination(),
+					Phase:       phaseCancelled,
+					Message:     "Stopped before it started.",
 				})
 				continue
 			}
@@ -481,7 +571,7 @@ func (s *Service) downloadWorker(ctx context.Context) {
 // PDF → the reMarkable library → a remembered UUID.
 func (s *Service) runDownload(parent context.Context, out Sender, req downloadRequest) {
 	p := downloadProgress{SourceID: req.SourceID, SeriesID: req.SeriesID, VolumeID: req.VolumeID,
-		Grouping: req.grouping()}
+		Grouping: req.grouping(), Destination: req.destination()}
 
 	ctx, done := s.beginDownload(parent, req.key())
 	defer done()
@@ -619,11 +709,31 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		})
 	}
 
-	dir := filepath.Join(s.downloadDir, safeSegment(src.ID), safeSegment(req.SeriesID))
+	// A "quire" download lands in Quire's own storage root rather than the
+	// download cache; a "library" download is unchanged. Both use the same
+	// layout under their own root — safeSegment(sourceID)/safeSegment(seriesID)
+	// as the dir download.Queue writes chapters into — which is what lets
+	// "Send to library" hard-link a saved chapter's files into the cache
+	// afterwards instead of refetching them (see seedCacheFromSaved).
+	destRoot := s.downloadDir
+	if req.destination() == destinationQuire {
+		destRoot = s.savedDir
+	}
+	dir := filepath.Join(destRoot, safeSegment(src.ID), safeSegment(req.SeriesID))
 
 	// Held for the rest of the run, so a delete or a cache clear landing
 	// mid-download leaves these pages alone and takes the rest.
 	defer s.claimChapters(dir, chs)()
+
+	// "Send to library" on a chapter already saved in Quire: hard-link (or,
+	// failing that, copy) its page files straight into the cache directory
+	// download.Queue is about to write into, so its skip-existing resume
+	// fetches nothing. The saved copy is untouched either way — this only
+	// ever adds files to the cache, never removes anything from the saved
+	// root.
+	if req.destination() == destinationLibrary {
+		s.seedCacheFromSaved(src.ID, req.SeriesID, dir, chs)
+	}
 
 	// The pages already on disk are left exactly where they are. Resume works
 	// by skipping files that exist (PLAN §6 M4), so cancelling at page 300 of
@@ -639,6 +749,11 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 		return
 	}
 	vol.Chapters = pages
+
+	if req.destination() == destinationQuire {
+		s.finishSavedDownload(out, &p, src.ID, req.SeriesID, series.Title, vol, stats)
+		return
+	}
 
 	// xochitl refuses a multipart body of 100 MB or more, and usually by
 	// resetting the connection most of the way through rather than answering
@@ -1493,4 +1608,196 @@ func (f *sourceFetcher) Get(ctx context.Context, rawurl, referer string) (io.Rea
 		return nil, fmt.Errorf("%s answered %d", rawurl, resp.StatusCode)
 	}
 	return io.NopCloser(bytes.NewReader(resp.Body)), nil
+}
+
+// finishSavedDownload records a "quire" download's chapters in the shelf store
+// and sends the final "done" progress.
+//
+// **One record per chapter, always** — even when the request asked for volume
+// grouping. There is no PDF here to give the volume a single identity, and a
+// saved chapter is exactly what OpenSaved names: a source, a series and a
+// chapter, resolved independently of whatever run happened to fetch it
+// alongside.
+func (s *Service) finishSavedDownload(out Sender, p *downloadProgress, sourceID, seriesID, seriesTitle string,
+	vol volumePlan, stats download.Stats) {
+
+	root, err := filepath.Abs(filepath.Clean(s.savedDir))
+	if err != nil {
+		root = s.savedDir
+	}
+
+	for _, ch := range vol.Chapters {
+		var bytes int64
+		pages := make([]string, 0, len(ch.Pages))
+		for _, pg := range ch.Pages {
+			if n, err := fileBytes(pg.Path); err == nil {
+				bytes += n
+			}
+			pages = append(pages, relativeToRoot(root, pg.Path))
+		}
+		rec := shelf.Record{
+			Key:          shelf.Key{Source: sourceID, Series: seriesID, Chapter: ch.ID},
+			SeriesTitle:  seriesTitle,
+			ChapterTitle: ch.Title,
+			Number:       parseChapterNumber(ch.Number),
+			Pages:        pages,
+			Bytes:        bytes,
+			SavedAt:      time.Now(),
+		}
+		if err := s.shelfStore.Put(rec); err != nil {
+			// The pages are on disk either way. Losing the record only costs
+			// OpenSaved's ability to find them, so say so rather than calling
+			// the whole download a failure — the same rule runDownload's
+			// library path applies to a lost document UUID.
+			s.log.Error("could not remember a saved chapter", "source", sourceID, "series", seriesID,
+				"chapter", ch.ID, "err", err)
+			p.Note = strings.TrimSpace(p.Note +
+				" Quire could not remember this chapter, so opening it from Quire may not work.")
+		}
+	}
+
+	n := len(vol.Chapters)
+	p.Phase = phaseDone
+	p.Saved = true
+	p.BytesStored = stats.BytesStored
+	switch {
+	case n == 1:
+		p.Message = capitalize(chapterLabel(vol.Chapters[0])) + " is saved in Quire."
+	default:
+		p.Message = fmt.Sprintf("%d chapters of Vol %s are saved in Quire.", n, vol.Label)
+	}
+	if line := splitSentence(stats); line != "" {
+		p.PagesSplit, p.PagesFromSplit = stats.PagesSplit, stats.PagesFromSplit
+		p.Message += " " + line
+	}
+	s.log.Info("chapters saved in Quire", "source", sourceID, "series", seriesID, "chapters", n)
+	_ = send(out, appload.MessageDownloadProgress, *p)
+}
+
+// seedCacheFromSaved hard-links (falling back to a copy) a saved chapter's
+// page files into the download cache directory the queue is about to write
+// into, for every chapter of chs that is already saved.
+//
+// This is the whole of what makes "Send to library" not a second fetch: both
+// s.savedDir and s.downloadDir lay a chapter out identically —
+// download.ChapterDir(seriesDir, chapterID), page files named by
+// backend/download's own queue — so a saved chapter's files are, byte for
+// byte, exactly the files an ordinary download of that chapter would produce.
+// Putting copies of them where the queue looks for existing pages is what its
+// own skip-existing resume needs to see nothing left to fetch (PLAN §6 M4).
+// The saved copy is never modified or removed by this.
+func (s *Service) seedCacheFromSaved(sourceID, seriesID, cacheSeriesDir string, chs []download.Chapter) {
+	if s.shelfStore == nil || s.savedDir == "" {
+		return
+	}
+	root, err := filepath.Abs(filepath.Clean(s.savedDir))
+	if err != nil {
+		return
+	}
+
+	for _, ch := range chs {
+		rec, ok := s.shelfStore.Get(shelf.Key{Source: sourceID, Series: seriesID, Chapter: ch.ID})
+		if !ok || len(rec.Pages) == 0 {
+			continue
+		}
+		dest := download.ChapterDir(cacheSeriesDir, ch.ID)
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			s.log.Warn("could not seed the cache from a saved chapter", "chapter", ch.ID, "err", err)
+			continue
+		}
+		for _, rel := range rec.Pages {
+			srcPath := filepath.Join(root, rel)
+			dstPath := filepath.Join(dest, filepath.Base(rel))
+			if _, err := os.Stat(dstPath); err == nil {
+				// Already there — a previous "Send to library" attempt, or an
+				// ordinary download that reached this page on its own.
+				continue
+			}
+			if err := os.Link(srcPath, dstPath); err == nil {
+				continue
+			}
+			// Cross-device or a filesystem that refuses hard links: fall back
+			// to a copy. Either way the saved original is only ever read.
+			if err := copyFile(srcPath, dstPath); err != nil {
+				s.log.Warn("could not seed a cache page from a saved chapter",
+					"chapter", ch.ID, "page", rel, "err", err)
+			}
+		}
+	}
+}
+
+// copyFile copies src to dst via a temp file and rename, so a page seeded
+// into the cache is never found half-written by the queue that is about to
+// read it.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".seed-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	committed := false
+	defer func() {
+		tmp.Close()
+		if !committed {
+			os.Remove(name)
+		}
+	}()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, dst); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+// relativeToRoot is path relative to root, or the absolute path when it
+// cannot be made relative — which should not happen for anything this package
+// writes itself, since every saved page path comes from a join under root.
+func relativeToRoot(root, path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return abs
+	}
+	return rel
+}
+
+// parseChapterNumber recovers the float a chapter's printed number came from.
+// An unparseable or empty number (a theme that named none) is 0, which is
+// indistinguishable from a real chapter 0 — the same ambiguity
+// shelf.Record.Number accepts because nothing here composes a sentence from
+// it; that is the service layer's job wherever it happens (PLAN §2).
+func parseChapterNumber(s string) float64 {
+	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// capitalize upper-cases the first rune of s, for a chapterLabel result used
+// at the start of a sentence — chapterLabel itself is written for the middle
+// of one ("Volume 3 of X is 4 chapters, chapter 1 to chapter 4").
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }

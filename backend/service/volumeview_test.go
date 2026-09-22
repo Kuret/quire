@@ -120,7 +120,7 @@ func TestADownloadedVolumeRowOffersRead(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	vols := volumesOf(t, svc, seriesID)
@@ -142,7 +142,7 @@ func TestAVolumeOfSeparatelyDownloadedChaptersStillOffersTheVolume(t *testing.T)
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	vols := volumesOf(t, svc, seriesID)
@@ -182,7 +182,7 @@ func TestAVolumeReusesPagesAlreadyDownloadedPerChapter(t *testing.T) {
 	// One chapter on its own first, the way sampling a series goes.
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 	afterChapter := len(imageReferers(t, f))
 	if afterChapter == 0 {
@@ -200,7 +200,7 @@ func TestAVolumeReusesPagesAlreadyDownloadedPerChapter(t *testing.T) {
 	second := &recorder{}
 	handle(t, svc, second, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, second, "done")
 
 	if after := imageFetchesFor(f, firstSlug); after != before {

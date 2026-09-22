@@ -24,6 +24,7 @@ import (
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/madara"
@@ -145,14 +146,38 @@ func downloadRoutes(t *testing.T) map[string]themetest.Route {
 	return r
 }
 
-func newDownloadService(t *testing.T) (*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
-	t.Helper()
-	return newDownloadServiceWith(t, downloadRoutes(t))
+// downloadHarness is everything buildDownloadHarness assembles, for the tests
+// that need more of it than the (svc, store, libStore, fake, rec) tuple most
+// of this file was written around — chiefly the "Saved in Quire" tests, which
+// need the shelf store and the saved-files root the tuple has no room for.
+type downloadHarness struct {
+	svc         *service.Service
+	store       *state.Store
+	libStore    *library.Store
+	shelfStore  *shelf.Store
+	fake        *fakeLibrary
+	fetcher     *themetest.Fetcher
+	savedDir    string
+	downloadDir string
 }
 
-func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
-	tweaks ...func(*service.Options)) (
-	*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
+// fetcherCalls is every request the theme made through the fake network, so a
+// test can prove a "Send to library" seeded from a saved chapter made no new
+// ones.
+func (h *downloadHarness) fetcherCalls() []themetest.Request {
+	return h.fetcher.Calls()
+}
+
+// buildDownloadHarness wires a Service with both backing stores a comic
+// download can land in: the reMarkable library (via fakeLibrary, an
+// in-process stand-in for xochitl's web interface) and Quire's own saved
+// storage. Both are always wired, even for a test only interested in one of
+// them, because the *first* message of a two-step download (the unconfirmed
+// "what does this cover?" ask) resolves a destination and is refused if that
+// destination's store does not exist — see enqueueDownload — and the default
+// destination is "quire".
+func buildDownloadHarness(t *testing.T, routes map[string]themetest.Route,
+	tweaks ...func(*service.Options)) *downloadHarness {
 	t.Helper()
 
 	f := themetest.New(t, routes)
@@ -169,6 +194,10 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
 	if err != nil {
 		t.Fatal(err)
 	}
+	shelfStore, err := shelf.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	fake := &fakeLibrary{entries: []library.Entry{
 		{ID: "comics", Parent: "", Type: library.Collection, VisibleName: "Comics"},
@@ -181,6 +210,8 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
 		t.Fatal(err)
 	}
 
+	downloadDir := filepath.Join(dir, "downloads")
+	savedDir := filepath.Join(dir, "saved")
 	opts := service.Options{
 		Store:      store,
 		Registry:   reg,
@@ -194,14 +225,32 @@ func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
 			AddAlias: func() error { return nil },
 		}),
 		LibraryStore: libStore,
-		DownloadDir:  filepath.Join(dir, "downloads"),
+		DownloadDir:  downloadDir,
+		SavedDir:     savedDir,
+		ShelfStore:   shelfStore,
 	}
 	for _, tweak := range tweaks {
 		tweak(&opts)
 	}
 	svc := service.New(opts)
 	t.Cleanup(svc.Close)
-	return svc, store, libStore, fake, &recorder{}
+	return &downloadHarness{
+		svc: svc, store: store, libStore: libStore, shelfStore: shelfStore, fake: fake, fetcher: f,
+		savedDir: savedDir, downloadDir: downloadDir,
+	}
+}
+
+func newDownloadService(t *testing.T) (*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
+	t.Helper()
+	return newDownloadServiceWith(t, downloadRoutes(t))
+}
+
+func newDownloadServiceWith(t *testing.T, routes map[string]themetest.Route,
+	tweaks ...func(*service.Options)) (
+	*service.Service, *state.Store, *library.Store, *fakeLibrary, *recorder) {
+	t.Helper()
+	h := buildDownloadHarness(t, routes, tweaks...)
+	return h.svc, h.store, h.libStore, h.fake, &recorder{}
 }
 
 func addSource(t *testing.T, store *state.Store) {
@@ -296,7 +345,7 @@ func TestDownloadEndsWithAStoredDocumentUUID(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 
 	done := waitForPhase(t, rec, "done")
 
@@ -365,7 +414,7 @@ func TestAMissingSeriesFolderIsNotWorthMentioning(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 
 	done := waitForPhase(t, rec, "done")
 	if note, _ := done["note"].(string); note != "" {
@@ -389,7 +438,7 @@ func TestDownloadWithoutComicsStillLandsAndSaysSo(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 
 	done := waitForPhase(t, rec, "done")
 	if uuid, _ := done["documentUuid"].(string); uuid == "" {
@@ -410,7 +459,7 @@ func TestDownloadStreamsProgress(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	seen := map[string]bool{}
@@ -507,7 +556,7 @@ func TestConfirmingRunsTheDownload(t *testing.T) {
 
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 }
 
@@ -520,7 +569,7 @@ func TestTheDocumentIsNamedSeriesAndVolume(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	fake.mu.Lock()
@@ -549,7 +598,8 @@ func TestAnUnorderedSeriesFallsBackToOnePDFPerChapter(t *testing.T) {
 	// One chapter is not a volume, so there is nothing to confirm: the
 	// download starts on the first tap.
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","destination":"library"}`)
 
 	done := waitForPhase(t, rec, "done")
 	note, _ := done["note"].(string)
@@ -586,7 +636,7 @@ func TestAnOversizedVolumeArrivesAsParts(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 
 	fake.mu.Lock()
@@ -707,7 +757,8 @@ func TestTheFirstTapDownloadsAChapterWithoutAsking(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	// No "confirmed":true. This is the first tap.
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","destination":"library"}`)
 
 	done := waitForPhase(t, rec, "done")
 	for _, m := range progressOf(t, rec) {

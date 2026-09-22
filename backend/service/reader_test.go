@@ -17,7 +17,7 @@ func TestSeriesDetailCarriesTheStoredUUID(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 
@@ -56,7 +56,7 @@ func TestOpeningAMissingDocumentForgetsIt(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 
@@ -91,7 +91,7 @@ func TestOpeningAPresentDocumentSaysNothing(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 

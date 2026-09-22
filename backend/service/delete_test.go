@@ -33,7 +33,7 @@ func TestTrashingADocumentForgetsItAndReclaimsThePDF(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 	pdf := recordFor(t, libStore, uuid).PDF
@@ -72,7 +72,7 @@ func TestAFailedTrashKeepsTheRecord(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 	pdf := recordFor(t, libStore, uuid).PDF
@@ -115,7 +115,7 @@ func TestDeletingOnePartLeavesTheOtherParts(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	before := libStore.List()
@@ -169,7 +169,7 @@ func TestDeletingAsksFirstAndNamesTheDocument(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 	name := recordFor(t, libStore, uuid).VisibleName
@@ -240,7 +240,7 @@ func TestATrashThatWillNotEmptyIsStillADelete(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 

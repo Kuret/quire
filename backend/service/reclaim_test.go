@@ -77,7 +77,7 @@ func TestDeletingADownloadRemovesItsCachedPages(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 
@@ -219,7 +219,7 @@ func TestReclaimingDoesNotChangeWhatTheUserIsTold(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	done := waitForPhase(t, rec, "done")
 	uuid, _ := done["documentUuid"].(string)
 

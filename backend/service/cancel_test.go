@@ -127,7 +127,7 @@ func TestCancelStopsADownloadMidFetch(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	body := `{"sourceId":"example-reader","seriesId":"` + seriesID + `","volumeId":"` + chapterID + `"`
-	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true}`)
+	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true,"destination":"library"}`)
 
 	stall.waitForStall(t)
 	handle(t, svc, rec, appload.MessageCancelDownload, body+`}`)
@@ -158,7 +158,7 @@ func TestCancelKeepsFetchedPagesAndLeavesNoPDF(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	body := `{"sourceId":"example-reader","seriesId":"` + seriesID + `","volumeId":"` + chapterID + `"`
-	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true}`)
+	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true,"destination":"library"}`)
 
 	stall.waitForStall(t)
 	handle(t, svc, rec, appload.MessageCancelDownload, body+`}`)
@@ -238,7 +238,7 @@ func TestCancelKeepsPartsAlreadyUploaded(t *testing.T) {
 	fake.onUpload = func() {
 		handle(t, svc, rec, appload.MessageCancelDownload, body+`}`)
 	}
-	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true}`)
+	handle(t, svc, rec, appload.MessageEnqueueDownload, body+`,"confirmed":true,"destination":"library"}`)
 
 	stop := waitForPhase(t, rec, "cancelled")
 	message, _ := stop["message"].(string)
@@ -275,7 +275,7 @@ func TestDetachingPausesADownload(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	stall.waitForStall(t)
 
 	svc.FrontendDetached(nil)
@@ -313,12 +313,12 @@ func TestDetachingDrainsTheQueue(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	stall.waitForStall(t)
 
 	queued := &recorder{}
 	handle(t, svc, queued, appload.MessageEnqueueDownload,
-		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"queued-one","confirmed":true}`)
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"queued-one","confirmed":true,"destination":"library"}`)
 
 	svc.FrontendDetached(nil)
 	waitForPhase(t, rec, "cancelled")

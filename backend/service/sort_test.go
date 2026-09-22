@@ -39,7 +39,7 @@ func downloadOneWith(t *testing.T, entries ...library.Entry) (*service.Service, 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	var ask sortAsk
@@ -95,7 +95,7 @@ func TestADownloadIntoAnExistingFolderAsksNothing(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	rec.mu.Lock()
@@ -142,7 +142,7 @@ func TestTheBackendPrefersAFolderThatAlreadyExists(t *testing.T) {
 
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, rec, "done")
 
 	var ask sortAsk
@@ -250,7 +250,7 @@ func TestARecordedFolderThatHasGoneIsNotUsed(t *testing.T) {
 	fresh := &recorder{}
 	handle(t, svc, fresh, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+ask.SeriesID+`","volumeId":"`+
-			ask.SeriesID+`chapter-4/","confirmed":true}`)
+			ask.SeriesID+`chapter-4/","confirmed":true,"destination":"library"}`)
 	_ = rec
 
 	var second sortAsk

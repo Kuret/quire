@@ -248,7 +248,7 @@ func downloadTheBook(t *testing.T, svc *service.Service, rec *recorder) {
 	t.Helper()
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
-			bookReleaseID+`","confirmed":true}`)
+			bookReleaseID+`","confirmed":true,"destination":"library"}`)
 }
 
 // The path, end to end: the file the source produced is what lands in the
@@ -629,7 +629,7 @@ func TestAPageBasedDownloadIsUnchangedByTheBookPath(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, env.svc, env.rec)
 	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, env.rec, "done")
 
 	env.fake.mu.Lock()

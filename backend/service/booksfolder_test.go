@@ -156,7 +156,7 @@ func TestAComicIsNeverFiledIntoBooksOrFlat(t *testing.T) {
 	seriesID, chapterID := firstChapter(t, env.svc, env.rec)
 	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
 		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
-			`","confirmed":true}`)
+			`","confirmed":true,"destination":"library"}`)
 	waitForPhase(t, env.rec, "done")
 
 	var ask sortAsk
