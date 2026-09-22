@@ -41,6 +41,11 @@
 function refreshOnShow(screen) {
     if (screen === "downloaded")
         return "listDownloaded"
+    // The private source list, like Downloaded: no push of its own, so a
+    // mark or unmark made elsewhere shows up the next time this screen is
+    // opened — which includes being returned to (see showScreen).
+    if (screen === "privateSources")
+        return "listPrivateSources"
     return ""
 }
 

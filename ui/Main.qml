@@ -396,6 +396,13 @@ Rectangle {
     }
 
     ListModel { id: sourcesModel }
+    // The private source list's own model, filled only from
+    // Msg.PrivateSources — never from Msg.Sources, and never by filtering
+    // sourcesModel here. The backend already partitions the two lists
+    // (service.buildSourceViews); a second partition in the view would be
+    // exactly the "filtering in the UI" the design forbids for the combined
+    // search, applied to the list a bug there would be just as able to leak.
+    ListModel { id: privateSourcesModel }
     ListModel { id: seriesModel }
 
     // One page of the combined search's groups (Msg.SearchAllResults). A row
@@ -495,6 +502,10 @@ Rectangle {
 
         case Msg.Sources:
             root.fillSources(msg ? msg.sources : [])
+            return
+
+        case Msg.PrivateSources:
+            root.fillPrivateSources(msg ? msg.sources : [])
             return
 
         case Msg.ProbeProgress:
@@ -632,17 +643,22 @@ Rectangle {
 
     // ---- model filling -----------------------------------------------------
 
-    function fillSources(list) {
-        sourcesModel.clear()
+    // fillSourceRows is fillSources and fillPrivateSources at once: the two
+    // lists are the same row shape, partitioned by the backend rather than by
+    // this file (service.buildSourceViews), so there is exactly one place
+    // that turns a sourceView into what a row draws.
+    function fillSourceRows(model, list) {
+        model.clear()
         for (var i = 0; i < (list ? list.length : 0); ++i) {
             var s = list[i]
-            sourcesModel.append({
+            model.append({
                 "sourceId": s.id,
                 "name": s.name,
                 "baseUrl": s.baseUrl,
                 "theme": s.theme,
                 "lang": s.lang,
                 "enabled": s.enabled,
+                "private": !!s.private,
                 // The backend resolves "unset" to "auto", so this is never
                 // blank; the fallback is for a reply from an older backend.
                 "splitStrips": s.splitStrips ? s.splitStrips : "auto",
@@ -659,6 +675,14 @@ Rectangle {
                 "pendingHosts": JSON.stringify(s.pendingHosts ? s.pendingHosts : [])
             })
         }
+    }
+
+    function fillSources(list) {
+        fillSourceRows(sourcesModel, list)
+    }
+
+    function fillPrivateSources(list) {
+        fillSourceRows(privateSourcesModel, list)
     }
 
     function fillSeries(msg) {
@@ -995,24 +1019,36 @@ Rectangle {
     // the screen has the first — and it is here because this is the one place
     // the message is composed: a page turn, a relayout and the Search key all
     // arrive through it, and only one of them has a keyboard in front of it.
+    // Which scope the one combined-search screen is currently answering for.
+    // The screen and its model (searchAllScreen, searchAllModel) are shared
+    // between the normal and the private search — they are never open at the
+    // same time, so there is nothing to keep in step by duplicating either —
+    // and this is the one flag that decides which message a page request
+    // sends. See openSearchAll / openPrivateSearchAll.
+    property bool searchAllPrivate: false
+
     function requestSearchAllPage(page) {
         if (!Grouping.searchable(searchAllScreen.query))
             return
-        root.send(Msg.SearchAll, {
+        root.send(root.searchAllPrivate ? Msg.SearchAllPrivate : Msg.SearchAll, {
             "query": searchAllScreen.query,
             "page": page,
             "pageSize": searchAllScreen.pageSize})
     }
 
-    // openSearchAll is the way in from the sources screen.
+    // openSearchAll is the way in from the sources screen. openPrivateSearchAll
+    // is its private-list counterpart, reached only from the eye-icon screen
+    // and touching only private sources (backend/service/searchall.go's own
+    // partition, not a filter here).
     //
-    // It starts empty. A search is a question the user asks, and coming back
+    // Both start empty. A search is a question the user asks, and coming back
     // to the screen later to find someone else's old answer — possibly from
     // sources that have since been disabled — is worse than an empty box.
     // Returning *from a series* is a different route and goes through
     // showScreen, which keeps the page the user was on.
-    function openSearchAll() {
-        root.showScreen("searchall")
+    function openSearchAllScoped(screenName, private_) {
+        root.searchAllPrivate = private_
+        root.showScreen(screenName)
         searchAllModel.clear()
         root.searchAllMatches = ({})
         root.lastSearchAll = null
@@ -1024,9 +1060,26 @@ Rectangle {
         searchAllScreen.searching = true
     }
 
+    function openSearchAll() {
+        root.openSearchAllScoped("searchall", false)
+    }
+
+    function openPrivateSearchAll() {
+        root.openSearchAllScoped("searchAllPrivate", true)
+    }
+
+    // browseCameFrom is where Back from a single source's catalogue goes:
+    // "sources" ordinarily, "privateSources" when the row that was tapped
+    // came from the private list. Without it, browsing a private source and
+    // pressing Back would land on the normal list rather than the private one
+    // it was reached from — a small thing, but exactly the kind of paper cut
+    // that makes someone stop using the private list at all.
+    property string browseCameFrom: "sources"
+
     function openSource(sourceId, name) {
         root.currentSourceId = sourceId
         root.currentSourceName = name
+        root.browseCameFrom = root.screen === "privateSources" ? "privateSources" : "sources"
         root.showScreen("browse")
         seriesGridScreen.reset()
         seriesGridScreen.busy = true
@@ -1052,6 +1105,7 @@ Rectangle {
             root.seriesCameFrom = root.screen === "watching"
                                || root.screen === "downloaded"
                                || root.screen === "searchall"
+                               || root.screen === "searchAllPrivate"
                                   ? root.screen : "browse"
         // The alternatives belong to the group, not to the source being read,
         // so they survive a switch between them.
@@ -1118,8 +1172,14 @@ Rectangle {
         // rows of whatever is now showing.
         root.dismissInput()
         root.screen = name
-        if (Screens.refreshOnShow(name) === "listDownloaded")
+        switch (Screens.refreshOnShow(name)) {
+        case "listDownloaded":
             root.send(Msg.ListDownloaded, {})
+            break
+        case "listPrivateSources":
+            root.send(Msg.ListPrivateSources, {})
+            break
+        }
     }
 
     function goBack() {
@@ -1129,13 +1189,23 @@ Rectangle {
             break
         case "watching":
         case "downloaded":
+        case "privateSources":
             root.showScreen("sources")
             break
         case "browse":
+            root.showScreen(root.browseCameFrom)
+            break
         case "searchall":
         case "add":
         case "settings":
             root.showScreen("sources")
+            break
+        // The private search goes back to the private list it was opened
+        // from, the same way "searchall" goes back to the normal list —
+        // never straight to "sources", or the private list the user came
+        // from would be one extra Back away.
+        case "searchAllPrivate":
+            root.showScreen("privateSources")
             break
         default:
             root.close()
@@ -1150,6 +1220,8 @@ Rectangle {
         // below, and repeating it in the header would be the only title on any
         // screen that changes as the user types.
         case "searchall": return "Every source"
+        case "privateSources": return "Private sources"
+        case "searchAllPrivate": return "Every private source"
         case "watching": return "Watching"
         case "downloaded": return "Downloaded"
         case "series": return chapterListScreen.seriesTitle
@@ -1314,15 +1386,22 @@ Rectangle {
         id: body
         anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
 
+        // One instance for both the normal and the private source list. They
+        // are the same screen in every way but which model backs it, which
+        // scope its own combined search touches, and which direction the
+        // "Make private"/"Make public" row action goes — see
+        // SourceList.qml's showingPrivate.
         SourceList {
             id: sourceListScreen
             objectName: "sourceList"
             anchors.fill: parent
-            visible: root.screen === "sources"
-            model: sourcesModel
+            visible: root.screen === "sources" || root.screen === "privateSources"
+            showingPrivate: root.screen === "privateSources"
+            model: root.screen === "privateSources" ? privateSourcesModel : sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.showScreen("add") }
             onWatchingRequested: root.showScreen("watching")
-            onSearchAllRequested: root.openSearchAll()
+            onSearchAllRequested: root.screen === "privateSources"
+                                   ? root.openPrivateSearchAll() : root.openSearchAll()
             // Fetched on the way in rather than pushed: a list that is right
             // when it is opened is enough, and much less machinery. "Opened"
             // includes being returned to — see showScreen.
@@ -1342,6 +1421,15 @@ Rectangle {
                                              {"sourceId": sourceId, "host": host})
             onRevokeHostRequested: root.send(Msg.RevokeSourceHost,
                                               {"sourceId": sourceId, "host": host})
+            // Marking or unmarking private: the backend moves the source
+            // between the two lists and answers with both (see
+            // Service.buildSourceViews / sendSourceListFor), so nothing here
+            // has to guess which screen to refresh.
+            onPrivateRequested: root.send(Msg.SetSourcePrivate,
+                                          {"sourceId": sourceId, "private": makePrivate})
+            // The eye-icon button. The private list is fetched on the way in,
+            // like Downloaded — see Screens.js.
+            onPrivateListRequested: root.showScreen("privateSources")
         }
 
         AddSource {
@@ -1477,7 +1565,7 @@ Rectangle {
             id: searchAllScreen
             objectName: "searchAll"
             anchors.fill: parent
-            visible: root.screen === "searchall"
+            visible: root.screen === "searchall" || root.screen === "searchAllPrivate"
             model: searchAllModel
             // The same stored layout the per-source results use (Views.js).
             view: root.searchView

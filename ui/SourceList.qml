@@ -18,6 +18,14 @@ Item {
 
     property alias model: list.model
 
+    // True when this instance is drawing the private source list rather than
+    // the normal one — one component, reused for both (they share every
+    // action a row offers except which direction "private" moves it, and
+    // duplicating the file would be two things to keep in step forever). See
+    // Main.qml for how the same SourceList and SearchAll instances are
+    // repointed at the private scope's model and messages.
+    property bool showingPrivate: false
+
     // PLAN §12.1: the list turns pages rather than scrolling. The whole list is
     // already in hand here — the backend sends every configured source in one
     // message — so choosing the window into it is presentational and stays in
@@ -65,6 +73,16 @@ Item {
     signal allowHostRequested(string sourceId, string host)
     signal revokeHostRequested(string sourceId, string host)
     signal noticeDismissed()
+
+    // Marking a source private, or taking that back — reachable from a row's
+    // long-press menu on either list, the same way Rename and Remove are.
+    signal privateRequested(string sourceId, bool makePrivate)
+
+    // The eye-icon button, lower right, only on the normal list: the way in to
+    // the private one. It carries no state of its own — the private screen is
+    // reached by name, not toggled — so there is nothing to bind besides the
+    // tap.
+    signal privateListRequested()
 
     // A quiet line from the backend, above the list. Composed there, not here.
     property string notice: ""
@@ -456,7 +474,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "No sources yet"
+            text: screen.showingPrivate ? "No private sources" : "No sources yet"
             font.pointSize: Style.headingSize
             color: Style.ink
         }
@@ -464,8 +482,17 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: "Quire ships with no sites. Add one by pasting its web address; " +
-                  "you are responsible for the sites you choose to use."
+            // The private list's own empty state says what marking a source
+            // private does and, as plainly, what it does not: a volume already
+            // downloaded from it is a document in your reMarkable library, and
+            // this screen has no say over that library.
+            text: screen.showingPrivate
+                  ? "Nothing here. Mark a source private from its menu on the " +
+                    "main source list to keep it off that list and out of its " +
+                    "combined search. Anything already downloaded from it stays " +
+                    "in your reMarkable library exactly as before."
+                  : "Quire ships with no sites. Add one by pasting its web address; " +
+                    "you are responsible for the sites you choose to use."
             font.pointSize: Style.bodySize
             color: Style.muted
         }
@@ -608,7 +635,7 @@ Item {
             id: renameButton
             objectName: "renameButton"
             anchors {
-                right: removeButton.left; rightMargin: Style.gap
+                right: privateButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
             width: 160
@@ -629,6 +656,41 @@ Item {
                 id: renameArea
                 anchors.fill: parent
                 onClicked: screen.startRename(screen.confirmingId, screen.confirmingName)
+            }
+        }
+
+        // Marking private, or taking that back — the reverse action the
+        // private list needs is exactly this button with its label flipped,
+        // since it is the same row menu on either list (screen.showingPrivate).
+        Rectangle {
+            id: privateButton
+            objectName: "privateButton"
+            anchors {
+                right: removeButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 160
+            height: Style.buttonHeight - Style.gap
+            color: privateArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: screen.showingPrivate ? "Make public" : "Make private"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: privateArea
+                anchors.fill: parent
+                onClicked: {
+                    screen.privateRequested(screen.confirmingId, !screen.showingPrivate)
+                    screen.confirmingId = ""
+                    screen.confirmingName = ""
+                }
             }
         }
 
@@ -677,7 +739,11 @@ Item {
     Item {
         id: addBar
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: Style.rowHeight + Style.gap
+        // A dedicated strip below the labelled buttons for the eye-icon
+        // button, only on the normal list — see privateListButton below for
+        // why it needs its own space rather than sharing the labelled row's.
+        height: Style.rowHeight + Style.gap +
+                (screen.showingPrivate ? 0 : (48 + Style.gap))
 
         Rectangle {
             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -690,7 +756,9 @@ Item {
         // because the first screen is where a list of things that may have
         // gained a chapter belongs (PLAN §12.2).
         Row {
-            anchors.centerIn: parent
+            anchors { horizontalCenter: parent.horizontalCenter
+                      top: parent.top; topMargin: Style.gap / 2 }
+            height: Style.rowHeight + Style.gap / 2
             spacing: Style.gap
 
             // Four buttons now: Search, Watching, Downloaded and Add.
@@ -734,6 +802,13 @@ Item {
 
             Rectangle {
                 objectName: "downloadedButton"
+                // Downloaded and Watching are both about the *normal* library:
+                // private sources have no counterpart list of their own (see
+                // PrivateMark.qml's comment and the header note above this
+                // file's empty state) — the discretion this feature offers is
+                // scoped to the list and the combined search, not to every
+                // screen a source's series can reach.
+                visible: !screen.showingPrivate
                 width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: downloadedArea.pressed ? Style.pressed : Style.paper
@@ -758,6 +833,7 @@ Item {
 
             Rectangle {
                 objectName: "watchingButton"
+                visible: !screen.showingPrivate
                 width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: watchingArea.pressed ? Style.pressed : Style.paper
@@ -809,6 +885,11 @@ Item {
 
             Rectangle {
                 objectName: "addSourceButton"
+                // A source is added on the normal list; marking it private is
+                // a separate, later action from that list's own row menu (see
+                // privateButton above), so the private screen offers no add
+                // button of its own.
+                visible: !screen.showingPrivate
                 width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
                 height: Style.buttonHeight
                 color: addArea.pressed ? Style.pressed : Style.paper
@@ -828,6 +909,50 @@ Item {
                     anchors.fill: parent
                     onClicked: screen.addRequested()
                 }
+            }
+        }
+
+        // The way in to the private source list: small, icon-only, in the
+        // lower right of the screen — deliberately not one of the labelled
+        // buttons above. Those name what they do; this one is meant to be
+        // found by someone who is looking for it and to read as nothing in
+        // particular to someone who is not (see PrivateMark.qml). It carries
+        // no label and no count, on purpose: a badge here would be exactly
+        // the signpost the brief asks this not to be.
+        //
+        // It has a dedicated strip below the labelled row (see addBar's own
+        // height above) rather than sharing that row's space: the row's
+        // buttons are capped at 300px each and centred, so on a narrow window
+        // the slack beside them can shrink to nothing, and a button that only
+        // sometimes has room is a button that sometimes cannot be tapped.
+        //
+        // Only on the normal list. The private list is reached from here and
+        // left by the header's own Back, so it does not need a way back to
+        // itself.
+        Rectangle {
+            id: privateListButton
+            objectName: "privateListButton"
+            anchors {
+                right: parent.right; rightMargin: Style.margin
+                bottom: parent.bottom; bottomMargin: Style.gap / 2
+            }
+            width: 64
+            height: 48
+            visible: !screen.showingPrivate
+            color: privateListArea.pressed ? Style.pressed : Style.paper
+            border.width: 1
+            border.color: Style.rule
+            radius: 6
+
+            PrivateMark {
+                anchors.centerIn: parent
+            }
+
+            MouseArea {
+                id: privateListArea
+                objectName: "privateListArea"
+                anchors.fill: parent
+                onClicked: screen.privateListRequested()
             }
         }
     }

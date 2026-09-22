@@ -138,6 +138,20 @@ Window {
         return out
     }
 
+    // Every word a screen actually puts in front of somebody, joined — the
+    // same helper Harness.qml uses, and for the same reason: the question
+    // worth asking of a screen is "what does it show", not "what is bound to
+    // it", and a Text inside a collapsed strip reads false for `visible`
+    // because that property is the effective one.
+    function wordsOn(item) {
+        var texts = win.textsUnder(item, [])
+        var said = []
+        for (var i = 0; i < texts.length; ++i)
+            if (texts[i].visible && String(texts[i].text).length > 0)
+                said.push(String(texts[i].text))
+        return said.join(" | ")
+    }
+
     // The screens, by the objectName Main.qml gives each one.
     function screenNamed(name) { return win.findChild(win.app, name) }
 
@@ -492,6 +506,154 @@ Window {
         sourceList.removeRequested("src-b")
         win.want("and a removal names it",
                  backend.bodyOf(Msg.RemoveSource).sourceId, "src-b")
+
+        // ---- private sources -------------------------------------------------
+        //
+        // One SourceList instance and one SearchAll instance serve both
+        // scopes (ui/Main.qml's sourceListScreen and searchAllScreen,
+        // ui/SourceList.qml's showingPrivate) — an efficient reuse and
+        // exactly the shape where a row, or a request, from the scope just
+        // left survives the switch. There is no per-row filter anywhere in
+        // ui/ (SourceList.qml draws whatever model it is given); the
+        // guarantee that a private source never reaches the normal screen is
+        // that the two lists are always fed by two different messages into
+        // two different models, and that is what is asserted below — by what
+        // is actually on screen, not by what was sent.
+
+        backend.forget()
+        win.deliver(Msg.Sources, {"sources": [
+            {"id": "pub-1", "name": "Public Site", "baseUrl": "https://pub.invalid",
+             "theme": "generic", "lang": "en", "enabled": true,
+             "status": "Working", "statusDetail": ""}]})
+        win.deliver(Msg.PrivateSources, {"sources": [
+            {"id": "priv-1", "name": "Undercover Site", "baseUrl": "https://priv.invalid",
+             "theme": "generic", "lang": "en", "enabled": true,
+             "status": "Working", "statusDetail": ""}]})
+
+        win.want("delivering the private list does not touch the normal one",
+                 sourceList.model.count, 1)
+        win.want("which still names the public source",
+                 sourceList.model.get(0).name, "Public Site")
+        win.want("and never draws the private one on the normal screen",
+                 win.wordsOn(sourceList).indexOf("Undercover Site") >= 0, false)
+        win.want("receiving both lists navigates nowhere by itself",
+                 win.app.screen, "sources")
+
+        // The eye-icon button: found by its objectName, never by a label —
+        // it carries none, on purpose (ui/PrivateMark.qml) — and it is the
+        // only way into the private list.
+        var eyeButton = win.findChild(sourceList, "privateListButton")
+        win.want("the eye button is there to find", eyeButton !== null, true)
+        win.want("on the normal list, where it belongs", eyeButton.visible, true)
+        win.want("carrying no label, no count and no badge of its own",
+                 win.wordsOn(eyeButton), "")
+
+        backend.forget()
+        sourceList.privateListRequested()
+        win.want("the eye button opens the private list",
+                 win.app.screen, "privateSources")
+        win.want("fetching it fresh, the way Downloaded is",
+                 backend.types(), String(Msg.ListPrivateSources))
+        win.want("this instance now knows it is the private one",
+                 sourceList.showingPrivate, true)
+        win.want("and the eye button is not offered on the list it opens",
+                 eyeButton.visible, false)
+
+        // **Repopulated, not merely relabelled.** The same ListView is
+        // reused for both scopes, which is exactly the shape where a row from
+        // the scope just left survives the switch.
+        win.want("the private list shows the private source",
+                 sourceList.model.count, 1)
+        win.want("named as it arrived",
+                 sourceList.model.get(0).name, "Undercover Site")
+        win.want("and only that — nothing from the normal list rides along",
+                 win.wordsOn(sourceList).indexOf("Public Site") >= 0, false)
+
+        // private→normal is the direction that leaks: opening the private
+        // list starts from a screen that had nothing on it yet, but going
+        // back has to actually *replace* rows already drawn on screen.
+        win.app.goBack()
+        win.want("Back from the private list returns to the normal one",
+                 win.app.screen, "sources")
+        win.want("the model is repopulated, not left showing the private row",
+                 sourceList.model.count, 1)
+        win.want("back to the public source",
+                 sourceList.model.get(0).name, "Public Site")
+        win.want("the private row does not survive the trip back",
+                 win.wordsOn(sourceList).indexOf("Undercover Site") >= 0, false)
+        win.want("and the eye button is back too",
+                 eyeButton.visible, true)
+
+        // ---- marking and unmarking private -----------------------------------
+
+        backend.forget()
+        sourceList.privateRequested("pub-1", true)
+        win.want("marking a source private names it",
+                 backend.bodyOf(Msg.SetSourcePrivate).sourceId, "pub-1")
+        win.want("and which way it moved",
+                 backend.bodyOf(Msg.SetSourcePrivate).private, true)
+
+        backend.forget()
+        sourceList.privateRequested("priv-1", false)
+        win.want("taking it back names the source too",
+                 backend.bodyOf(Msg.SetSourcePrivate).sourceId, "priv-1")
+        win.want("and the reverse direction",
+                 backend.bodyOf(Msg.SetSourcePrivate).private, false)
+
+        // ---- the private combined search ---------------------------------
+        //
+        // One SearchAll instance for both scopes too (root.searchAllPrivate).
+        // The scope has to travel with the request itself, not just with
+        // which screen happens to be on top when it is sent.
+
+        backend.forget()
+        sourceList.searchAllRequested()
+        win.want("Search all, from the normal list, opens the normal search",
+                 win.app.screen, "searchall")
+        searchAll.query = "manga"
+        searchAll.searchRequested("manga")
+        win.want("it asks every source", backend.countOf(Msg.SearchAll), 1)
+        win.want("never the private message",
+                 backend.countOf(Msg.SearchAllPrivate), 0)
+
+        win.app.goBack()
+        win.want("Back from the normal search returns to the normal list",
+                 win.app.screen, "sources")
+        sourceList.privateListRequested()
+        win.want("on the private list now", win.app.screen, "privateSources")
+
+        backend.forget()
+        sourceList.searchAllRequested()
+        win.want("Search all, from the private list, opens the private search",
+                 win.app.screen, "searchAllPrivate")
+        searchAll.query = "manga"
+        searchAll.searchRequested("manga")
+        win.want("it asks only the private sources",
+                 backend.countOf(Msg.SearchAllPrivate), 1)
+        win.want("carrying the query",
+                 backend.bodyOf(Msg.SearchAllPrivate).query, "manga")
+        win.want("and never the normal message",
+                 backend.countOf(Msg.SearchAll), 0)
+
+        win.app.goBack()
+        win.want("Back from the private search returns to the private list",
+                 win.app.screen, "privateSources")
+        win.app.goBack()
+        win.want("and Back from there returns to the normal list",
+                 win.app.screen, "sources")
+
+        // ---- the private list's own empty state --------------------------
+        //
+        // The only place the honest limit is stated: marking a source
+        // private does not touch anything already downloaded from it.
+        backend.forget()
+        win.deliver(Msg.PrivateSources, {"sources": []})
+        sourceList.privateListRequested()
+        win.want("an empty private list is empty", sourceList.model.count, 0)
+        win.want("and says what marking a source private does and does not do",
+                 win.wordsOn(sourceList).indexOf("reMarkable library") >= 0, true)
+        win.app.goBack()
+        win.want("leaving it back on the normal list", win.app.screen, "sources")
 
         // ---- adding a source ------------------------------------------------
 
