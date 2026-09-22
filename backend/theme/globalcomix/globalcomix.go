@@ -28,9 +28,13 @@
 // See mangadex's package doc for the fuller version of this argument; it
 // applies here without much change. GlobalComix is one deployment with one
 // API, so Fingerprint gates on the registrable domain rather than reading
-// markup class names, and Validate refuses any baseUrl that is not the real
-// API host, for the same reason mangadex's does: a theme with one true home
-// should not accept an arbitrary host that happens to answer similar JSON.
+// markup class names, and Validate refuses any baseUrl outside that same
+// registrable domain, for the same reason mangadex's does: a theme with one
+// true home should not accept an arbitrary host that happens to answer
+// similar JSON. Unlike mangadex, Validate accepts either host on that
+// domain — the browser-facing site as well as the API — because endpoint()
+// (see normaliseAPIHost) rewrites every request to the API host regardless
+// of which one a source names.
 //
 // # The client header and the reading-grant cookie
 //
@@ -440,15 +444,49 @@ func fillTemplate(tmpl, baseURL, releaseKey string, order int, quality string) s
 // The base is the source's, not the apiHost constant, for the same reason
 // mangadex's endpoint helper works this way: PLAN §6 M2's offline tests run
 // against example.invalid, and a theme that hard-coded its host could only be
-// tested by going online. Validate below is what keeps a real source pointed
-// at the real API.
+// tested by going online. Validate below is what keeps a real source on the
+// site's registrable domain in the first place; normaliseAPIHost, next, is
+// what keeps every request actually reaching the API host regardless of
+// which host on that domain the source names.
+//
+// normaliseAPIHost is applied to the base first. This is the fix for a source
+// added by pasting the site's own, natural URL — https://globalcomix.com —
+// rather than the API host the theme actually drives, https://api.globalcomix.com:
+// the fingerprint correctly recognises the site on either host (Fingerprint's
+// gate is the registrable domain), but until now only a source already
+// pointed at the API host actually worked, leaving the natural URL fingerprinted
+// yet functionally broken. Doing the correction here, rather than requiring
+// the API host at Validate time, means every call this theme makes —
+// including the PLAN §7.5 stage 5 capability check that runs before a source
+// is ever stored — reaches the right host regardless of which of the two the
+// source names, and a source may be stored under either name.
 func (t *Theme) endpoint(s *theme.Source, path string, v url.Values) string {
-	base := strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
+	base := normaliseAPIHost(strings.TrimRight(strings.TrimSpace(s.BaseURL), "/"))
 	u := base + path
 	if len(v) > 0 {
 		u += "?" + v.Encode()
 	}
 	return u
+}
+
+// normaliseAPIHost rewrites base to apiHost when its host is on the site's
+// registrable domain but is not already apiHost. A base whose host is not on
+// siteDomain at all — in particular *.invalid, which PLAN §6 M2's offline
+// tests use as their base — is returned unchanged: this only resolves the one
+// confusion this site invites (its own domain vs. its API subdomain), not a
+// general host substitution that would make an offline test's fixed host
+// silently drift to something else.
+func normaliseAPIHost(base string) string {
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return base
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, apiHost) || !strings.EqualFold(fetch.RegistrableDomain(host), siteDomain) {
+		return base
+	}
+	u.Host = apiHost
+	return strings.TrimRight(u.String(), "/")
 }
 
 // authorsOf wraps a single display name as the []string theme.SeriesStub and
@@ -541,6 +579,18 @@ func parsePublished(raw string) time.Time {
 // with any baseUrl would be accepted, and an imported sources file could point
 // Quire's GlobalComix support at a host that merely answers similarly-shaped
 // JSON.
+//
+// Any host on siteDomain's registrable domain is accepted, including the
+// site domain itself (https://globalcomix.com), not only apiHost. This used
+// to be narrower — a non-API host on the same domain was rejected — but
+// endpoint() (see normaliseAPIHost) now rewrites every request to apiHost
+// regardless of which of the two a source names, so a stored baseUrl that
+// names the site rather than the API is a cosmetic difference, not a
+// functional one: every request still reaches the real API. What still has
+// to be rejected is a host outside this domain entirely, which
+// normaliseAPIHost leaves untouched and which would otherwise let a source
+// point this theme's requests at an unrelated host that merely answers
+// similarly-shaped JSON.
 func (t *Theme) Validate(s *theme.Source) error {
 	u, err := url.Parse(strings.TrimSpace(s.BaseURL))
 	if err != nil {
@@ -548,11 +598,6 @@ func (t *Theme) Validate(s *theme.Source) error {
 	}
 	host := u.Hostname()
 	if strings.EqualFold(fetch.RegistrableDomain(host), siteDomain) {
-		if !strings.EqualFold(host, apiHost) {
-			return fmt.Errorf(
-				"theme %s: source %q: baseUrl is %q, but this theme drives the API; use https://%s",
-				ID, s.ID, s.BaseURL, apiHost)
-		}
 		return nil
 	}
 	// Allowed only for the offline tests (PLAN §6 M2); .invalid can never
@@ -561,6 +606,6 @@ func (t *Theme) Validate(s *theme.Source) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"theme %s: source %q: baseUrl is %q; this theme drives one site, so it must be https://%s",
-		ID, s.ID, s.BaseURL, apiHost)
+		"theme %s: source %q: baseUrl is %q; this theme drives one site, so it must be on %s",
+		ID, s.ID, s.BaseURL, siteDomain)
 }

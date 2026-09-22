@@ -279,11 +279,31 @@ func TestQualityOverride(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsWrongHost(t *testing.T) {
+// TestValidateAcceptsSiteDomain: a baseUrl naming the browser-facing site
+// (rather than the API host) is accepted, not rejected. That used to be an
+// error, but endpoint() (see normaliseAPIHost) now rewrites every request to
+// the API host regardless of which of the two a source names, so the stored
+// host is a cosmetic difference, not a functional one — rejecting it here
+// would only reproduce the contradiction of a source that probes as
+// "addable" and then fails to be added.
+func TestValidateAcceptsSiteDomain(t *testing.T) {
 	th := globalcomix.New(nil)
 	s := &theme.Source{ID: "x", Theme: globalcomix.ID, BaseURL: "https://globalcomix.com"}
+	if err := th.Validate(s); err != nil {
+		t.Errorf("want no error for the site domain, since requests are normalised to the API host anyway: %v", err)
+	}
+}
+
+// TestValidateRejectsForeignHost confirms the part of the old rule that is
+// still real: a host outside globalcomix.com's registrable domain entirely
+// (not merely "on it but not the API host") must still be rejected, since
+// normaliseAPIHost never rewrites such a host and nothing else in this theme
+// would stop it from being used as-is.
+func TestValidateRejectsForeignHost(t *testing.T) {
+	th := globalcomix.New(nil)
+	s := &theme.Source{ID: "x", Theme: globalcomix.ID, BaseURL: "https://not-globalcomix.example.com"}
 	if err := th.Validate(s); err == nil {
-		t.Error("want an error: the theme drives the API host, not the browser-facing site")
+		t.Error("want an error: this host is not on globalcomix.com's registrable domain")
 	}
 }
 
@@ -292,6 +312,63 @@ func TestValidateAcceptsAPIHost(t *testing.T) {
 	s := &theme.Source{ID: "x", Theme: globalcomix.ID, BaseURL: "https://api.globalcomix.com"}
 	if err := th.Validate(s); err != nil {
 		t.Errorf("want no error for the real API host: %v", err)
+	}
+}
+
+// TestEndpointNormalisesSiteDomainToAPIHost is the fix for pasting the site's
+// own URL: a source whose baseUrl is the browser-facing domain still reaches
+// the real API host, because endpoint() rewrites it before building the
+// request — see normaliseAPIHost's doc comment.
+func TestEndpointNormalisesSiteDomainToAPIHost(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /v1/search/query": {File: "search.json"},
+	})
+	th := globalcomix.NewWithClock(f, clock)
+
+	s := &theme.Source{ID: "x", Theme: globalcomix.ID, BaseURL: "https://globalcomix.com"}
+	if _, err := th.Search(context.Background(), s, "lighthouse", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	u, err := url.Parse(calls[0].URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Hostname() != "api.globalcomix.com" {
+		t.Errorf("request went to host %q, want api.globalcomix.com", u.Hostname())
+	}
+}
+
+// TestEndpointLeavesOfflineTestHostAlone guards the offline-test rationale
+// endpoint's doc comment gives: a base on a domain that is not
+// globalcomix.com at all — in particular the .invalid host PLAN §6 M2's
+// fixtures use everywhere else in this file — must never be rewritten, or
+// every other test in this package would start requesting a host with no
+// fixture behind it.
+func TestEndpointLeavesOfflineTestHostAlone(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /v1/search/query": {File: "search.json"},
+	})
+	th := globalcomix.NewWithClock(f, clock)
+
+	if _, err := th.Search(context.Background(), site(), "lighthouse", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	u, err := url.Parse(calls[0].URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Hostname() != "api.example.invalid" {
+		t.Errorf("request went to host %q, want the untouched offline-test host api.example.invalid", u.Hostname())
 	}
 }
 
