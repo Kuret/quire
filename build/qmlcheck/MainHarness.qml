@@ -464,6 +464,20 @@ Window {
         win.want("which is the visible one", downloadedList.visible, true)
         win.want("and the others are not", sourceList.visible, false)
 
+        // The private Downloaded screen (round 2): the same DownloadedList
+        // instance, in its private mode, asking with private:true and
+        // going back to the private source list rather than the ordinary
+        // one.
+        backend.forget()
+        win.app.showScreen("downloadedPrivate")
+        win.want("opening the private Downloaded screen asks with private:true",
+                 backend.bodyOf(Msg.ListDownloaded).private, true)
+        win.want("the same screen instance shows it", downloadedList.visible, true)
+        win.want("titled for the private mode", win.app.screenTitle(), "Private · Downloaded")
+        win.app.goBack()
+        win.want("back goes to the private source list, not the ordinary one",
+                 win.app.screen, "privateSources")
+
         backend.forget()
         win.app.showScreen("browse")
         win.want("a screen that needs nothing re-asks for nothing",
@@ -1695,6 +1709,25 @@ Window {
         watchList.markSeenRequested("src-a", "/manga/lantern/")
         win.want("and marking seen names the pair",
                  backend.bodyOf(Msg.MarkSeen).seriesId, "/manga/lantern/")
+
+        // ---- the private Watching list (round 2) -----------------------------------
+        //
+        // privateWatched/privateSummary are the same shapes as watched/summary,
+        // routed onto the same WatchList instance in its private mode — never
+        // mixed into the ordinary watchedModel, which is what keeps the
+        // ordinary "Watching · 3 new" badge from ever counting a private series.
+        var privateLantern = Object.assign({}, win.lanternWatch, {"private": true})
+        win.deliver(Msg.WatchList, {
+            "watched": [], "summary": {"short": "", "phrase": ""},
+            "privateWatched": [privateLantern],
+            "privateSummary": {"short": "1 new", "phrase": "1 series has new chapters"}})
+        win.want("the ordinary list stays empty", win.app.watchShort, "")
+        win.app.showScreen("watchingPrivate")
+        win.want("the private Watching screen shows the private list's own rows",
+                 watchList.model.count, 1)
+        win.want("titled for the private mode", win.app.screenTitle(), "Private · Watching")
+        win.app.goBack()
+        win.want("back goes to the private source list", win.app.screen, "privateSources")
 
         // ---- what a queue could not take -------------------------------------------
 

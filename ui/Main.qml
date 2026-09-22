@@ -76,6 +76,12 @@ Rectangle {
     property string watchShort: ""
     property string watchPhrase: ""
 
+    // The private Watching list's own mirror of the two above, off
+    // MessageWatchList's privateSummary — computed from private sources'
+    // watches only, so it never contributes to the ordinary entry point.
+    property string privateWatchShort: ""
+    property string privateWatchPhrase: ""
+
     // Which screen the open series was reached from, so Back goes where the
     // user came from rather than always to the grid they may never have seen.
     property string seriesCameFrom: "browse"
@@ -108,8 +114,14 @@ Rectangle {
         // (Views.js wireName).
         case "browse":
         case "searchall": return root.searchView
-        case "downloaded": return root.downloadedView
-        case "watching": return root.watchingView
+        // The private Downloaded / Watching screens share the same stored
+        // layout as their ordinary counterparts — one layout preference per
+        // kind of screen, not one per mode, which would be a setting nobody
+        // asked for and a second thing to keep in step.
+        case "downloaded":
+        case "downloadedPrivate": return root.downloadedView
+        case "watching":
+        case "watchingPrivate": return root.watchingView
         }
         return Views.GRID
     }
@@ -407,15 +419,32 @@ Rectangle {
         }
     }
 
-    // The backend's line for an empty library, shown as it arrived.
+    // The backend's line for an empty library, shown as it arrived — one for
+    // each of the two overviews, since a build can have plenty in one and
+    // nothing in the other.
     property string downloadedEmpty: ""
+    property string privateDownloadedEmpty: ""
 
+    // PLAN §12.6's one storage sentence, shown on both the ordinary and the
+    // private Downloaded screen and in Settings. It covers everything —
+    // private sources included — so there is exactly one of it, not one per
+    // mode (backend/service/cache.go's storageStatus).
+    property string storageLine: ""
+
+    // fillDownloaded fills whichever of the two overviews msg.private says
+    // this reply is for. The two models are otherwise identical in shape;
+    // which one a row's "watched" flag is checked against follows the same
+    // split, because a private source's watch only ever lives on the private
+    // Watching list (see privateWatchedModel).
     function fillDownloaded(msg) {
-        downloadedModel.clear()
+        var priv = !!(msg && msg.private)
+        var target = priv ? privateDownloadedModel : downloadedModel
+        var watchModel = priv ? privateWatchedModel : watchedModel
+        target.clear()
         var rows = msg && msg.series ? msg.series : []
         for (var i = 0; i < rows.length; ++i) {
             var r = rows[i]
-            downloadedModel.append({
+            target.append({
                 "sourceId": r.sourceId ? r.sourceId : "",
                 "sourceName": r.sourceName ? r.sourceName : "",
                 "seriesId": r.seriesId ? r.seriesId : "",
@@ -459,10 +488,15 @@ Rectangle {
                 // The menu's Watch / Stop watching line, from the store. A
                 // row here is a (source, series) pair, so it answers for
                 // itself rather than for the source being browsed.
-                "watched": WatchJs.indexOf(watchedModel, r.sourceId ? r.sourceId : "",
+                "watched": WatchJs.indexOf(watchModel, r.sourceId ? r.sourceId : "",
                                            r.seriesId ? r.seriesId : "") >= 0})
         }
-        root.downloadedEmpty = msg && msg.empty ? msg.empty : ""
+        if (priv)
+            root.privateDownloadedEmpty = msg && msg.empty ? msg.empty : ""
+        else
+            root.downloadedEmpty = msg && msg.empty ? msg.empty : ""
+        if (msg && msg.storage)
+            root.storageLine = msg.storage
         downloadedListScreen.page = 1
         downloadedListScreen.requestVisibleCovers()
     }
@@ -506,10 +540,22 @@ Rectangle {
 
     ListModel { id: watchedModel }
 
+    // The private Watching list's own rows (round 2) — a private source's
+    // watches, and only those. Filled from the same pushed MessageWatchList
+    // the ordinary list is, off its privateWatched field, never by filtering
+    // watchedModel here: the backend already partitions the two (see
+    // service.watchListView / privateWatchListView).
+    ListModel { id: privateWatchedModel }
+
     // The downloaded overview's rows (PLAN §12.5). Filled from the backend when
     // the screen opens; there is no push, so a download or a delete shows up
     // the next time it is opened.
     ListModel { id: downloadedModel }
+
+    // The private Downloaded screen's own rows (round 2): only series from
+    // private sources, filled the same way — fetched with private:true
+    // when that screen opens.
+    ListModel { id: privateDownloadedModel }
 
     // ---- transport ---------------------------------------------------------
 
@@ -644,6 +690,10 @@ Rectangle {
             // land in the same place: the screen shows one line about the
             // cache, and it is always the most recent true thing said about it.
             settingsScreen.cacheSummary = msg && msg.message ? msg.message : ""
+            // PLAN §12.6's fuller picture, riding on the same message.
+            settingsScreen.storageSummary = msg && msg.storage ? msg.storage : ""
+            if (msg && msg.storage)
+                root.storageLine = msg.storage
             settingsScreen.closeCacheQuestion()
             return
 
@@ -711,12 +761,25 @@ Rectangle {
 
         case Msg.SavedDeleted:
             if (msg && msg.phase === "confirm") {
-                chapterListScreen.confirmingKind = "deleteSaved"
-                chapterListScreen.confirmingId = msg.chapterId
+                // A single chapter's reply names chapterId; a whole volume's
+                // does not — that is what tells this apart from the request
+                // side, the same way the backend itself tells the two
+                // deletes apart (deleteSavedRequest.isVolume).
+                chapterListScreen.confirmingKind = msg.chapterId ? "deleteSaved" : "deleteSavedVolume"
+                chapterListScreen.confirmingId = msg.chapterId ? msg.chapterId : ""
                 chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
             } else if (msg && msg.phase === "done") {
                 chapterListScreen.closeConfirm()
-                root.clearSavedFlag(msg.chapterId)
+                // A single chapter's id, or a whole volume's — either way
+                // clearSavedFlag takes what actually went (msg.chapterIds
+                // when this was a volume delete).
+                root.clearSavedFlag(msg.chapterIds && msg.chapterIds.length
+                                     ? msg.chapterIds : msg.chapterId)
+                // The Downloaded screen's savedCount and storage line can now
+                // be stale if it is open — simplest fix is to just re-ask
+                // (PLAN §12.6).
+                if (root.screen === "downloaded" || root.screen === "downloadedPrivate")
+                    root.send(Msg.ListDownloaded, {"private": root.screen === "downloadedPrivate"})
             } else if (msg && msg.phase === "failed") {
                 chapterListScreen.closeConfirm()
                 root.lastError = msg.message ? msg.message : "Something went wrong."
@@ -1001,13 +1064,30 @@ Rectangle {
                 // it. The row carries the first chapter of its volume.
                 "chapterId": vols[v].id,
                 "title": vols[v].title,
+                // The source's own bare label ("2"), for the short "Vol 2"
+                // form the delete confirm strip's button names — never a
+                // sentence (PLAN §2), just what backend/service/download.go
+                // already calls this same volume in a filename.
+                "label": vols[v].label ? vols[v].label : "",
                 "detail": vols[v].detail ? vols[v].detail : "",
                 "chapterCount": vols[v].chapterCount,
                 "downloadState": vols[v].documentUuid ? "done" : "",
                 "downloadMessage": "",
                 "documentUuid": vols[v].documentUuid ? vols[v].documentUuid : "",
                 // True only when every chapter of the volume is saved.
-                "saved": vols[v].saved ? true : false
+                "saved": vols[v].saved ? true : false,
+                // The volume's own chapters, in order, and how many of them
+                // are saved right now — what decides whether Delete shows at
+                // all, and what MessageDeleteSaved's chapterIds names to
+                // delete the whole volume from Quire in one round trip.
+                //
+                // Stored JSON-encoded rather than as a plain array: a
+                // ListModel role holding a JS array silently becomes a
+                // nested QQmlListModel instead, which is not an array and
+                // breaks the moment something calls .join or .length on it.
+                // Encoding it keeps the round trip exact.
+                "chapterIdsJson": JSON.stringify(vols[v].chapterIds ? vols[v].chapterIds : []),
+                "savedCount": vols[v].savedCount ? vols[v].savedCount : 0
             })
         }
 
@@ -1042,16 +1122,25 @@ Rectangle {
     // where the flag already agrees (Watch.js), so the common case — a check
     // round with no news — repaints nothing.
     function markWatchedElsewhere() {
-        WatchJs.markWatched(seriesModel, watchedModel, root.currentSourceId)
-        WatchJs.markWatched(downloadedModel, watchedModel, "")
+        // Checked against both watch models rather than one: the browse
+        // screen's seriesModel serves one source's catalogue, which can be
+        // either ordinary or private, and a downloaded row's source likewise
+        // is not fixed — see WatchJs.markWatchedAcross.
+        WatchJs.markWatchedAcross(seriesModel, watchedModel, privateWatchedModel, root.currentSourceId)
+        WatchJs.markWatchedAcross(downloadedModel, watchedModel, privateWatchedModel, "")
+        WatchJs.markWatchedAcross(privateDownloadedModel, watchedModel, privateWatchedModel, "")
     }
 
     function reconcileWatched(msg) {
         WatchJs.reconcile(watchedModel, msg ? msg.watched : [])
+        WatchJs.reconcile(privateWatchedModel, msg ? msg.privateWatched : [])
         root.markWatchedElsewhere()
         // Written only where the string differs, so a check round that ends
-        // with the same summary it began with repaints nothing.
+        // with the same summary it began with repaints nothing. watchShort/
+        // watchPhrase stay ordinary-only; privateWatchShort/privateWatchPhrase
+        // are the private list's own mirror, off the same message.
         WatchJs.applySummary(root, msg)
+        WatchJs.applySummary(root, msg, "privateSummary", "privateWatchShort", "privateWatchPhrase")
         root.refreshWatchedFlag()
         // The list is pushed rather than fetched, so this is the only cue that
         // a row the grid has no cover for has arrived.
@@ -1059,7 +1148,23 @@ Rectangle {
     }
 
     function applyWatchUpdate(w) {
-        WatchJs.applyUpdate(watchedModel, w)
+        // Routed by the row's own `private`, so a streamed result lands on
+        // the right list even though the two are otherwise the same shape —
+        // and removed from the other model, for the source-marked-private-or
+        // -public-again case: the watch itself never moved, only which list
+        // renders it (backend/service/watch.go's watchListView /
+        // privateWatchListView).
+        if (w && w.private) {
+            WatchJs.applyUpdate(privateWatchedModel, w)
+            var at = WatchJs.indexOf(watchedModel, w.sourceId, w.seriesId)
+            if (at >= 0)
+                watchedModel.remove(at)
+        } else {
+            WatchJs.applyUpdate(watchedModel, w)
+            var pat = WatchJs.indexOf(privateWatchedModel, w ? w.sourceId : "", w ? w.seriesId : "")
+            if (pat >= 0)
+                privateWatchedModel.remove(pat)
+        }
         root.refreshWatchedFlag()
         root.markWatchedElsewhere()
     }
@@ -1071,6 +1176,8 @@ Rectangle {
     function refreshWatchedFlag() {
         chapterListScreen.watched = WatchJs.indexOf(
             watchedModel, root.currentSourceId, root.currentSeriesId) >= 0
+            || WatchJs.indexOf(
+            privateWatchedModel, root.currentSourceId, root.currentSeriesId) >= 0
     }
 
     // The backend decides what a download looks like; this only finds the row.
@@ -1121,21 +1228,39 @@ Rectangle {
         }
     }
 
-    // clearSavedFlag is SavedDeleted's phase "done": the row goes back to
-    // [Try][Download] (or plain [Delete][Read] if it is still in the
-    // library) without waiting for a refetch, the same immediacy
+    // clearSavedFlag is SavedDeleted's phase "done": the row(s) go back to
+    // [Try][Download] (or plain [Delete][Read] if still in the library)
+    // without waiting for a refetch — the same immediacy
     // applyProgressToModel gives the opposite change.
-    function clearSavedFlag(chapterId) {
+    //
+    // Takes either one chapter id (a single-chapter delete) or an array (a
+    // whole-volume delete): a volume row's own savedCount is decremented by
+    // however many of its chapters were actually named, and its saved flag
+    // (every chapter saved) drops the moment any of them go.
+    function clearSavedFlag(chapterIds) {
+        var ids = Array.isArray(chapterIds) ? chapterIds : [chapterIds]
+        if (ids.length === 0)
+            return
+        var idSet = {}
+        for (var k = 0; k < ids.length; ++k)
+            idSet[ids[k]] = true
+
         for (var i = 0; i < chaptersModel.count; ++i) {
-            if (chaptersModel.get(i).chapterId === chapterId) {
+            if (idSet[chaptersModel.get(i).chapterId])
                 chaptersModel.setProperty(i, "saved", false)
-                break
-            }
         }
         for (var j = 0; j < volumesModel.count; ++j) {
-            if (volumesModel.get(j).chapterId === chapterId) {
+            var vol = volumesModel.get(j)
+            var ourIds = vol.chapterIdsJson ? JSON.parse(vol.chapterIdsJson) : []
+            var removed = 0
+            for (var m = 0; m < ourIds.length; ++m) {
+                if (idSet[ourIds[m]])
+                    removed++
+            }
+            if (removed > 0) {
+                volumesModel.setProperty(j, "savedCount",
+                                          Math.max(0, (vol.savedCount ? vol.savedCount : 0) - removed))
                 volumesModel.setProperty(j, "saved", false)
-                break
             }
         }
     }
@@ -1253,6 +1378,8 @@ Rectangle {
         if (root.screen !== "series")
             root.seriesCameFrom = root.screen === "watching"
                                || root.screen === "downloaded"
+                               || root.screen === "watchingPrivate"
+                               || root.screen === "downloadedPrivate"
                                || root.screen === "searchall"
                                || root.screen === "searchAllPrivate"
                                   ? root.screen : "browse"
@@ -1325,6 +1452,9 @@ Rectangle {
         case "listDownloaded":
             root.send(Msg.ListDownloaded, {})
             break
+        case "listDownloadedPrivate":
+            root.send(Msg.ListDownloaded, {"private": true})
+            break
         case "listPrivateSources":
             root.send(Msg.ListPrivateSources, {})
             break
@@ -1348,6 +1478,15 @@ Rectangle {
         case "downloaded":
         case "privateSources":
             root.showScreen("sources")
+            break
+        // The private Downloaded / Watching screens (round 2) go back to the
+        // private source list they can only ever be reached from — never to
+        // "sources", or the private list the user came from would be one
+        // extra Back away, the same reasoning "searchAllPrivate" already
+        // uses below.
+        case "watchingPrivate":
+        case "downloadedPrivate":
+            root.showScreen("privateSources")
             break
         case "browse":
             root.showScreen(root.browseCameFrom)
@@ -1414,6 +1553,8 @@ Rectangle {
         case "searchAllPrivate": return "Every private source"
         case "watching": return "Watching"
         case "downloaded": return "Downloaded"
+        case "watchingPrivate": return "Private · Watching"
+        case "downloadedPrivate": return "Private · Downloaded"
         case "series": return chapterListScreen.seriesTitle
         case "try":
         case "saved":
@@ -1597,14 +1738,22 @@ Rectangle {
             showingPrivate: root.screen === "privateSources"
             model: root.screen === "privateSources" ? privateSourcesModel : sourcesModel
             onAddRequested: { addSourceScreen.reset(); root.showScreen("add") }
-            onWatchingRequested: root.showScreen("watching")
+            // Round 2: the private source list has Downloaded and Watching
+            // buttons of its own now, opening the same two screens in their
+            // private mode (see the shared WatchList / DownloadedList
+            // instances below) rather than the ordinary ones.
+            onWatchingRequested: root.showScreen(
+                sourceListScreen.showingPrivate ? "watchingPrivate" : "watching")
             onSearchAllRequested: root.screen === "privateSources"
                                    ? root.openPrivateSearchAll() : root.openSearchAll()
             // Fetched on the way in rather than pushed: a list that is right
             // when it is opened is enough, and much less machinery. "Opened"
             // includes being returned to — see showScreen.
-            onDownloadedRequested: root.showScreen("downloaded")
-            watchingLabel: root.watchShort
+            onDownloadedRequested: root.showScreen(
+                sourceListScreen.showingPrivate ? "downloadedPrivate" : "downloaded")
+            // The private list's own badge, from privateWatchShort — never
+            // watchShort, which must never count a private series.
+            watchingLabel: sourceListScreen.showingPrivate ? root.privateWatchShort : root.watchShort
             onOpenRequested: root.openSource(sourceId, name)
             notice: root.notice
             onNoticeDismissed: root.notice = ""
@@ -1648,10 +1797,14 @@ Rectangle {
             id: watchListScreen
             objectName: "watchList"
             anchors.fill: parent
-            visible: root.screen === "watching"
-            model: watchedModel
+            // One instance for both the ordinary and the private Watching
+            // screen (round 2), exactly like SourceList's one instance for
+            // both source lists above: same screen in every way but which
+            // model and summary back it.
+            visible: root.screen === "watching" || root.screen === "watchingPrivate"
+            model: root.screen === "watchingPrivate" ? privateWatchedModel : watchedModel
             view: root.watchingView
-            phrase: root.watchPhrase
+            phrase: root.screen === "watchingPrivate" ? root.privateWatchPhrase : root.watchPhrase
             onCheckRequested: root.send(Msg.CheckWatched, {})
             onCoversRequested: root.requestCoversBySource(covers)
             onUnwatchRequested: root.send(Msg.UnwatchSeries,
@@ -1677,10 +1830,18 @@ Rectangle {
             id: downloadedListScreen
             objectName: "downloadedList"
             anchors.fill: parent
-            visible: root.screen === "downloaded"
-            model: downloadedModel
+            // One instance for both the ordinary and the private Downloaded
+            // screen (round 2), the same way as WatchList above.
+            readonly property bool inPrivateMode: root.screen === "downloadedPrivate"
+            readonly property var activeModel: inPrivateMode ? privateDownloadedModel : downloadedModel
+            visible: root.screen === "downloaded" || root.screen === "downloadedPrivate"
+            model: activeModel
             view: root.downloadedView
-            emptyNote: root.downloadedEmpty
+            emptyNote: inPrivateMode ? root.privateDownloadedEmpty : root.downloadedEmpty
+            // PLAN §12.6: the same one storage sentence on both modes — it
+            // covers everything, private sources included, so there is no
+            // private/ordinary split to draw here.
+            storageNote: root.storageLine
             onCoversRequested: root.requestCoversBySource(covers)
             // The same route into a series the grid and the watched list use:
             // one series screen, one Back behaviour, one message.
@@ -1691,7 +1852,7 @@ Rectangle {
                 // carried on the signal: the signal is the same one three
                 // screens raise, and only this one's rows have a kind.
                 root.openSeries(seriesId, title, undefined,
-                                Kinds.kindFor(downloadedModel,
+                                Kinds.kindFor(downloadedListScreen.activeModel,
                                               {"sourceId": sourceId, "seriesId": seriesId}))
             }
             onDeleteRequested: root.send(Msg.DeleteSeries,
@@ -1857,6 +2018,17 @@ Rectangle {
             onDeleteSavedConfirmed: root.send(Msg.DeleteSaved,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "chapterId": chapterId, "confirmed": true})
+
+            // Deleting a whole saved volume in one go (round 2): chapterIds
+            // names every chapter of the volume, and the backend deletes
+            // whichever of them are actually saved, ignoring the rest — see
+            // backend/service/saved_delete.go's deleteSavedVolume.
+            onDeleteVolumeRequested: root.send(Msg.DeleteSaved,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeLabel": volumeLabel, "chapterIds": chapterIds, "confirmed": false})
+            onDeleteVolumeConfirmed: root.send(Msg.DeleteSaved,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeLabel": volumeLabel, "chapterIds": chapterIds, "confirmed": true})
 
             // Step one asks the backend for the question; step two does the
             // deleting. Both go through root so the QML that touches xochitl
