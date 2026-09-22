@@ -49,6 +49,13 @@ Item {
     // something to show.
     property string emptyNote: ""
 
+    // PLAN §12.6's one storage sentence — what Quire's own storage is holding
+    // and how much room is left, composed in backend/service/cache.go. Shown
+    // as a muted line at the top of the screen, in both the ordinary and the
+    // private mode (Main.qml passes the same value to both): the figure
+    // covers everything, so there is nothing mode-specific to draw here.
+    property string storageNote: ""
+
     // Which layout is showing, from the store by way of Main.qml. Grid until a
     // status says otherwise, so the screen draws on the way in rather than
     // waiting for the first Pong (Views.js).
@@ -310,12 +317,36 @@ Item {
         }
     }
 
+    // ---- storage (PLAN §12.6) ------------------------------------------------
+
+    Item {
+        id: storageBar
+        objectName: "storageBar"
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: storageText.visible ? storageText.implicitHeight + Style.gap : 0
+
+        Text {
+            id: storageText
+            objectName: "storageLine"
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                verticalCenter: parent.verticalCenter
+            }
+            elide: Text.ElideRight
+            text: screen.storageNote
+            font.pointSize: Style.smallSize
+            color: Style.muted
+            visible: screen.storageNote.length > 0
+        }
+    }
+
     // ---- the list ----------------------------------------------------------
 
     Item {
         id: viewport
         anchors {
-            top: parent.top
+            top: storageBar.bottom
             left: parent.left; right: parent.right
             bottom: pagerBar.top
         }
