@@ -154,3 +154,18 @@ var EndTry = 87
 var TryPageCount = 88
 
 var Error = 90
+
+// Saved in Quire: a comic/manga chapter kept in Quire's own storage and read
+// in Quire's own reader (TryReader.qml's "saved" mode), rather than uploaded
+// to xochitl's library. Unlike Try, every page path is already known and
+// local when OpenSaved answers, so there is no page-by-page traffic — and a
+// reading position is kept, sent back on a page turn (debounced) and on
+// close. OpenSaved on a chapter that turns out not to be saved, or whose
+// files are gone, answers MessageError instead of SavedOpened. DeleteSaved
+// follows the same confirm/done shape as a library delete
+// (MessageDeleteDownload / MessageDownloadDeleted).
+var OpenSaved = 91
+var SavedOpened = 92
+var SavePosition = 93
+var DeleteSaved = 94
+var SavedDeleted = 95

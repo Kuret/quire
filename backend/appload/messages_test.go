@@ -82,6 +82,11 @@ func TestMessageTypeValues(t *testing.T) {
 		"EndTry":                87,
 		"TryPageCount":          88,
 		"Error":                 90,
+		"OpenSaved":             91,
+		"SavedOpened":           92,
+		"SavePosition":          93,
+		"DeleteSaved":           94,
+		"SavedDeleted":          95,
 	}
 	if len(messageNames) != len(want) {
 		t.Fatalf("messageNames has %d entries, want %d", len(messageNames), len(want))

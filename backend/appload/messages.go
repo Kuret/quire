@@ -529,6 +529,39 @@ const (
 	MessageTryPageCount MessageType = 88
 
 	MessageError MessageType = 90
+
+	// Saved in Quire: comics and manga downloads default to Quire's own
+	// storage and Quire's own reader (ui/TryReader.qml's "saved" mode) rather
+	// than the reMarkable library — see backend/service/download.go's package
+	// comment and PLAN §2 for the reasoning. "Send to library" (the
+	// `destination` field on MessageEnqueueDownload) is the explicit opt-in
+	// that keeps today's PDF-and-upload behaviour.
+	//
+	// MessageOpenSaved is UI→BE, JSON {sourceId, seriesId, chapterId}: open a
+	// saved chapter in the reader. MessageSavedOpened is BE→UI, JSON
+	// {sourceId, seriesId, chapterId, seriesTitle, chapterTitle, pages,
+	// position}: every page path is local and known up front, so the reader
+	// needs no TryPageRequest traffic for a saved chapter. A chapter that is
+	// not saved, or whose files are gone from disk, answers MessageError
+	// (code saved_missing) instead, and a record whose files are gone is
+	// dropped rather than left to fail the same way again.
+	MessageOpenSaved   MessageType = 91
+	MessageSavedOpened MessageType = 92
+
+	// MessageSavePosition is UI→BE, JSON {sourceId, seriesId, chapterId,
+	// position}, with no reply: the reader's own page-turn bookmark, sent
+	// debounced rather than on every turn. Try mode never sends this — there
+	// is no Try record to remember a place in.
+	MessageSavePosition MessageType = 93
+
+	// MessageDeleteSaved is UI→BE, JSON {sourceId, seriesId, chapterId,
+	// confirmed}: the same two-step shape as MessageDeleteDownload, because
+	// deleting a saved chapter is also for good — os.RemoveAll of its
+	// directory, never the Trash, since there is no xochitl document to put
+	// there. MessageSavedDeleted is BE→UI, JSON {sourceId, seriesId,
+	// chapterId, phase, message}, phase one of "confirm", "done" or "failed".
+	MessageDeleteSaved  MessageType = 94
+	MessageSavedDeleted MessageType = 95
 )
 
 // messageNames covers every type Quire defines, system types included. It is
@@ -606,6 +639,11 @@ var messageNames = map[MessageType]string{
 	MessageEndTry:                "EndTry",
 	MessageTryPageCount:          "TryPageCount",
 	MessageError:                 "Error",
+	MessageOpenSaved:             "OpenSaved",
+	MessageSavedOpened:           "SavedOpened",
+	MessageSavePosition:          "SavePosition",
+	MessageDeleteSaved:           "DeleteSaved",
+	MessageSavedDeleted:          "SavedDeleted",
 }
 
 // Name returns the PLAN §7.1 name of a message type, or "Unknown(<n>)".
