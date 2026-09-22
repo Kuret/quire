@@ -1219,13 +1219,21 @@ Item {
                     // reason: this row offers Read on a document, so it offers
                     // the way to get rid of it. One document, whichever view
                     // the user happens to be looking at it from.
+                    //
+                    // Never for a saved row, though: model.chapterId here is
+                    // only the volume's *first* chapter (see
+                    // backend/service/download.go's volumeRows), so
+                    // askToDeleteSaved on it would delete one chapter while
+                    // the button reads "Delete" for the whole volume. A saved
+                    // volume row offers Read only; deleting a saved chapter
+                    // happens one at a time, from the chapter view.
                     Rectangle {
                         id: volumeDeleteButton
                         objectName: "volumeDeleteButton"
                         anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: (model.saved || model.documentUuid) && !screen.selecting ? true : false
+                        visible: !model.saved && model.documentUuid && !screen.selecting ? true : false
                         color: volumeDeleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -1243,17 +1251,13 @@ Item {
                             objectName: "volumeDeleteArea"
                             anchors.fill: parent
                             enabled: volumeDeleteButton.visible
-                            onClicked: {
-                                if (model.saved)
-                                    screen.askToDeleteSaved(model.chapterId)
-                                else
-                                    screen.askToDelete(model.documentUuid)
-                            }
+                            onClicked: screen.askToDelete(model.documentUuid)
                         }
                     }
 
                     Rectangle {
                         id: volumeButton
+                        objectName: "volumeButton"
                         anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
                         width: 180
                         height: Style.buttonHeight
@@ -1271,6 +1275,7 @@ Item {
 
                         MouseArea {
                             id: volumeArea
+                            objectName: "volumeArea"
                             anchors.fill: parent
                             enabled: !screen.selecting
                                      && screen.canTap(model.downloadState, model.documentUuid)

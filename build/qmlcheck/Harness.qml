@@ -1996,8 +1996,11 @@ Window {
         win.want("a position past the end is clamped to the last page",
                  tryReader.index, 0)
 
-        // The volume view offers it on the same terms. A row that offers Read
-        // offers Delete, whichever view the document is being looked at from.
+        // The volume view offers it on the same terms as a downloaded
+        // chapter — except for a saved row, which offers Read only (see
+        // below): model.chapterId on a volume row is only its first chapter,
+        // so a Delete button there would delete one chapter while claiming
+        // to delete the whole volume.
         //
         // The volumes are put back first: the block above this one emptied the
         // model to prove a series that loses its volumes loses the switch.
@@ -2036,6 +2039,27 @@ Window {
         chapterList.closeConfirm()
         volumesModel.setProperty(0, "documentUuid", "")
         win.want("clearing it takes the volume Delete button too", visibleVolumeDeletes(), 0)
+
+        // A saved volume row — even one also on the tablet — offers no
+        // Delete at all: only Read, opening the volume's first chapter via
+        // OpenSaved. Deleting a saved chapter happens one at a time, from
+        // the chapter view.
+        volumesModel.setProperty(0, "documentUuid", "doc-vol")
+        volumesModel.setProperty(0, "saved", true)
+        win.findChild(chapterList, "volumeRows").forceLayout()
+        win.want("a saved volume row offers no Delete, even when also downloaded",
+                 visibleVolumeDeletes(), 0)
+        win.want("its button reads Read",
+                 win.findChild(chapterList, "volumeButton").children[0].text, "Read")
+
+        var readSavedAsksBefore = win.readSavedAsks
+        win.findChild(chapterList, "volumeArea").clicked(null)
+        win.want("tapping it asks to read the saved chapter, not the document",
+                 win.readSavedAsks, readSavedAsksBefore + 1)
+        win.want("naming the volume's first chapter", win.readSavedChapterId, "c0")
+
+        volumesModel.setProperty(0, "saved", false)
+        volumesModel.setProperty(0, "documentUuid", "")
         chapterList.showView("chapters")
 
         // ---- selecting several rows (PLAN §12.1) ---------------------------
