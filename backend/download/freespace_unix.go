@@ -21,3 +21,9 @@ func freeSpace(dir string) (int64, error) {
 	}
 	return int64(uint64(st.Bavail) * uint64(st.Bsize)), nil
 }
+
+// FreeSpace is freeSpace, exported for callers outside this package that want
+// the same statfs-based figure — the storage summary (PLAN §12.6) reports it
+// for the saved root's filesystem, which is the same "/home on the device"
+// question a download's own pre-flight check asks.
+func FreeSpace(dir string) (int64, error) { return freeSpace(dir) }
