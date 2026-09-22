@@ -1,0 +1,26 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of /api/series/{slug} (PLAN §1.3/§1.4).",
+  "series": {
+    "id": 1,
+    "slug": "example-series-one",
+    "title": "Example Series One",
+    "alt_titles": ["Placeholder Alt Title", "Second Alt Title"],
+    "description": "<p>A placeholder synopsis, first paragraph.</p><p>Second paragraph with a <br>line break.</p>",
+    "cover": "https://cdn.example.invalid/asura-images/covers/example-series-one.webp",
+    "banner": "https://cdn.example.invalid/asura-images/banners/example-series-one.jpg",
+    "status": "hiatus",
+    "type": "manhwa",
+    "author": "Placeholder Author",
+    "artist": "-",
+    "chapter_count": 2,
+    "public_url": "/comics/example-series-one-abc123",
+    "source_url": "/s/1",
+    "genres": [
+      {"id": 1, "name": "Action", "slug": "action"},
+      {"id": 2, "name": "Fantasy", "slug": "fantasy"}
+    ]
+  },
+  "recommended_series": [
+    {"id": 9, "slug": "example-series-nine", "title": "Not Used By This Theme"}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "_comment": "Synthetic fixture reproducing a gated chapter that still ships a preview page or two, so the access_gate check is exercised independently of the empty-pages case in chapter-3-gated.json.",
+  "data": {
+    "access_gate": "subscription_required",
+    "chapter": {
+      "id": 103,
+      "series_id": 1,
+      "number": 3,
+      "slug": "chapter-3",
+      "pages": [
+        {"url": "https://cdn.example.invalid/asura-images/chapters/example-series-one/3/001.webp", "width": 800, "height": 1200}
+      ]
+    }
+  }
+}

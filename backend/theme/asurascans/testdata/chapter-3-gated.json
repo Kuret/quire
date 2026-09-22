@@ -1,0 +1,13 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of a gated chapter response: the chapter exists but is not readable without whatever the site is asking for.",
+  "data": {
+    "access_gate": "subscription_required",
+    "chapter": {
+      "id": 103,
+      "series_id": 1,
+      "number": 3,
+      "slug": "chapter-3",
+      "pages": []
+    }
+  }
+}

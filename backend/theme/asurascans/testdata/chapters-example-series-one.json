@@ -1,0 +1,10 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of /api/series/{slug}/chapters. Descending on purpose (newest first, matching the real site's own order) so TestChaptersAreAscending is watching the reversal and not a fixture that happens to be ascending already.",
+  "data": [
+    {"id": 105, "series_id": 1, "number": 5, "slug": "chapter-5", "page_count": 3, "is_premium": false, "published_at": "2026-09-20T10:00:00Z", "series_slug": "example-series-one"},
+    {"id": 104, "series_id": 1, "number": 4, "slug": "chapter-4", "page_count": 3, "is_premium": false, "published_at": "2026-09-13T10:00:00Z", "series_slug": "example-series-one"},
+    {"id": 103, "series_id": 1, "number": 3, "slug": "chapter-3", "page_count": 3, "is_premium": true, "published_at": "2026-09-06T10:00:00Z", "series_slug": "example-series-one"},
+    {"id": 102, "series_id": 1, "number": 2, "slug": "chapter-2", "page_count": 3, "is_premium": false, "published_at": "2026-08-30T10:00:00Z", "series_slug": "example-series-one"},
+    {"id": 101, "series_id": 1, "number": 1, "slug": "chapter-1", "page_count": 3, "is_premium": false, "published_at": "0001-01-01T00:00:00Z", "series_slug": "example-series-one"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of /api/series/{slug}/chapters/{number} for a readable chapter.",
+  "data": {
+    "access_gate": "",
+    "chapter": {
+      "id": 105,
+      "series_id": 1,
+      "number": 5,
+      "slug": "chapter-5",
+      "pages": [
+        {"url": "https://cdn.example.invalid/asura-images/chapters/example-series-one/5/001.webp", "width": 800, "height": 1200},
+        {"url": "https://cdn.example.invalid/asura-images/chapters/example-series-one/5/002.webp", "width": 800, "height": 1200},
+        {"url": "https://cdn.example.invalid/asura-images/chapters/example-series-one/5/003.webp", "width": 800, "height": 1200}
+      ]
+    }
+  }
+}

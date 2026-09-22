@@ -1,0 +1,17 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of /api/series with no search term (PLAN §7.5's Browse case).",
+  "data": [
+    {
+      "id": 2,
+      "slug": "example-series-two",
+      "title": "Example Series Two",
+      "cover": "https://cdn.example.invalid/asura-images/covers/example-series-two.webp",
+      "status": "completed",
+      "type": "manhwa",
+      "author": "-",
+      "artist": "-",
+      "genres": []
+    }
+  ],
+  "meta": {"total": 1, "per_page": 20, "has_more": false}
+}
