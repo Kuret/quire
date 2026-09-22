@@ -251,3 +251,99 @@ func TestRenameAnUnknownSourceIsNotFound(t *testing.T) {
 		t.Errorf("Rename = %v, want ErrNotFound", err)
 	}
 }
+
+// TestNewSourceDefaultsToNotPrivate pins the direction that matters for every
+// sources.json already on disk: an unmarked source is not private. Inverting
+// this default would make every existing source private the moment this
+// build ran, silently, with no migration to explain it.
+func TestNewSourceDefaultsToNotPrivate(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Example Reader", "https://example.invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.IsPrivate() {
+		t.Fatal("a new source defaults to private, want not-private")
+	}
+}
+
+// TestSetPrivateSurvivesReload is TestToggleProbeAndRemove's shape, for the
+// private flag: the toggle has to be there after the process that set it is
+// gone, or the whole feature resets itself on every restart.
+func TestSetPrivateSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Example Reader", "https://example.invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPrivate(added.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := reloaded.Get(added.ID)
+	if !ok {
+		t.Fatal("source vanished across a reload")
+	}
+	if !got.IsPrivate() {
+		t.Error("the private flag did not survive a reload")
+	}
+
+	if err := reloaded.SetPrivate(added.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if back, _ := reloaded.Get(added.ID); back.IsPrivate() {
+		t.Error("SetPrivate(false) left the source private")
+	}
+}
+
+func TestSetPrivateOnAnUnknownSourceIsNotFound(t *testing.T) {
+	store, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPrivate("nope", true); !errors.Is(err, state.ErrNotFound) {
+		t.Errorf("SetPrivate = %v, want ErrNotFound", err)
+	}
+}
+
+// TestListCopiesPrivate is TestListReturnsCopies' shape for Private: List
+// hands out copies, and a caller mutating the pointer it got back must not
+// reach into the store's own copy — the same failure mode Enabled's own
+// pointer field exists to avoid.
+func TestListCopiesPrivate(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(source("Example Reader", "https://example.invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPrivate(added.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	list := s.List()
+	if len(list) != 1 || !list[0].IsPrivate() {
+		t.Fatal("List did not report the source as private")
+	}
+	*list[0].Private = false
+
+	got, _ := s.Get(added.ID)
+	if !got.IsPrivate() {
+		t.Error("mutating a List() copy's Private pointer changed the stored source")
+	}
+}

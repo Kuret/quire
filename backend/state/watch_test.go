@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,6 +299,24 @@ func TestWatchingAnUnknownSourceIsRefused(t *testing.T) {
 	s, _ := newWatchStore(t)
 	if _, err := s.Watch("no-such-source", "/manga/a/", "A", nil, watchNow); err == nil {
 		t.Fatal("a watch on a missing source must be refused")
+	}
+	if got := s.Watches(); len(got) != 0 {
+		t.Fatalf("it was written anyway: %+v", got)
+	}
+}
+
+// TestWatchingAPrivateSourceIsRefused is the mutation that matters for the
+// private-sources feature's watch side: a watch that could exist would end up
+// on the ordinary Watching list the moment a check landed (see
+// service.watchListView), which is exactly what marking a source private is
+// supposed to prevent.
+func TestWatchingAPrivateSourceIsRefused(t *testing.T) {
+	s, _ := newWatchStore(t)
+	if err := s.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Watch("example-reader", "/manga/a/", "A", nil, watchNow); !errors.Is(err, state.ErrSourceIsPrivate) {
+		t.Fatalf("Watch on a private source = %v, want ErrSourceIsPrivate", err)
 	}
 	if got := s.Watches(); len(got) != 0 {
 		t.Fatalf("it was written anyway: %+v", got)

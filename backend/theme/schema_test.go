@@ -72,6 +72,7 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 	s := loadSchema(t)
 	at := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 	enabled := false
+	private := true
 
 	tests := []struct {
 		name string
@@ -109,6 +110,7 @@ func TestSourceRoundTripsAgainstSchema(t *testing.T) {
 				RateLimit:    &fetch.RateLimit{RequestsPerMinute: 6, Concurrency: 1},
 				SplitStrips:  "never",
 				Enabled:      &enabled,
+				Private:      &private,
 				AddedAt:      at,
 				LastProbe: &theme.ProbeResult{
 					Verdict:     theme.VerdictPartial,
@@ -310,7 +312,7 @@ func TestSourceOmitsEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "lastProbe", "selfHosted", "proxy"} {
+	for _, unwanted := range []string{"overrides", "selectors", "script", "allowedHosts", "rateLimit", "splitStrips", "enabled", "private", "lastProbe", "selfHosted", "proxy"} {
 		if strings.Contains(string(b), `"`+unwanted+`"`) {
 			t.Errorf("a bare source exported %q; it should be omitted:\n%s", unwanted, b)
 		}
@@ -334,6 +336,27 @@ func TestEnabledDefaultsToTrue(t *testing.T) {
 	}
 	if src.IsEnabled() {
 		t.Error("enabled:false was not honoured")
+	}
+}
+
+// TestPrivateDefaultsToFalse pins the schema default the private-sources
+// feature depends on for safety: every sources.json written before this field
+// existed has no "private" key, and it must not read as private. Private is a
+// pointer for the same round-trip reason Enabled is.
+func TestPrivateDefaultsToFalse(t *testing.T) {
+	var src theme.Source
+	if err := json.Unmarshal([]byte(`{"id":"a"}`), &src); err != nil {
+		t.Fatal(err)
+	}
+	if src.IsPrivate() {
+		t.Fatal("a source with no private field reads as private; the schema default is false")
+	}
+
+	if err := json.Unmarshal([]byte(`{"id":"a","private":true}`), &src); err != nil {
+		t.Fatal(err)
+	}
+	if !src.IsPrivate() {
+		t.Error("private:true was not honoured")
 	}
 }
 

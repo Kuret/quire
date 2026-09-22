@@ -108,6 +108,11 @@
       "description": "Per-source toggle surfaced in the source list (PLAN §6 M3).",
       "default": true
     },
+    "private": {
+      "type": "boolean",
+      "description": "Keeps this source out of the normal source list and the combined search; it appears only in the private source list and its own combined search.",
+      "default": false
+    },
     "addedAt": {
       "type": "string",
       "format": "date-time"

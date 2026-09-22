@@ -3,11 +3,20 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/rickl/quire/backend/theme"
 )
+
+// ErrSourceIsPrivate means a watch was refused because its source is marked
+// private (theme.Source.Private). Watching is a standing background job whose
+// result is pushed to the ordinary Watching list, and a private source's
+// series has no home there — see service.watchListView.
+var ErrSourceIsPrivate = errors.New("state: that source is private and cannot be watched")
 
 // Watch is one watched series and what Quire knows about it since the user last
 // looked (PLAN §12.2).
@@ -116,8 +125,17 @@ func (s *Store) Watch(sourceID, seriesID, title string, seen []string, now time.
 	// A watch on a source that is not here would be an orphan from the moment
 	// it was written, and PLAN §12.2 is explicit that orphans are not allowed
 	// to exist.
-	if !s.hasSource(sourceID) {
+	src, ok := s.getSourceLocked(sourceID)
+	if !ok {
 		return nil, fmt.Errorf("state: %q: %w", sourceID, ErrNotFound)
+	}
+	// A private source is kept out of the ordinary Watching list (see
+	// service.watchListView), and a watch that could never be shown there is
+	// not a feature, it is a way for a badge or a title to leak somewhere the
+	// owner did not ask for it to appear. Refused outright rather than
+	// silently accepted-but-hidden, so the "Watch" action can say why.
+	if src.IsPrivate() {
+		return nil, ErrSourceIsPrivate
 	}
 
 	w := s.findWatch(sourceID, seriesID)
@@ -403,6 +421,18 @@ func (s *Store) findWatch(sourceID, seriesID string) *Watch {
 		}
 	}
 	return nil
+}
+
+// getSourceLocked must be called with the lock held. It returns the stored
+// entry itself, not a copy: callers here only read it before releasing the
+// lock, and never hand it further.
+func (s *Store) getSourceLocked(id string) (*theme.Source, bool) {
+	for _, src := range s.sources {
+		if src.ID == id {
+			return src, true
+		}
+	}
+	return nil, false
 }
 
 // hasSource must be called with the lock held.

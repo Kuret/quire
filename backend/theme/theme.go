@@ -598,6 +598,21 @@ type Source struct {
 	// across an export/import round trip.
 	Enabled *bool `json:"enabled,omitempty"`
 
+	// Private marks a source as one the owner wants kept out of sight during
+	// ordinary use. A nil pointer means the schema default of false, which is
+	// what makes this safe against every source already on disk: nothing
+	// written before this field existed can read as private by accident.
+	//
+	// It never filters anything by itself — see IsPrivate. The two places
+	// sources are enumerated for the user, Service.sendSources and the
+	// combined search's newSearchAllPager, are what partition on it, each
+	// driven by IsPrivate so the two cannot drift apart. Nothing else needs
+	// to consult it: a private source's own screens (single-source search,
+	// browse, series detail) work exactly as any other source's do, because
+	// discretion is about what appears unasked for, not about disabling the
+	// source itself.
+	Private *bool `json:"private,omitempty"`
+
 	AddedAt time.Time `json:"addedAt"`
 
 	// LastProbe is the result of the most recent probe, re-run on failure
@@ -804,6 +819,11 @@ const (
 
 // IsEnabled applies the schema's default of true.
 func (s *Source) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
+
+// IsPrivate applies the schema's default of false: a source nobody has
+// touched is not private, which is the one direction that keeps every
+// existing sources.json valid without a migration.
+func (s *Source) IsPrivate() bool { return s.Private != nil && *s.Private }
 
 // SplitStripsValues are the accepted spellings of Source.SplitStrips, in the
 // schema's order. Empty is also accepted and means the default, "auto".

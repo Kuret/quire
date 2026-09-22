@@ -227,6 +227,22 @@ func (s *Store) SetEnabled(id string, on bool) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// SetPrivate is the per-source discretion toggle: a private source stays out
+// of the normal source list and out of the combined search, and appears in
+// their private counterparts instead. See theme.Source.Private.
+func (s *Store) SetPrivate(id string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID == id {
+			v := on
+			src.Private = &v
+			return s.save()
+		}
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // ErrBadSplitStrips means the requested strip-splitting mode is not one the
 // schema offers.
 var ErrBadSplitStrips = errors.New("state: splitStrips must be auto, never or always")
@@ -699,6 +715,10 @@ func copySource(src *theme.Source) *theme.Source {
 	if src.Enabled != nil {
 		v := *src.Enabled
 		out.Enabled = &v
+	}
+	if src.Private != nil {
+		v := *src.Private
+		out.Private = &v
 	}
 	if src.RateLimit != nil {
 		v := *src.RateLimit
