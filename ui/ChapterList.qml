@@ -157,6 +157,13 @@ Item {
     signal deleteSavedRequested(string chapterId)
     signal deleteSavedConfirmed(string chapterId)
 
+    // Deleting a whole saved volume in one go (round 2): the same
+    // confirm-then-done shape, naming every chapter of the volume rather than
+    // one. volumeLabel is the short "Vol 2" form, for the backend's question
+    // and done sentence.
+    signal deleteVolumeRequested(string volumeLabel, var chapterIds)
+    signal deleteVolumeConfirmed(string volumeLabel, var chapterIds)
+
     // Deleting a download (PLAN §12.4). Two signals because it is two steps and
     // the question in between is the backend's: deleteRequested asks for it,
     // deleteConfirmed is the answer. An accidental tap can only ever reach the
@@ -222,6 +229,13 @@ Item {
     property string confirmingId: ""
     property string confirmingMessage: ""
 
+    // The whole-volume delete's own pair, alongside confirmingId: a volume
+    // delete names a label and a list of chapter ids rather than one id, and
+    // both have to survive from the request to the confirmed tap (see
+    // askToDeleteVolume / the confirm button below).
+    property string confirmingVolumeLabel: ""
+    property var confirmingChapterIds: []
+
     // Which question the strip is asking: "download" is the volume-download
     // confirmation the strip was built for, "delete" is PLAN §12.4's. One
     // property rather than a strip each, because there is one place at the foot
@@ -236,6 +250,7 @@ Item {
     // spelling out "delete or deleteSaved" for itself.
     readonly property bool confirmingDelete: screen.confirmingKind === "delete"
                                              || screen.confirmingKind === "deleteSaved"
+                                             || screen.confirmingKind === "deleteSavedVolume"
 
     // ---- selecting several rows --------------------------------------------
     //
@@ -391,11 +406,27 @@ Item {
         screen.deleteSavedRequested(chapterId)
     }
 
+    // askToDeleteVolume is askToDeleteSaved's whole-volume counterpart (round
+    // 2): chapterIds names every chapter of the volume, and the backend
+    // deletes whichever of them are actually saved.
+    function askToDeleteVolume(volumeLabel, chapterIds) {
+        if (!chapterIds || chapterIds.length === 0)
+            return
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+        screen.confirmingKind = "deleteSavedVolume"
+        screen.confirmingVolumeLabel = volumeLabel
+        screen.confirmingChapterIds = chapterIds
+        screen.deleteVolumeRequested(volumeLabel, chapterIds)
+    }
+
     // closeConfirm puts the strip away without answering it.
     function closeConfirm() {
         screen.confirmingId = ""
         screen.confirmingMessage = ""
         screen.confirmingKind = "download"
+        screen.confirmingVolumeLabel = ""
+        screen.confirmingChapterIds = []
     }
 
     // The phases are backend/service's; the words each maps to are the view's,
@@ -1215,25 +1246,68 @@ Item {
                         }
                     }
 
+                    // Delete for the volume's chapters saved in Quire —
+                    // whether the volume is fully or only partly saved. This
+                    // is offered *instead of* the library-document delete
+                    // below whenever there is anything saved to delete: the
+                    // library document (if any) stays reachable through the
+                    // chapter rows, and once nothing is saved any more this
+                    // row falls back to offering that delete instead (round
+                    // 2's whole-volume delete).
+                    Rectangle {
+                        id: volumeDeleteSavedButton
+                        objectName: "volumeDeleteSavedButton"
+                        anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                        width: 140
+                        height: Style.buttonHeight
+                        // savedCount is undefined for a row appended without
+                        // the role at all (an older backend, or a harness
+                        // fixture) — treated as 0, same as everywhere else
+                        // that reads it.
+                        visible: (model.savedCount ? model.savedCount : 0) > 0 && !screen.selecting
+                        color: volumeDeleteSavedArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Delete"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: volumeDeleteSavedArea
+                            objectName: "volumeDeleteSavedArea"
+                            anchors.fill: parent
+                            enabled: volumeDeleteSavedButton.visible
+                            // "Vol " + the source's own bare label, matching
+                            // the same short form backend/service/download.go
+                            // already names this volume's files with — never
+                            // a sentence built here (PLAN §2), just the label
+                            // the backend's own question wraps around.
+                            onClicked: screen.askToDeleteVolume(
+                                model.label && model.label.length > 0 ? "Vol " + model.label : "",
+                                model.chapterIdsJson ? JSON.parse(model.chapterIdsJson) : [])
+                        }
+                    }
+
                     // The same affordance as a chapter row, for the same
-                    // reason: this row offers Read on a document, so it offers
-                    // the way to get rid of it. One document, whichever view
-                    // the user happens to be looking at it from.
-                    //
-                    // Never for a saved row, though: model.chapterId here is
-                    // only the volume's *first* chapter (see
-                    // backend/service/download.go's volumeRows), so
-                    // askToDeleteSaved on it would delete one chapter while
-                    // the button reads "Delete" for the whole volume. A saved
-                    // volume row offers Read only; deleting a saved chapter
-                    // happens one at a time, from the chapter view.
+                    // reason: this row offers Read on a document, so it
+                    // offers the way to get rid of it. Offered only when
+                    // there is nothing saved to delete instead (above) — a
+                    // volume that is both saved and a library document
+                    // offers the saved delete, and this one is reachable
+                    // again from here once that is no longer true.
                     Rectangle {
                         id: volumeDeleteButton
                         objectName: "volumeDeleteButton"
                         anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: !model.saved && model.documentUuid && !screen.selecting ? true : false
+                        visible: (model.savedCount ? model.savedCount : 0) === 0
+                                 && model.documentUuid && !screen.selecting ? true : false
                         color: volumeDeleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -1426,7 +1500,11 @@ Item {
         anchors { left: parent.left; right: parent.right; bottom: pagerBar.top }
         height: Style.rowHeight
         color: Style.paper
-        visible: screen.confirmingId.length > 0 && screen.confirmingMessage.length > 0
+        // A whole-volume delete carries no single confirmingId — it names a
+        // list of chapter ids instead (confirmingChapterIds) — so the strip
+        // is also shown for that kind once the backend's question arrives.
+        visible: (screen.confirmingId.length > 0 || screen.confirmingKind === "deleteSavedVolume")
+                 && screen.confirmingMessage.length > 0
 
         Rectangle {
             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -1546,8 +1624,12 @@ Item {
                     onClicked: {
                         var id = screen.confirmingId
                         var kind = screen.confirmingKind
+                        var volumeLabel = screen.confirmingVolumeLabel
+                        var chapterIds = screen.confirmingChapterIds
                         screen.closeConfirm()
-                        if (kind === "deleteSaved")
+                        if (kind === "deleteSavedVolume")
+                            screen.deleteVolumeConfirmed(volumeLabel, chapterIds)
+                        else if (kind === "deleteSaved")
                             screen.deleteSavedConfirmed(id)
                         else
                             screen.deleteConfirmed(id)

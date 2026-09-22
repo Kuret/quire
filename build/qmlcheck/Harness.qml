@@ -236,6 +236,14 @@ Window {
     property int deleteSavedConfirms: 0
     property string deleteSavedConfirmedAbout: ""
 
+    // A whole saved volume's Delete (round 2): the label and chapter ids it
+    // asked to remove.
+    property int deleteVolumeAsks: 0
+    property string deleteVolumeAskedLabel: ""
+    property var deleteVolumeAskedAbout: []
+    property int deleteVolumeConfirms: 0
+    property var deleteVolumeConfirmedAbout: []
+
     // What the probe wizard answered with: the choice, and the value typed into
     // the question's own field. A counter, because the field must not turn into
     // an answer by itself — the answer is the option the user tapped.
@@ -558,6 +566,15 @@ Window {
                       win.deleteSavedConfirms++
                       win.deleteSavedConfirmedAbout = chapterId
                   }
+                  onDeleteVolumeRequested: {
+                      win.deleteVolumeAsks++
+                      win.deleteVolumeAskedLabel = volumeLabel
+                      win.deleteVolumeAskedAbout = chapterIds
+                  }
+                  onDeleteVolumeConfirmed: {
+                      win.deleteVolumeConfirms++
+                      win.deleteVolumeConfirmedAbout = chapterIds
+                  }
                   synopsis: "A long description that runs on and on. " }
 
     // A second chapter screen with no volumes at all, which is what a source
@@ -744,12 +761,17 @@ Window {
                 "title": "Watched " + w, "newChapters": 0,
                 "state": "ok", "status": "Up to date", "checkedAt": "2026-09-16T00:00:00Z"}))
 
+        // Every role a volume row can carry, from this first append: a
+        // ListModel's schema is fixed by its first append, and a role
+        // missing from it is silently dropped on every later write to any
+        // row, even one that names it (round 2's savedCount/chapterIds/label).
         for (var v = 0; v < 3; ++v)
             volumesModel.append({"chapterId": "c" + (v * 7), "title": "Volume " + (v + 1),
+                                 "label": "" + (v + 1),
                                  "detail": "7 chapters, Chapter 1 to Chapter 7",
                                  "chapterCount": 7,
                                  "downloadState": "", "downloadMessage": "", "documentUuid": "",
-                                 "saved": false})
+                                 "saved": false, "savedCount": 0, "chapterIdsJson": "[]"})
 
         // Three releases of one book, titled the way the backend titles them.
         // Every role a chapter row has, because it is the same row: the two a
@@ -2030,9 +2052,15 @@ Window {
         // The volumes are put back first: the block above this one emptied the
         // model to prove a series that loses its volumes loses the switch.
         volumesModel.append({"chapterId": "c0", "title": "Volume 1",
+                             "label": "1",
                              "detail": "7 chapters, Chapter 1 to Chapter 7", "chapterCount": 7,
                              "downloadState": "", "downloadMessage": "", "documentUuid": "",
-                             "saved": false})
+                             "saved": false,
+                             // Both roles have to exist from this first
+                             // append, or a later setProperty onto them is
+                             // silently dropped (ListModel's own rule, see
+                             // ui/Main.qml's fillDownloaded comment).
+                             "savedCount": 0, "chapterIdsJson": "[]"})
         chapterList.showView("volumes")
         // Collected fresh each time: a ListView destroys and rebuilds its
         // delegates when the model changes, so a list held from before an
@@ -2065,26 +2093,68 @@ Window {
         volumesModel.setProperty(0, "documentUuid", "")
         win.want("clearing it takes the volume Delete button too", visibleVolumeDeletes(), 0)
 
-        // A saved volume row — even one also on the tablet — offers no
-        // Delete at all: only Read, opening the volume's first chapter via
-        // OpenSaved. Deleting a saved chapter happens one at a time, from
-        // the chapter view.
-        volumesModel.setProperty(0, "documentUuid", "doc-vol")
-        volumesModel.setProperty(0, "saved", true)
+        // A saved volume row — even one also on the tablet — offers Delete
+        // for its *saved chapters*, not the library document (round 2): the
+        // library-document Delete (volumeDeleteButton) is offered only while
+        // nothing is saved, and the saved-chapters one
+        // (volumeDeleteSavedButton) takes over the moment savedCount > 0.
+        // The library document itself stays reachable from the chapter rows
+        // in the meantime.
+        // Re-appended rather than mutated in place: ListModel.setProperty
+        // does not reliably update an array-valued role (chapterIds) once a
+        // row already exists — only a fresh append gives it the array this
+        // step needs. Scalar roles (documentUuid, saved, savedCount) do not
+        // have that limitation and are set the ordinary way everywhere else
+        // in this file; this row is the one place chapterIds itself has to
+        // change after creation.
+        volumesModel.remove(0)
+        volumesModel.append({"chapterId": "c0", "title": "Volume 1", "label": "1",
+                             "detail": "7 chapters, Chapter 1 to Chapter 7", "chapterCount": 7,
+                             "downloadState": "", "downloadMessage": "", "documentUuid": "doc-vol",
+                             "saved": true, "savedCount": 7,
+                             "chapterIdsJson": JSON.stringify(["c0", "c1", "c2", "c3", "c4", "c5", "c6"])})
+        // The remove() above took volumeModel.count briefly to zero, which
+        // trips hasVolumesChanged's own safety net ("a series that loses its
+        // volumes must not leave the screen looking at nothing") and drops
+        // the view back to "chapters" — exactly as it should for a real
+        // refresh that loses its volumes, but not what this step means, so
+        // it is put back explicitly.
+        chapterList.showView("volumes")
         win.findChild(chapterList, "volumeRows").forceLayout()
-        win.want("a saved volume row offers no Delete, even when also downloaded",
+        win.want("a saved volume row offers no library Delete, even when also downloaded",
                  visibleVolumeDeletes(), 0)
+        var visibleVolumeSavedDeletes = function () {
+            var found = win.findChildren(chapterList, "volumeDeleteSavedButton", [])
+            var n = 0
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
+                    n++
+            return n
+        }
+        win.want("but offers Delete for its saved chapters instead",
+                 visibleVolumeSavedDeletes(), 1)
         win.want("its button reads Read",
                  win.findChild(chapterList, "volumeButton").children[0].text, "Read")
 
+        win.deleteVolumeAsks = 0
+        win.findChild(chapterList, "volumeDeleteSavedArea").clicked(null)
+        win.want("the saved-chapters delete asks once", win.deleteVolumeAsks, 1)
+        win.want("naming the volume's own chapters",
+                 win.deleteVolumeAskedAbout.join(","), "c0,c1,c2,c3,c4,c5,c6")
+
         var readSavedAsksBefore = win.readSavedAsks
         win.findChild(chapterList, "volumeArea").clicked(null)
-        win.want("tapping it asks to read the saved chapter, not the document",
+        win.want("tapping the volume button still reads the saved chapter, not the document",
                  win.readSavedAsks, readSavedAsksBefore + 1)
         win.want("naming the volume's first chapter", win.readSavedChapterId, "c0")
 
-        volumesModel.setProperty(0, "saved", false)
-        volumesModel.setProperty(0, "documentUuid", "")
+        // Reset the same way: chapterIds cannot be cleared by setProperty
+        // either.
+        volumesModel.remove(0)
+        volumesModel.append({"chapterId": "c0", "title": "Volume 1", "label": "1",
+                             "detail": "7 chapters, Chapter 1 to Chapter 7", "chapterCount": 7,
+                             "downloadState": "", "downloadMessage": "", "documentUuid": "",
+                             "saved": false, "savedCount": 0, "chapterIdsJson": "[]"})
         chapterList.showView("chapters")
 
         // ---- selecting several rows (PLAN §12.1) ---------------------------
