@@ -98,6 +98,11 @@ Item {
     // it.
     property string confirmingId: ""
     property string confirmingName: ""
+    // The confirm strip's own sentence for removing this source
+    // (backend/service/service.go's removeQuestion) — composed there, not
+    // here, because it depends on whether the source has any chapters saved
+    // in Quire (PLAN §2).
+    property string confirmingRemoveQuestion: ""
     // The open row's current splitting mode, carried for the same reason the
     // name is: the strip is drawn outside the delegate that knows it.
     property string confirmingSplit: "auto"
@@ -411,6 +416,8 @@ Item {
                             var open = screen.confirmingId !== model.sourceId
                             screen.confirmingId = open ? model.sourceId : ""
                             screen.confirmingName = open ? model.name : ""
+                            screen.confirmingRemoveQuestion = open && model.removeQuestion
+                                                            ? model.removeQuestion : ""
                             screen.confirmingSplit = open && model.splitStrips
                                                    ? model.splitStrips : "auto"
                             screen.confirmingProxy = open && model.proxy ? model.proxy : ""
@@ -520,14 +527,23 @@ Item {
         }
 
         Text {
+            objectName: "removeQuestionLabel"
             anchors {
                 left: parent.left; leftMargin: Style.margin
                 right: splitButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
+            // The backend's own sentence (backend/service/service.go's
+            // removeQuestion) — composed there, not here, because whether
+            // removing this source also deletes chapters saved in Quire is
+            // not something QML knows (PLAN §2). Two lines rather than one:
+            // the strip has the height to spare, and the "chapters saved in
+            // Quire will be deleted" sentence is worth reading in full
+            // rather than elided away.
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
             elide: Text.ElideRight
-            text: "Remove " + screen.confirmingName +
-                  "? Downloaded volumes stay in your library."
+            text: screen.confirmingRemoveQuestion
             font.pointSize: Style.smallSize
             color: Style.muted
         }

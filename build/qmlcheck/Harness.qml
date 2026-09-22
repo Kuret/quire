@@ -33,11 +33,13 @@ Window {
                       theme: "madara"; lang: "en"; enabled: true; status: "Working"; statusDetail: ""
                       splitStrips: "never"; proxy: "http://localhost:1055"; selfHostedViaProxy: true
                       allowedHosts: "cdn.example.invalid"
-                      pendingHosts: "[{\"host\":\"images.example.invalid\",\"purpose\":\"cover\"}]" }
+                      pendingHosts: "[{\"host\":\"images.example.invalid\",\"purpose\":\"cover\"}]"
+                      removeQuestion: "Remove Example Reader? Downloaded volumes stay in your library." }
         // No splitStrips at all: a source stored before PLAN §12.3 existed. It
         // has to read as Automatic rather than blank.
         ListElement { sourceId: "s2"; name: "Another"; baseUrl: "https://other.invalid"
-                      theme: "mangadex"; lang: "en"; enabled: false; status: "Off"; statusDetail: "" }
+                      theme: "mangadex"; lang: "en"; enabled: false; status: "Off"; statusDetail: ""
+                      removeQuestion: "Remove Another? Its 4 chapters saved in Quire will be deleted; anything in your library stays." }
     }
     ListModel { id: seriesModel }
     ListModel { id: chaptersModel }
@@ -1318,6 +1320,29 @@ Window {
         sourceList.notice = ""
         win.want("no notice, no strip", noticeStrip.visible, false)
         win.want("and no height taken from the list", noticeStrip.height, 0)
+
+        // ---- removing a source: the question is the backend's -----------
+        //
+        // The strip shows backend/service/service.go's removeQuestion
+        // verbatim (PLAN §2) rather than a sentence composed in QML, because
+        // only the backend knows whether removing this source also deletes
+        // any chapters saved in Quire.
+        var removeLabel = win.findChild(sourceList, "removeQuestionLabel")
+        sourceList.confirmingId = "s1"
+        sourceList.confirmingRemoveQuestion = sourcesModel.get(0).removeQuestion
+        win.want("a source with nothing saved gets the plain sentence",
+                 removeLabel.text,
+                 "Remove Example Reader? Downloaded volumes stay in your library.")
+
+        sourceList.confirmingId = "s2"
+        sourceList.confirmingRemoveQuestion = sourcesModel.get(1).removeQuestion
+        win.want("a source with saved chapters names how many",
+                 removeLabel.text,
+                 "Remove Another? Its 4 chapters saved in Quire will be deleted; " +
+                 "anything in your library stays.")
+
+        sourceList.confirmingId = ""
+        sourceList.confirmingRemoveQuestion = ""
 
         // ---- PLAN §12.3: the per-source strip-splitting override --------
         //
