@@ -1761,6 +1761,32 @@ Window {
         win.want("back on an ordinary screen, the gesture is not consumed again",
                  win.app.escapeRequested(), false)
 
+        // ---- saved in Quire: reading a chapter kept in Quire's own storage -----------
+        //
+        // Unlike Try, the screen does not switch on the ask (openSaved) — only
+        // on the answer (SavedOpened) — since a chapter that turns out not to
+        // be saved answers MessageError instead, and switching first would
+        // leave the reader open on nothing.
+        var reader = win.findChild(win.app, "tryReader")
+        win.app.currentSourceId = "src-a"
+        win.app.currentSeriesId = "/manga/lantern/"
+        win.app.openSaved("src-a", "/manga/lantern/", "c9")
+        win.want("asking to read a saved chapter does not yet switch screens",
+                 win.app.screen, "series")
+
+        win.deliver(Msg.SavedOpened, {
+            "sourceId": "src-a", "seriesId": "/manga/lantern/", "chapterId": "c9",
+            "seriesTitle": "The Lantern Keeper", "chapterTitle": "Chapter 9",
+            "pages": ["/tmp/s0.jpg", "/tmp/s1.jpg"], "position": 1})
+        win.want("the answer is what switches to the reader", win.app.screen, "saved")
+        win.want("opened in saved mode", reader.mode, "saved")
+        win.want("at the stored position", reader.index, 1)
+
+        win.want("the reader consumes the escape gesture here too",
+                 win.app.escapeRequested(), true)
+        win.want("leaving a saved chapter goes back to its series",
+                 win.app.screen, "series")
+
         // ---- leaving --------------------------------------------------------------------
         //
         // **It detaches; it does not terminate.** The backend is a service that

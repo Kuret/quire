@@ -1786,6 +1786,35 @@ Window {
         win.findChild(tryReader, "tryBackArea").clicked(null)
         win.want("closing the reader is reported once", win.tryCloses, 1)
 
+        // ---- saved mode: every page known up front, no honesty line -------
+        //
+        // Unlike Try, openSaved arrives with the whole chapter already on
+        // disk and the position to open at — no "Fetching…" placeholder is
+        // possible and none of the "nothing is saved here" wording applies.
+        tryReader.openSaved({"sourceId": "src", "seriesId": "series", "chapterId": "c9",
+                             "seriesTitle": "The Lantern Keeper", "chapterTitle": "Chapter 9",
+                             "pages": ["/tmp/s0.jpg", "/tmp/s1.jpg", "/tmp/s2.jpg"],
+                             "position": 1})
+        win.want("saved mode opens at the stored position", tryReader.index, 1)
+        win.want("every page is already known",
+                 win.findChild(tryReader, "tryPageImage").visible, true)
+        win.want("so the fetching placeholder never shows",
+                 win.findChild(tryReader, "tryLoadingLabel").visible, false)
+        win.want("nothing to be honest about on the opening page",
+                 win.findChild(tryReader, "tryOpeningNotice").visible, false)
+        win.findChild(tryReader, "tryMiddleZone").clicked(null)
+        win.want("nor in the overlay",
+                 win.findChild(tryReader, "tryOverlayNotice").visible, false)
+        win.findChild(tryReader, "tryMiddleZone").clicked(null)
+
+        // A position past the last page (a stale or malformed one) is
+        // clamped rather than trusted — see openSaved's own comment.
+        tryReader.openSaved({"sourceId": "src", "seriesId": "series", "chapterId": "c9",
+                             "chapterTitle": "Chapter 9", "pages": ["/tmp/s0.jpg"],
+                             "position": 99})
+        win.want("a position past the end is clamped to the last page",
+                 tryReader.index, 0)
+
         // The volume view offers it on the same terms. A row that offers Read
         // offers Delete, whichever view the document is being looked at from.
         //

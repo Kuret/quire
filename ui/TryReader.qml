@@ -65,6 +65,14 @@ Item {
     property string chapterId: ""
     property string chapterTitle: ""
 
+    // "try" (the default, streaming preview) or "saved" (a chapter saved in
+    // Quire's own storage, opened with OpenSaved/SavedOpened). Both modes
+    // share every tap zone, the overlay and the escape handling below — the
+    // differences are what is already known up front (every saved page, so
+    // no TryPageRequest traffic) and what closing sends (Main.qml's
+    // leaveReader).
+    property string mode: "try"
+
     property int index: 0
     // 0 means "not known to be the whole chapter yet" — the same convention
     // ui/PagerBar.qml uses for "the source has not said how much there is",
@@ -117,7 +125,11 @@ Item {
     // on its first page with the overlay shut, off the instant either stops
     // being true. See the file comment for why this is enough on its own —
     // it needs no timer and no dismissal to track.
-    readonly property bool showOpeningNotice: screen.index === 0 && !screen.overlayVisible
+    // Saved mode has no such line to show: everything on a saved chapter's
+    // disk is exactly what SavedOpened said it was, so there is nothing to
+    // be honest about.
+    readonly property bool showOpeningNotice: screen.mode === "try"
+                                              && screen.index === 0 && !screen.overlayVisible
 
     function goToPreviousPage() {
         if (screen.canGoBack)
@@ -138,6 +150,7 @@ Item {
     // "Fetching page 1…" instead of whatever the previous session left on
     // screen.
     function begin(sourceId, seriesId, chapterId, title) {
+        screen.mode = "try"
         screen.sourceId = sourceId
         screen.seriesId = seriesId
         screen.chapterId = chapterId
@@ -154,6 +167,39 @@ Item {
         // above emits no change signal at all, and page 1 would never be
         // asked for.
         screen.ensureRequested(0)
+    }
+
+    // openSaved is MessageSavedOpened: unlike begin/ready, every page is
+    // already known and local, so there is nothing to stream in and no
+    // "Fetching…" placeholder to show — the reader opens complete, straight
+    // at the position the backend last stored for it.
+    function openSaved(payload) {
+        screen.mode = "saved"
+        screen.sourceId = payload.sourceId
+        screen.seriesId = payload.seriesId
+        screen.chapterId = payload.chapterId
+        screen.chapterTitle = payload.chapterTitle
+        screen.note = ""
+        screen.overlayVisible = false
+        screen.requested = ({})
+
+        var pages = payload.pages ? payload.pages : []
+        var paths = {}
+        for (var i = 0; i < pages.length; ++i)
+            paths[i] = pages[i]
+        screen.pagePaths = paths
+        screen.pageCount = pages.length
+        screen.complete = true
+
+        // Clamped defensively — the backend already clamps position to the
+        // page range, but a reader that trusted the wire over its own page
+        // count could still be told to open past the last page.
+        var pos = payload.position ? payload.position : 0
+        if (pos < 0)
+            pos = 0
+        if (pages.length > 0 && pos >= pages.length)
+            pos = pages.length - 1
+        screen.index = pos
     }
 
     // ready is MessageTryReady: the session is open and its first page is on
@@ -454,6 +500,9 @@ Item {
                 Text {
                     objectName: "tryOverlayNotice"
                     width: parent.width
+                    // Saved mode has nothing to be honest about — see
+                    // showOpeningNotice.
+                    visible: screen.mode === "try"
                     wrapMode: Text.WordWrap
                     text: "Preview only — nothing is saved here. Download the chapter to keep it."
                     font.pointSize: Style.smallSize
