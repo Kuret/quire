@@ -21,12 +21,15 @@ import (
 )
 
 type volumeRowJSON struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Title        string `json:"title"`
-	Detail       string `json:"detail"`
-	ChapterCount int    `json:"chapterCount"`
-	DocumentUUID string `json:"documentUuid"`
+	ID           string   `json:"id"`
+	Label        string   `json:"label"`
+	Title        string   `json:"title"`
+	Detail       string   `json:"detail"`
+	ChapterCount int      `json:"chapterCount"`
+	DocumentUUID string   `json:"documentUuid"`
+	Saved        bool     `json:"saved"`
+	ChapterIDs   []string `json:"chapterIds"`
+	SavedCount   int      `json:"savedCount"`
 }
 
 // volumesOf asks for a series the way the frontend does and returns the volume
@@ -94,6 +97,47 @@ func TestASourceWithLabelsIsOfferedAVolumeView(t *testing.T) {
 	}
 	if v.DocumentUUID != "" {
 		t.Errorf("nothing has been downloaded, yet the row offers to read %q", v.DocumentUUID)
+	}
+	if len(v.ChapterIDs) != v.ChapterCount {
+		t.Errorf("chapterIds has %d entries, want chapterCount's %d", len(v.ChapterIDs), v.ChapterCount)
+	}
+	if v.SavedCount != 0 {
+		t.Errorf("savedCount %d, want 0 — nothing has been saved", v.SavedCount)
+	}
+}
+
+// TestVolumeRowSavedCountTracksQuireSaves covers the volume delete feature's
+// read side: chapterIds names the whole volume in reading order, and
+// savedCount is how many of them are saved in Quire — the figure the row uses
+// to decide whether Delete is offered at all, and whether it reads "Read" or
+// "Download".
+func TestVolumeRowSavedCountTracksQuireSaves(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addVolumeSource(t, h.store)
+	rec := &recorder{}
+
+	seriesID, chapterID := firstChapter(t, h.svc, rec)
+	handle(t, h.svc, rec, appload.MessageEnqueueDownload,
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+	waitForPhase(t, rec, "confirm")
+	handle(t, h.svc, rec, appload.MessageEnqueueDownload,
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true}`)
+	waitForPhase(t, rec, "done")
+
+	vols := volumesOf(t, h.svc, seriesID)
+	if len(vols) != 1 {
+		t.Fatalf("%d volume rows, want 1", len(vols))
+	}
+	v := vols[0]
+	if len(v.ChapterIDs) != v.ChapterCount {
+		t.Fatalf("chapterIds has %d entries, want chapterCount's %d", len(v.ChapterIDs), v.ChapterCount)
+	}
+	if v.SavedCount != v.ChapterCount {
+		t.Errorf("savedCount %d, want every one of the volume's %d chapters", v.SavedCount, v.ChapterCount)
+	}
+	if !v.Saved {
+		t.Error("saved is false though every chapter of the volume is saved in Quire")
 	}
 }
 

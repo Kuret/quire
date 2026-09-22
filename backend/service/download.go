@@ -1165,6 +1165,17 @@ type volumeRow struct {
 	// checked one at a time rather than looked up as one thing, because one
 	// thing is not what a Quire-saved volume is.
 	Saved bool `json:"saved"`
+
+	// ChapterIDs are the volume's own chapters, in order — what
+	// MessageDeleteSaved's chapterIds names to delete the whole volume from
+	// Quire in one go, rather than one chapter at a time.
+	ChapterIDs []string `json:"chapterIds,omitempty"`
+
+	// SavedCount is how many of ChapterIDs are saved in Quire right now: zero
+	// for a volume with nothing saved, ChapterCount for one fully saved
+	// (Saved is then also true), and anything between for a partly saved one.
+	// It is what decides whether the volume row offers Delete at all.
+	SavedCount int `json:"savedCount"`
 }
 
 // volumeRows is the chapter screen's second view, or nil when there is none.
@@ -1209,6 +1220,13 @@ func volumeRows(seriesTitle string, chapters []theme.Chapter,
 		}
 		r.DocumentUUID = volumeDocument(p, stored)
 		r.Saved = allChaptersSaved(p, saved)
+		r.ChapterIDs = make([]string, 0, len(p.Chapters))
+		for _, c := range p.Chapters {
+			r.ChapterIDs = append(r.ChapterIDs, c.ID)
+			if saved[c.ID] {
+				r.SavedCount++
+			}
+		}
 		rows = append(rows, r)
 	}
 	return rows
