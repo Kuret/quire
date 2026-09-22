@@ -739,11 +739,15 @@ Item {
     Item {
         id: addBar
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        // A dedicated strip below the labelled buttons for the eye-icon
-        // button, only on the normal list — see privateListButton below for
-        // why it needs its own space rather than sharing the labelled row's.
-        height: Style.rowHeight + Style.gap +
-                (screen.showingPrivate ? 0 : (48 + Style.gap))
+        height: Style.rowHeight + Style.gap
+
+        // The eye-icon button sits at the right-hand end of the labelled row
+        // rather than on a strip of its own, and privateSlot is what makes
+        // that safe: the labelled buttons divide the space *after* this is
+        // taken out, so the two cannot collide however narrow the panel gets.
+        // Zero on the private list, where there is no eye to make room for.
+        readonly property int privateMarkWidth: 64
+        readonly property int privateSlot: screen.showingPrivate ? 0 : privateMarkWidth + Style.gap
 
         Rectangle {
             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -756,6 +760,7 @@ Item {
         // because the first screen is where a list of things that may have
         // gained a chapter belongs (PLAN §12.2).
         Row {
+            id: actionRow
             anchors { horizontalCenter: parent.horizontalCenter
                       top: parent.top; topMargin: Style.gap / 2 }
             height: Style.rowHeight + Style.gap / 2
@@ -774,7 +779,7 @@ Item {
             // is a window and a bar sized to the panel overflows it.
             Rectangle {
                 objectName: "searchAllButton"
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: searchAllArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -809,7 +814,7 @@ Item {
                 // scoped to the list and the combined search, not to every
                 // screen a source's series can reach.
                 visible: !screen.showingPrivate
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: downloadedArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -834,7 +839,7 @@ Item {
             Rectangle {
                 objectName: "watchingButton"
                 visible: !screen.showingPrivate
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: watchingArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -890,7 +895,7 @@ Item {
                 // privateButton above), so the private screen offers no add
                 // button of its own.
                 visible: !screen.showingPrivate
-                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3) / 4, 300)
+                width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: addArea.pressed ? Style.pressed : Style.paper
                 border.width: 2
@@ -920,11 +925,12 @@ Item {
         // no label and no count, on purpose: a badge here would be exactly
         // the signpost the brief asks this not to be.
         //
-        // It has a dedicated strip below the labelled row (see addBar's own
-        // height above) rather than sharing that row's space: the row's
-        // buttons are capped at 300px each and centred, so on a narrow window
-        // the slack beside them can shrink to nothing, and a button that only
-        // sometimes has room is a button that sometimes cannot be tapped.
+        // It sits at the right-hand end of the labelled row. That row's
+        // buttons are capped at 300px each and centred, so the slack beside
+        // them can shrink to nothing on a narrow panel — which is why the
+        // eye's width is subtracted from their arithmetic (addBar.privateSlot)
+        // rather than hoped for. A button that only sometimes has room is a
+        // button that sometimes cannot be tapped.
         //
         // Only on the normal list. The private list is reached from here and
         // left by the header's own Back, so it does not need a way back to
@@ -934,10 +940,10 @@ Item {
             objectName: "privateListButton"
             anchors {
                 right: parent.right; rightMargin: Style.margin
-                bottom: parent.bottom; bottomMargin: Style.gap / 2
+                verticalCenter: actionRow.verticalCenter
             }
-            width: 64
-            height: 48
+            width: addBar.privateMarkWidth
+            height: Style.buttonHeight
             visible: !screen.showingPrivate
             color: privateListArea.pressed ? Style.pressed : Style.paper
             border.width: 1
