@@ -1256,6 +1256,40 @@ Rectangle {
         }
     }
 
+    // escapeRequested is Annex's contract for its own escape hatch: xochitl's
+    // swipe-down-from-top-left, which the host otherwise treats as "close
+    // this app" without asking it anything. Returning true says the app
+    // handled the gesture itself and should stay open; returning false (or
+    // not declaring this at all) leaves the host closing Quire exactly as it
+    // does today. The host will not let this trap anyone — it consumes at
+    // most one escape in a row, so a second swipe shortly after a consumed
+    // one closes Quire regardless.
+    //
+    // **Only the Try reader consumes it.** Try is full screen and draws over
+    // the header along with everything Annex would otherwise let the user
+    // swipe back to (see the TryReader comment below) — the swipe that would
+    // ordinarily leave a screen for the one under it has nothing to land on.
+    // Leaving goes through exactly the path the reader's own Close button and
+    // the header Back button already use: root.endTry() ends the session and
+    // sweeps its page cache, then showScreen returns to the series it was
+    // opened from.
+    //
+    // Every other panel that floats over a screen — rename, proxy, hosts,
+    // splitting, the private list, search-all — is left alone on purpose.
+    // Each is already one tap or one Back from the ordinary screen under it,
+    // so the swipe that would dismiss it is a swipe the user already has:
+    // Back, or the panel's own close. Consuming the gesture there buys
+    // nothing and costs the one swipe in a row the host will actually honour
+    // — spending it on a panel is a swipe not available to leave Quire the
+    // moment it turns out this was not what the user meant to close.
+    function escapeRequested() {
+        if (root.screen !== "try")
+            return false
+        root.endTry()
+        root.showScreen("series")
+        return true
+    }
+
     function screenTitle() {
         switch (root.screen) {
         case "add": return "Add a source"

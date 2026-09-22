@@ -1723,6 +1723,44 @@ Window {
                  backend.sendCount, 0)
         win.want("and the app is still on its screen", win.app.screen, "series")
 
+        // ---- escapeRequested: Annex's own escape hatch -----------------------------------
+        //
+        // Annex's host offers xochitl's swipe-down-from-top-left to the app
+        // before treating it as "close Quire" (see ui/Main.qml's own comment
+        // on escapeRequested). Two things have to be true of it:
+        //
+        //   (a) an ordinary screen does not consume it — an implementation
+        //       that always answered true would still pass every other check
+        //       in this file, and only fails here;
+        //   (b) leaving the reader goes through the same teardown Back does
+        //       — an implementation that switched the screen without calling
+        //       endTry would still answer true and move the screen, and only
+        //       the EndTry assertion below would catch it.
+
+        win.want("on an ordinary screen the gesture is not consumed",
+                 win.app.escapeRequested(), false)
+        win.want("and the screen does not move", win.app.screen, "series")
+
+        win.app.currentSourceId = "src-a"
+        win.app.currentSeriesId = "/manga/lantern/"
+        backend.forget()
+        win.app.openTry("c2", "Chapter 2")
+        win.want("opening Try switches to the reader", win.app.screen, "try")
+        win.want("which asks the backend to start the session",
+                 backend.countOf(Msg.TryChapter), 1)
+
+        backend.forget()
+        win.want("the reader consumes the gesture", win.app.escapeRequested(), true)
+        win.want("leaving the way Back and the reader's own Close both do",
+                 win.app.screen, "series")
+        win.want("which ends the Try session, sweeping its page cache",
+                 backend.countOf(Msg.EndTry), 1)
+        win.want("naming the chapter that was open",
+                 backend.bodyOf(Msg.EndTry).chapterId, "c2")
+
+        win.want("back on an ordinary screen, the gesture is not consumed again",
+                 win.app.escapeRequested(), false)
+
         // ---- leaving --------------------------------------------------------------------
         //
         // **It detaches; it does not terminate.** The backend is a service that
