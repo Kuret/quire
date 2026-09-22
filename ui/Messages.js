@@ -137,4 +137,20 @@ var PrivateSources = 81
 // SearchAllResults, unchanged.
 var SearchAllPrivate = 82
 
+// Try: reading a chapter in Quire's own reader without downloading it and
+// without a library entry (milestone 1). TryChapter opens a session,
+// ending whichever was open; TryReady says the session is open and its
+// first page (index 0) is on disk, with `complete` saying whether pageCount
+// is the whole chapter yet or still resolving behind a fast first page
+// (theme.FirstPageProber) — TryPageCount follows once it is. TryPageRequest
+// asks for a page the reader turned to and does not already have; TryPage
+// answers with it. EndTry discards the session's cache — the entire cleanup
+// Try needs, since there is no reading position and no library entry.
+var TryChapter = 83
+var TryReady = 84
+var TryPage = 85
+var TryPageRequest = 86
+var EndTry = 87
+var TryPageCount = 88
+
 var Error = 90

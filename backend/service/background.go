@@ -111,4 +111,16 @@ func (s *Service) goBackground(ctx context.Context, fn func(context.Context)) {
 // caller to shut them down in its own order.
 func (s *Service) Close() {
 	s.bg.close()
+	// Whatever Try session was open leaves no trace even on a clean shutdown,
+	// not only after a crash: End is cheap, and there is no reason to leave
+	// it to the next startup's sweep when this one can do it itself.
+	s.tryMu.Lock()
+	session := s.trySession
+	s.trySession = nil
+	s.tryMu.Unlock()
+	if session != nil {
+		if err := session.End(); err != nil {
+			s.log.Warn("could not remove the Try session's cache on shutdown", "err", err)
+		}
+	}
 }

@@ -49,6 +49,7 @@ import (
 	"github.com/rickl/quire/backend/theme/shelfmark"
 	"github.com/rickl/quire/backend/theme/webtoons"
 	"github.com/rickl/quire/backend/theme/weebcentral"
+	"github.com/rickl/quire/backend/tryreader"
 )
 
 // logDir is where the rotating log lives, once it is known. Empty means
@@ -597,10 +598,14 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	}
 
 	svc := service.New(service.Options{
-		Store:        store,
-		Registry:     reg,
-		Fetcher:      client,
-		Covers:       covers.New(filepath.Join(dir, "covers"), client),
+		Store:    store,
+		Registry: reg,
+		Fetcher:  client,
+		Covers:   covers.New(filepath.Join(dir, "covers"), client),
+		// Try's own page cache (milestone 1), swept clean on every start —
+		// see tryreader.New: unlike covers, nothing under it is worth keeping
+		// warm across a restart.
+		TryCache:     tryreader.New(filepath.Join(dir, "try"), client),
 		Log:          log,
 		Library:      lib,
 		LibraryStore: libStore,

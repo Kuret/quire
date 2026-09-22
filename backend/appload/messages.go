@@ -491,6 +491,43 @@ const (
 	// scoped cache key).
 	MessageSearchAllPrivate MessageType = 82
 
+	// Try: reading a chapter in Quire's own reader without downloading it and
+	// without a library entry (milestone 1's Try feature). See
+	// backend/service/tryreader.go for the whole exchange.
+	//
+	// MessageTryChapter is UI→BE, JSON {sourceId, seriesId, chapterId}: open a
+	// session on this chapter, ending whichever was open. MessageTryReady is
+	// BE→UI, JSON {sourceId, seriesId, chapterId, index, path, pageCount,
+	// complete}: the session is open and its first page (index 0) is on disk.
+	// `complete` says whether pageCount is the whole chapter yet — false for a
+	// theme that named a fast first page and is still resolving the rest
+	// (theme.FirstPageProber); MessageTryPageCount follows once it has.
+	MessageTryChapter MessageType = 83
+	MessageTryReady   MessageType = 84
+
+	// MessageTryPage is BE→UI, JSON {sourceId, seriesId, chapterId, index,
+	// path}: one page, fetched and downscaled, in answer to
+	// MessageTryPageRequest — UI→BE, JSON {sourceId, seriesId, chapterId,
+	// index} — which the reader sends when it turns to a page it does not
+	// already have. A page not yet answered is not an error; the reader says
+	// so on screen and waits (PLAN's e-ink rule: never a blank page standing
+	// in for content).
+	MessageTryPage        MessageType = 85
+	MessageTryPageRequest MessageType = 86
+
+	// MessageEndTry is UI→BE, JSON {sourceId, seriesId, chapterId}: leaving
+	// the reader, which discards the session's cache directory and is the
+	// entire cleanup Try needs — there is no reading position and no library
+	// entry to also undo.
+	MessageEndTry MessageType = 87
+
+	// MessageTryPageCount is BE→UI, JSON {sourceId, seriesId, chapterId,
+	// pageCount, complete, note}: the page count changed because a theme's
+	// full page list resolved (or failed to) behind the fast first page
+	// MessageTryReady already showed. `note` is set only when the list did
+	// not resolve, in plain language, and is empty on an ordinary completion.
+	MessageTryPageCount MessageType = 88
+
 	MessageError MessageType = 90
 )
 
@@ -562,6 +599,12 @@ var messageNames = map[MessageType]string{
 	MessageListPrivateSources:    "ListPrivateSources",
 	MessagePrivateSources:        "PrivateSources",
 	MessageSearchAllPrivate:      "SearchAllPrivate",
+	MessageTryChapter:            "TryChapter",
+	MessageTryReady:              "TryReady",
+	MessageTryPage:               "TryPage",
+	MessageTryPageRequest:        "TryPageRequest",
+	MessageEndTry:                "EndTry",
+	MessageTryPageCount:          "TryPageCount",
 	MessageError:                 "Error",
 }
 

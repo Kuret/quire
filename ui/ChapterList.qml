@@ -131,6 +131,16 @@ Item {
 
     signal readRequested(string documentUuid)
 
+    // Try (milestone 1): read a chapter without downloading it. Carries the
+    // title along with the id, the same as sourceSwitchRequested does,
+    // because the reader screen needs something to put in its own header and
+    // the row already has it — asking the backend to say it again would be a
+    // second answer to a question already answered.
+    //
+    // Never offered for a book (screen.isBook, below): a Shelfmark release
+    // has no page images at all, so there is nothing here to preview.
+    signal tryRequested(string chapterId, string title)
+
     // Deleting a download (PLAN §12.4). Two signals because it is two steps and
     // the question in between is the backend's: deleteRequested asks for it,
     // deleteConfirmed is the answer. An accidental tap can only ever reach the
@@ -826,7 +836,8 @@ Item {
                         anchors {
                             left: selectBox.visible ? selectBox.right : parent.left
                             leftMargin: Style.margin
-                            right: deleteButton.visible ? deleteButton.left : downloadButton.left
+                            right: deleteButton.visible ? deleteButton.left
+                                   : (tryButton.visible ? tryButton.left : downloadButton.left)
                             rightMargin: Style.gap
                             verticalCenter: parent.verticalCenter
                         }
@@ -913,6 +924,43 @@ Item {
                         }
                     }
 
+                    // Try (milestone 1): read this chapter without
+                    // downloading it. Never for a book — a release has no
+                    // page images, so there is nothing here to preview
+                    // (theme.FileTheme) — and never once the chapter is
+                    // already on the tablet, where "Read" opens the real
+                    // thing rather than a preview of it.
+                    Rectangle {
+                        id: tryButton
+                        // Suffixed with the chapter id — see downloadButton's
+                        // comment above for why a static name is not enough
+                        // to find *this* row's control.
+                        objectName: "tryButton-" + model.chapterId
+                        anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                        width: 140
+                        height: Style.buttonHeight
+                        visible: !screen.isBook && !model.documentUuid && !screen.selecting
+                        color: tryArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Try"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: tryArea
+                            objectName: "tryArea-" + model.chapterId
+                            anchors.fill: parent
+                            enabled: tryButton.visible
+                            onClicked: screen.tryRequested(model.chapterId, model.title)
+                        }
+                    }
+
                     // Only on a row that has something to delete, and never
                     // instead of Read: the download is the thing the user came
                     // for, and a delete that sits where they expect to tap to
@@ -920,7 +968,7 @@ Item {
                     Rectangle {
                         id: deleteButton
                         objectName: "deleteButton"
-                        anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
+                        anchors { right: tryButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
                         visible: model.documentUuid && !screen.selecting ? true : false
@@ -952,6 +1000,12 @@ Item {
                     // it is in; it just stops being tappable.
                     Rectangle {
                         id: downloadButton
+                        // Suffixed with the chapter id, the same convention
+                        // as the source chips (sourceChip-<id>): a ListView
+                        // recycles and reorders its delegates, so a test that
+                        // wants *this row's* button has to name it rather
+                        // than guess at a position.
+                        objectName: "downloadButton-" + model.chapterId
                         anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
                         width: 180
                         height: Style.buttonHeight
@@ -969,6 +1023,7 @@ Item {
 
                         MouseArea {
                             id: downloadArea
+                            objectName: "downloadArea-" + model.chapterId
                             anchors.fill: parent
                             enabled: !screen.selecting
                                      && screen.canTap(model.downloadState, model.documentUuid)

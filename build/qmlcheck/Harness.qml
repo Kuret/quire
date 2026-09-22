@@ -207,6 +207,14 @@ Window {
     property string switchedToName: ""
     property string switchedToSeries: ""
 
+    // Try (milestone 1): what a chapter row's Try button asked for, and what
+    // the reader itself asked the host for and reported closing.
+    property int tryAsks: 0
+    property string triedChapterId: ""
+    property string triedTitle: ""
+    property int tryCloses: 0
+    property var tryPageWants: []
+
     // What the probe wizard answered with: the choice, and the value typed into
     // the question's own field. A counter, because the field must not turn into
     // an answer by itself — the answer is the option the user tapped.
@@ -489,6 +497,11 @@ Window {
 
     ChapterList { id: chapterList; objectName: "chapterList"; anchors.fill: parent; model: chaptersModel
                   volumeModel: volumesModel
+                  onTryRequested: {
+                      win.tryAsks++
+                      win.triedChapterId = chapterId
+                      win.triedTitle = title
+                  }
                   onSourceSwitchRequested: {
                       win.sourceSwitches++
                       win.switchedToSource = sourceId
@@ -527,6 +540,20 @@ Window {
     ChapterList { id: bookChapterList; objectName: "bookChapterList"; anchors.fill: parent
                   kind: "book"; model: releasesModel; volumeModel: volumesModel
                   synopsis: "A novel about spice." }
+
+    // The Try reader (milestone 1): read a chapter without downloading it.
+    // Standalone, the same way PagerBar and the tile grid above are — it is
+    // driven directly by its own API (begin/ready/pageArrived/countUpdated)
+    // exactly as Main.qml drives it, rather than through a fixture model.
+    TryReader {
+        id: tryReader
+        objectName: "tryReader"
+        anchors.fill: parent
+        onCloseRequested: win.tryCloses++
+        onPageWanted: {
+            win.tryPageWants.push(index)
+        }
+    }
     Settings {
         id: settings
         objectName: "settings"
@@ -1570,6 +1597,126 @@ Window {
         // row it did not ask for.
         chaptersModel.setProperty(0, "documentUuid", "")
         win.want("clearing the UUID takes the Delete button with it", visibleDeletes(), 0)
+
+        // ---- Try (milestone 1): read a chapter without downloading it -----
+        //
+        // Three claims: it sits beside Download without replacing it, it
+        // disappears once the chapter is on the tablet (Read is the better
+        // offer at that point), and a book (theme.FileTheme) is never shown
+        // it at all — a mutation that started offering it there is exactly
+        // what PLAN's proof section asks this file to catch.
+        //
+        // Rows are found by chapter id, not by position: a ListView recycles
+        // and reorders its delegates, so the same convention the source
+        // chips use (sourceChip-<id>) is what makes "this row's button"
+        // findable at all — see the objectName comments on tryButton and
+        // downloadButton in ChapterList.qml.
+        var findByPrefix = function (item, prefix, into) {
+            if (!item)
+                return into
+            if (typeof item.objectName === "string" && item.objectName.indexOf(prefix) === 0)
+                into.push(item)
+            for (var i = 0; i < item.children.length; ++i)
+                findByPrefix(item.children[i], prefix, into)
+            return into
+        }
+        var visibleTries = function (screen) {
+            var found = findByPrefix(screen, "tryButton-", [])
+            var n = 0
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
+                    n++
+            return n
+        }
+        win.want("an ordinary chapter list offers Try", visibleTries(chapterList) > 0, true)
+        win.want("Download is still there beside it",
+                 findByPrefix(chapterList, "downloadButton-", []).length > 0, true)
+
+        // Tapping it names the chapter, and touches nothing about the
+        // download machinery — no message, no state change on the row.
+        win.tryAsks = 0
+        var stateBefore = chaptersModel.get(1).downloadState
+        win.findChild(chapterList, "tryArea-c1").clicked(null)
+        win.want("tapping Try asks once", win.tryAsks, 1)
+        win.want("naming the chapter the row was for", win.triedChapterId, "c1")
+        win.want("Try leaves the download state untouched",
+                 chaptersModel.get(1).downloadState, stateBefore)
+
+        // Once a chapter is on the tablet, Try steps aside for Read; Download
+        // stays exactly as reachable as it always was (it now reads "Read").
+        chaptersModel.setProperty(2, "documentUuid", "doc-2")
+        win.want("a downloaded chapter is not offered Try",
+                 win.findChild(chapterList, "tryButton-c2").visible, false)
+        win.want("but Download (now \"Read\") is still there",
+                 win.findChild(chapterList, "downloadButton-c2").visible, true)
+        chaptersModel.setProperty(2, "documentUuid", "")
+
+        // Selection mode hides it exactly as it hides Delete: there is
+        // nothing to preview several rows at once into.
+        chapterList.enterSelection()
+        win.want("selection mode hides Try", visibleTries(chapterList), 0)
+        chapterList.leaveSelection()
+
+        // A book has no page images at all (theme.FileTheme) — the mutation
+        // anchor for "offer Try for a book".
+        win.want("a book offers no Try on any row", visibleTries(bookChapterList), 0)
+        win.want("but Download remains reachable on a book",
+                 findByPrefix(bookChapterList, "downloadButton-", []).length > 0, true)
+
+        // ---- the reader itself: page turning at both ends, and closing ----
+        //
+        // Driven directly through the same API Main.qml drives it with
+        // (begin/ready/pageArrived/countUpdated), rather than through a
+        // socket — this is the reader's own behaviour, independent of the
+        // backend that feeds it.
+        tryReader.begin("src", "series", "c1", "Chapter 1")
+        win.want("begin shows the fetching placeholder",
+                 win.findChild(tryReader, "tryLoadingLabel").visible, true)
+        win.want("and asks for page 1 straight away", win.tryPageWants.indexOf(0) >= 0, true)
+
+        tryReader.ready({"sourceId": "src", "seriesId": "series", "chapterId": "c1",
+                          "index": 0, "path": "/tmp/p0.jpg", "pageCount": 3, "complete": true})
+        win.want("the first page is shown", win.findChild(tryReader, "tryPageImage").visible, true)
+        win.want("not the fetching placeholder any more",
+                 win.findChild(tryReader, "tryLoadingLabel").visible, false)
+
+        var pager = win.findChild(tryReader, "tryPager")
+        win.want("previous is dead on the first page", pager.canGoBack, false)
+        win.want("next is alive with more pages known", pager.canGoOn, true)
+
+        // Turning to a page not fetched yet degrades to the loading label —
+        // never a blank page standing in for content, and never a freeze:
+        // the pager itself stays fully interactive throughout.
+        pager.nextRequested()
+        win.want("the reader moved to page 2", tryReader.index, 1)
+        win.want("which is not ready yet, so it shows fetching",
+                 win.findChild(tryReader, "tryLoadingLabel").visible, true)
+        win.want("and asked the host for it, exactly once",
+                 win.tryPageWants.filter(function (i) { return i === 1 }).length, 1)
+
+        tryReader.pageArrived({"sourceId": "src", "seriesId": "series", "chapterId": "c1",
+                               "index": 1, "path": "/tmp/p1.jpg"})
+        win.want("page 2 shows once it arrives",
+                 win.findChild(tryReader, "tryPageImage").visible, true)
+
+        pager.nextRequested()
+        win.want("page 3 (the last known page)", tryReader.index, 2)
+        win.want("next is dead at the last known page", pager.canGoOn, false)
+        pager.nextRequested()
+        win.want("a dead next does not run past the end", tryReader.index, 2)
+
+        pager.previousRequested()
+        pager.previousRequested()
+        win.want("previous turns all the way back to the first page", tryReader.index, 0)
+        pager.previousRequested()
+        win.want("a dead previous does not run past the start", tryReader.index, 0)
+
+        // Closing always tells the host, which is what ends the session on
+        // the backend and is the entire cleanup Try needs — nothing here
+        // decides that on its own, it only ever reports the tap.
+        win.tryCloses = 0
+        win.findChild(tryReader, "tryCloseArea").clicked(null)
+        win.want("closing the reader is reported once", win.tryCloses, 1)
 
         // The volume view offers it on the same terms. A row that offers Read
         // offers Delete, whichever view the document is being looked at from.

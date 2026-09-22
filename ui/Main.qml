@@ -252,6 +252,28 @@ Rectangle {
         // DESIGN.md §1.
     }
 
+    // openTry starts a Try session (milestone 1): read a chapter in Quire's
+    // own reader without downloading it. The reader is told to start showing
+    // "Fetching page 1…" immediately, before the backend has answered at
+    // all — see TryReader.qml's begin().
+    function openTry(chapterId, title) {
+        tryReaderScreen.begin(root.currentSourceId, root.currentSeriesId, chapterId, title)
+        root.showScreen("try")
+        root.send(Msg.TryChapter, {
+            "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "chapterId": chapterId})
+    }
+
+    // endTry discards whatever Try session is open. It is the only path that
+    // closes one — Back and the reader's own Close both call it — so the
+    // backend is never left holding a session nobody is looking at any more.
+    function endTry() {
+        if (!tryReaderScreen.chapterId)
+            return
+        root.send(Msg.EndTry, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "chapterId": tryReaderScreen.chapterId})
+    }
+
     // deleteDownload moves a document to xochitl's Trash and tells the backend
     // what happened (PLAN §12.4).
     //
@@ -607,6 +629,21 @@ Rectangle {
                 chapterListScreen.confirmingId = msg.documentUuid
                 chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
             }
+            return
+
+        case Msg.TryReady:
+            if (msg)
+                tryReaderScreen.ready(msg)
+            return
+
+        case Msg.TryPage:
+            if (msg)
+                tryReaderScreen.pageArrived(msg)
+            return
+
+        case Msg.TryPageCount:
+            if (msg)
+                tryReaderScreen.countUpdated(msg)
             return
 
         case Msg.DownloadDeleted:
@@ -1184,6 +1221,13 @@ Rectangle {
 
     function goBack() {
         switch (root.screen) {
+        // Leaving the Try reader always ends the session (PLAN's Try
+        // milestone: leaving discards it) and always returns to the series
+        // it was opened from — Try is only ever reached from there.
+        case "try":
+            root.endTry()
+            root.showScreen("series")
+            break
         case "series":
             root.showScreen(root.seriesCameFrom)
             break
@@ -1225,6 +1269,7 @@ Rectangle {
         case "watching": return "Watching"
         case "downloaded": return "Downloaded"
         case "series": return chapterListScreen.seriesTitle
+        case "try": return tryReaderScreen.chapterTitle.length > 0 ? tryReaderScreen.chapterTitle : "Preview"
         case "settings": return "Settings"
         }
         return "Quire"
@@ -1634,6 +1679,10 @@ Rectangle {
 
             onReadRequested: root.openInReader(documentUuid)
 
+            // Try (milestone 1): open the reader on this chapter without
+            // downloading it.
+            onTryRequested: root.openTry(chapterId, title)
+
             // Step one asks the backend for the question; step two does the
             // deleting. Both go through root so the QML that touches xochitl
             // stays behind the one Loader.
@@ -1646,6 +1695,25 @@ Rectangle {
             onQueueConfirmed: root.send(Msg.EnqueueDownloads, {
                 "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                 "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
+        }
+
+        TryReader {
+            id: tryReaderScreen
+            objectName: "tryReader"
+            anchors.fill: parent
+            visible: root.screen === "try"
+            // Leaving the reader always ends the session (see root.endTry) —
+            // Close is just another way in, alongside the shared Back button.
+            onCloseRequested: {
+                root.endTry()
+                root.showScreen("series")
+            }
+            // The reader asks for exactly one page at a time (see
+            // TryReader.qml's ensureRequested); this is the only place that
+            // becomes a MessageTryPageRequest.
+            onPageWanted: root.send(Msg.TryPageRequest, {
+                "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+                "chapterId": tryReaderScreen.chapterId, "index": index})
         }
 
         Settings {

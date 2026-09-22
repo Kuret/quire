@@ -27,6 +27,7 @@ import (
 	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/tryreader"
 )
 
 // Sender is the slice of appload.Conn the service uses. Sends are made from
@@ -54,6 +55,13 @@ type Options struct {
 	// DownloadDir is where page images and assembled PDFs live. It must be
 	// under /home: / has ~47 MB free (docs/DEVICE-NOTES.md §3.3).
 	DownloadDir string
+
+	// TryCache is the Try reader's page cache (milestone 1): read a chapter
+	// without downloading it and without a library entry. Nil disables Try —
+	// the AppLoad PC emulator and any build that has not wired one up refuse
+	// it with a plain answer, the same shape as a nil Library disabling
+	// downloads.
+	TryCache *tryreader.Cache
 
 	// DownloadOptions tunes the page queue. The zero value is the defaults
 	// backend/download documents.
@@ -173,6 +181,25 @@ type Service struct {
 	// interrupting anything, and offered from the source list. See
 	// pendinghosts.go and RecordOffDomainHost.
 	pending *pendingHosts
+
+	// tryCache is the Try reader's page cache; nil disables Try.
+	tryCache *tryreader.Cache
+
+	// tryMu guards the single Try session in flight. There is deliberately
+	// only one, exactly as there is one probe: the reader is one screen, and
+	// starting a second session ends whichever was open (see tryreader.go),
+	// so its cache directory is never left behind uncollected.
+	tryMu      sync.Mutex
+	trySession *tryreader.Session
+	tryKey     tryKey
+}
+
+// tryKey identifies which chapter the current Try session belongs to, so a
+// page request or an end-of-session message naming a different chapter (a
+// stale one, from a screen the user has since left) is not mistaken for the
+// session that is actually open.
+type tryKey struct {
+	Source, Series, Chapter string
 }
 
 // New builds a Service.
@@ -193,6 +220,7 @@ func New(opts Options) *Service {
 		libStore:        opts.LibraryStore,
 		downloadDir:     opts.DownloadDir,
 		downloadOptions: opts.DownloadOptions,
+		tryCache:        opts.TryCache,
 
 		uploadBudgetBytes: opts.UploadBudgetBytes,
 
@@ -542,6 +570,27 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		return true, s.enqueueMany(ctx, out, req)
+
+	case appload.MessageTryChapter:
+		var req tryRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.startTry(ctx, out, req)
+
+	case appload.MessageTryPageRequest:
+		var req tryPageRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.requestTryPage(ctx, out, req)
+
+	case appload.MessageEndTry:
+		var req tryRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.endTry(req)
 
 	case robotsMessage:
 		return s.handleRobots(out, payload)
@@ -1191,6 +1240,10 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 	// is a worse answer than no tab and the frontend has no way to tell.
 	_ = send(out, appload.MessageSeriesDetailResult, map[string]any{
 		"sourceId": sourceID,
+		// What this series' chapters are (see kind.go) — in particular, "book"
+		// says a source has no page images at all, which is what tells the
+		// chapter list to hide Try: there is nothing there to preview.
+		"kind":     kindOf(th),
 		"series":   series,
 		"chapters": rows,
 		"volumes":  volumeRows(series.Title, chapters, stored),

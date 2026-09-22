@@ -75,6 +75,12 @@ func TestMessageTypeValues(t *testing.T) {
 		"ListPrivateSources":    80,
 		"PrivateSources":        81,
 		"SearchAllPrivate":      82,
+		"TryChapter":            83,
+		"TryReady":              84,
+		"TryPage":               85,
+		"TryPageRequest":        86,
+		"EndTry":                87,
+		"TryPageCount":          88,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {
