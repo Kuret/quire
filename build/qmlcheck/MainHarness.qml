@@ -1343,9 +1343,16 @@ Window {
                  backend.bodyOf(Msg.EnqueueDownload).volumeId, "c1")
         win.want("on the source being read",
                  backend.bodyOf(Msg.EnqueueDownload).sourceId, "src-a")
+        // Comics/manga downloads are saved in Quire by default — never a
+        // library upload unless the reader overlay's own "Send to library"
+        // asks for one explicitly (ui/TryReader.qml).
+        win.want("and destined for Quire's own storage",
+                 backend.bodyOf(Msg.EnqueueDownload).destination, "quire")
         chapterList.volumeDownloadRequested("c1")
         win.want("a volume download says which grouping it meant",
                  backend.bodyOf(Msg.EnqueueDownload).grouping, "volume")
+        win.want("and is still destined for Quire",
+                 backend.bodyOf(Msg.EnqueueDownload).destination, "quire")
         chapterList.queueConfirmed(["c1", "c2"], false)
         win.want("a selection is queued in one message",
                  backend.countOf(Msg.EnqueueDownloads), 1)
@@ -1353,6 +1360,8 @@ Window {
                  backend.bodyOf(Msg.EnqueueDownloads).chapterIds.length, 2)
         win.want("and saying they are chapters",
                  backend.bodyOf(Msg.EnqueueDownloads).grouping, "chapter")
+        win.want("destined for Quire too",
+                 backend.bodyOf(Msg.EnqueueDownloads).destination, "quire")
 
         // ---- deleting one download --------------------------------------------
         //

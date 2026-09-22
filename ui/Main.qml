@@ -1782,27 +1782,32 @@ Rectangle {
                  "title": chapterListScreen.seriesTitle})
             onUnwatchRequested: root.send(Msg.UnwatchSeries,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId})
+            // destination is always "quire" from this screen — a book's
+            // release ignores it and goes to the library exactly as before
+            // (backend/service). "Send to library" is the reader overlay's
+            // own, explicit action (ui/TryReader.qml).
             onDownloadRequested: root.send(Msg.EnqueueDownload,
-                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "volumeId": chapterId})
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "volumeId": chapterId, "destination": "quire"})
             onDownloadCancelled: root.send(Msg.CancelDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "volumeId": chapterId})
             onDownloadConfirmed: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                 "volumeId": chapterId, "confirmed": true})
+                 "volumeId": chapterId, "destination": "quire", "confirmed": true})
 
             // The volume view's three. The grouping rides on the request
             // because it is situational — whether the user is about to be
             // without a connection — and not a property of the source.
             onVolumeDownloadRequested: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                 "volumeId": chapterId, "grouping": "volume"})
+                 "volumeId": chapterId, "grouping": "volume", "destination": "quire"})
             onVolumeDownloadCancelled: root.send(Msg.CancelDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "volumeId": chapterId, "grouping": "volume"})
             onVolumeDownloadConfirmed: root.send(Msg.EnqueueDownload,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                 "volumeId": chapterId, "grouping": "volume", "confirmed": true})
+                 "volumeId": chapterId, "grouping": "volume", "destination": "quire", "confirmed": true})
 
             onReadRequested: root.openInReader(documentUuid)
 
@@ -1832,7 +1837,8 @@ Rectangle {
             // download, because the two lists hold different things.
             onQueueConfirmed: root.send(Msg.EnqueueDownloads, {
                 "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
-                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
+                "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter",
+                "destination": "quire"})
         }
 
         Settings {
