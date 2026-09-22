@@ -560,6 +560,13 @@ const (
 	// directory, never the Trash, since there is no xochitl document to put
 	// there. MessageSavedDeleted is BE→UI, JSON {sourceId, seriesId,
 	// chapterId, phase, message}, phase one of "confirm", "done" or "failed".
+	//
+	// The payload also takes optional volumeLabel and chapterIds: when
+	// chapterIds is non-empty this deletes every saved chapter it names
+	// (ignoring any that are not saved) instead of the single chapterId —
+	// "delete this whole volume from Quire" in one round trip. The reply
+	// gains chapterIds too: the ones actually deleted, so the UI can clear
+	// each row's saved flag without a second fetch.
 	MessageDeleteSaved  MessageType = 94
 	MessageSavedDeleted MessageType = 95
 )

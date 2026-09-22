@@ -33,6 +33,16 @@ type deleteSavedRequest struct {
 	// MessageDeleteDownload uses, and for the same reason (PLAN §2: the
 	// sentence is the backend's).
 	Confirmed bool `json:"confirmed,omitempty"`
+
+	// VolumeLabel and ChapterIDs are the whole-volume delete: when ChapterIDs
+	// is non-empty, ChapterID is ignored and every chapter it names is
+	// deleted instead (the ones that are not actually saved are skipped
+	// rather than treated as an error — the row asking for this only knows
+	// what the volume contains, not which of its chapters Quire has).
+	// VolumeLabel is only for the question and the "done" sentence; it names
+	// nothing on its own.
+	VolumeLabel string   `json:"volumeLabel,omitempty"`
+	ChapterIDs  []string `json:"chapterIds,omitempty"`
 }
 
 func (r deleteSavedRequest) key() shelf.Key {
@@ -40,8 +50,15 @@ func (r deleteSavedRequest) key() shelf.Key {
 }
 
 func (r deleteSavedRequest) valid() bool {
-	return r.SourceID != "" && r.SeriesID != "" && r.ChapterID != ""
+	if r.SourceID == "" || r.SeriesID == "" {
+		return false
+	}
+	return r.ChapterID != "" || len(r.ChapterIDs) > 0
 }
+
+// isVolume reports whether this is a whole-volume delete rather than a
+// single chapter.
+func (r deleteSavedRequest) isVolume() bool { return len(r.ChapterIDs) > 0 }
 
 // savedChapterLabel is a saved chapter's name for a sentence: its own title
 // when the source gave one, else "Chapter <number>", else a plain "That
@@ -77,6 +94,9 @@ func (s *Service) deleteSaved(out Sender, req deleteSavedRequest) error {
 	if !req.valid() {
 		return s.sendError(out, "bad_request", "Quire needs a source, a series and a chapter to delete.")
 	}
+	if req.isVolume() {
+		return s.deleteSavedVolume(out, req)
+	}
 
 	rec, ok := s.shelfStore.Get(req.key())
 	if !ok {
@@ -108,6 +128,94 @@ func (s *Service) deleteSaved(out Sender, req deleteSavedRequest) error {
 		"sourceId": req.SourceID, "seriesId": req.SeriesID, "chapterId": req.ChapterID,
 		"phase":   savedDeletePhaseDone,
 		"message": savedChapterLabel(rec) + " is deleted.",
+	})
+}
+
+// savedVolumeLabel is what a whole-volume delete's sentences call the
+// volume: the label the row sent, or a plain "This volume" for a row that
+// somehow had none — which should not happen, but the sentence still has to
+// read as a sentence.
+func savedVolumeLabel(label string) string {
+	if l := strings.TrimSpace(label); l != "" {
+		return l
+	}
+	return "This volume"
+}
+
+// savedVolumeDeleteQuestion is the confirm sentence for a whole-volume
+// delete, singular-aware like savedDeleteQuestion.
+func savedVolumeDeleteQuestion(label string, savedCount int) string {
+	chapters := fmt.Sprintf("%d saved chapters", savedCount)
+	if savedCount == 1 {
+		chapters = "1 saved chapter"
+	}
+	return fmt.Sprintf("Delete %s from Quire? Its %s will need downloading again to read.",
+		label, chapters)
+}
+
+// deleteSavedVolume answers a MessageDeleteSaved naming a whole volume's
+// chapters: it deletes every one of them that is actually saved, through the
+// same removeSavedChapter every single-chapter delete uses — there is no
+// second removal path, only a loop over the one that already exists.
+func (s *Service) deleteSavedVolume(out Sender, req deleteSavedRequest) error {
+	label := savedVolumeLabel(req.VolumeLabel)
+
+	// Which of the named chapters are actually saved — the volume row may
+	// list chapters Quire never saved, and those are silently skipped rather
+	// than treated as an error: the row only knows what the volume contains.
+	var toDelete []string
+	for _, id := range req.ChapterIDs {
+		key := shelf.Key{Source: req.SourceID, Series: req.SeriesID, Chapter: id}
+		if _, ok := s.shelfStore.Get(key); ok {
+			toDelete = append(toDelete, id)
+		}
+	}
+	if len(toDelete) == 0 {
+		return s.sendError(out, "not_found", "Quire has none of that volume saved to delete.")
+	}
+
+	if !req.Confirmed {
+		return send(out, appload.MessageSavedDeleted, map[string]any{
+			"sourceId": req.SourceID, "seriesId": req.SeriesID,
+			"phase":   savedDeletePhaseConfirm,
+			"message": savedVolumeDeleteQuestion(label, len(toDelete)),
+		})
+	}
+
+	var deleted []string
+	var failed bool
+	for _, id := range toDelete {
+		if err := s.removeSavedChapter(req.SourceID, req.SeriesID, id); err != nil {
+			s.log.Error("could not delete a saved chapter as part of a volume delete",
+				"source", req.SourceID, "series", req.SeriesID, "chapter", id, "err", err)
+			failed = true
+			continue
+		}
+		deleted = append(deleted, id)
+	}
+
+	if failed && len(deleted) == 0 {
+		return send(out, appload.MessageSavedDeleted, map[string]any{
+			"sourceId": req.SourceID, "seriesId": req.SeriesID,
+			"phase":   savedDeletePhaseFailed,
+			"message": "Quire could not delete " + label + ", so it has left it as it was.",
+		})
+	}
+
+	s.log.Info("a saved volume was deleted",
+		"source", req.SourceID, "series", req.SeriesID, "chapters", len(deleted), "failed", failed)
+	message := label + " is deleted."
+	if failed {
+		// A partial failure is still reported as done — most of the volume
+		// really is gone — but the sentence says the rest did not go, rather
+		// than claiming a clean sweep it did not make.
+		message = label + " is mostly deleted, but some of its chapters could not be removed."
+	}
+	return send(out, appload.MessageSavedDeleted, map[string]any{
+		"sourceId": req.SourceID, "seriesId": req.SeriesID,
+		"phase":      savedDeletePhaseDone,
+		"message":    message,
+		"chapterIds": deleted,
 	})
 }
 
