@@ -379,6 +379,74 @@ func (s *Store) SetProxy(id, raw string) error {
 	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
 }
 
+// ErrHostAlreadyAllowed means AllowHost was asked to add a host a source's
+// allowedHosts already carries. It is returned rather than treated as success
+// so a caller wiring this to a UI button can tell "nothing to do" apart from
+// "the store changed", without diffing the list itself.
+var ErrHostAlreadyAllowed = errors.New("state: that host is already allowed for this source")
+
+// AllowHost appends host to a source's allowedHosts and persists it. This is
+// the *only* writer of theme.Source.AllowedHosts once a source exists — the
+// probe seeds the field at add time (PLAN §7.5 stage 6), and this is the path
+// for widening it afterwards, from the source list's record-and-offer review
+// of hosts a fetch was refused for.
+//
+// **It never grants what was not asked for.** The caller names sourceID and
+// host explicitly; nothing here infers one from the other, and nothing here
+// is reachable except by a person tapping Allow on a host their own source
+// asked to reach (fetch.GuardError.OffDomain, recorded by
+// Service.RecordOffDomainHost). A host is lower-cased and trimmed before
+// storing, matching hostMatches' case-folded comparison and the only form
+// schema/source.schema.json's allowedHosts pattern accepts — the same
+// normalisation the probe's own seeding already applies (capability.go).
+func (s *Store) AllowHost(id, host string) error {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return fmt.Errorf("state: empty host")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID != id {
+			continue
+		}
+		if slices.Contains(src.AllowedHosts, host) {
+			return fmt.Errorf("%w (%q)", ErrHostAlreadyAllowed, host)
+		}
+		was := src.AllowedHosts
+		src.AllowedHosts = append(append([]string(nil), was...), host)
+		if err := s.reg.Validate(src); err != nil {
+			src.AllowedHosts = was
+			return fmt.Errorf("state: %w", err)
+		}
+		return s.save()
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
+// RevokeHost removes host from a source's allowedHosts and persists it. Like
+// RevokeSelfHosted, this direction needs no evidence and cannot fail
+// validation: removing an entry only ever narrows what the guard will permit
+// for this source. Revoking a host that was never allowed is not an error —
+// the end state the caller wants is already true.
+func (s *Store) RevokeHost(id, host string) error {
+	host = strings.ToLower(strings.TrimSpace(host))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, src := range s.sources {
+		if src.ID != id {
+			continue
+		}
+		i := slices.Index(src.AllowedHosts, host)
+		if i < 0 {
+			return nil
+		}
+		src.AllowedHosts = slices.Delete(slices.Clone(src.AllowedHosts), i, i+1)
+		return s.save()
+	}
+	return fmt.Errorf("state: %q: %w", id, ErrNotFound)
+}
+
 // ErrNoProxyToConfirm means a source was offered as "confirmed by the proxy
 // that reaches it" without having a proxy.
 var ErrNoProxyToConfirm = errors.New("state: a source confirmed through a proxy has to have one")
