@@ -25,6 +25,7 @@ import (
 	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe/prober"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/tryreader"
@@ -55,6 +56,20 @@ type Options struct {
 	// DownloadDir is where page images and assembled PDFs live. It must be
 	// under /home: / has ~47 MB free (docs/DEVICE-NOTES.md §3.3).
 	DownloadDir string
+
+	// SavedDir is where a "Saved in Quire" download's page images live — a
+	// sibling of DownloadDir, laid out the same way (safeSegment(sourceID)/
+	// safeSegment(seriesID)/download.ChapterDir(...)) so that "Send to
+	// library" can hard-link a saved chapter's files straight into the
+	// download cache instead of refetching them. Nil-equivalent (empty) means
+	// destination "quire" downloads are refused, the same shape DownloadDir's
+	// absence would take if this build had no library either.
+	SavedDir string
+
+	// ShelfStore is the index of what SavedDir holds — backend/shelf's
+	// equivalent of LibraryStore. Nil disables "Saved in Quire" the same way
+	// a nil LibraryStore disables the reMarkable library.
+	ShelfStore *shelf.Store
 
 	// TryCache is the Try reader's page cache (milestone 1): read a chapter
 	// without downloading it and without a library entry. Nil disables Try —
@@ -98,6 +113,12 @@ type Service struct {
 	downloadDir       string
 	downloadOptions   download.Options
 	uploadBudgetBytes int64
+
+	// savedDir and shelfStore are "Saved in Quire"'s equivalent of
+	// downloadDir and libStore: where the page files live, and the index of
+	// what is there. See Options.SavedDir.
+	savedDir   string
+	shelfStore *shelf.Store
 
 	previousSessionCrashed bool
 
@@ -221,6 +242,9 @@ func New(opts Options) *Service {
 		downloadDir:     opts.DownloadDir,
 		downloadOptions: opts.DownloadOptions,
 		tryCache:        opts.TryCache,
+
+		savedDir:   opts.SavedDir,
+		shelfStore: opts.ShelfStore,
 
 		uploadBudgetBytes: opts.UploadBudgetBytes,
 
