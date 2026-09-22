@@ -257,6 +257,7 @@ type watchRow struct {
 	Status      string `json:"status"`
 	Detail      string `json:"detail"`
 	CheckedAt   string `json:"checkedAt"`
+	Private     bool   `json:"private"`
 }
 
 // settled waits for a watch update that is not the "checking" placeholder.
@@ -311,8 +312,10 @@ type watchSummaryRow struct {
 }
 
 type watchListMsg struct {
-	Watched []watchRow      `json:"watched"`
-	Summary watchSummaryRow `json:"summary"`
+	Watched        []watchRow      `json:"watched"`
+	Summary        watchSummaryRow `json:"summary"`
+	PrivateWatched []watchRow      `json:"privateWatched"`
+	PrivateSummary watchSummaryRow `json:"privateSummary"`
 }
 
 func (h *watchHarness) listMsg() watchListMsg {
@@ -678,11 +681,6 @@ func TestMarkingASourcePrivateDropsItsWatchFromTheOrdinaryList(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.forget()
-	handle(t, h.svc, h.rec, appload.MessageCheckWatched, `{}`)
-	// checkWatched skips a private source's watches outright, so no
-	// MessageWatchList push is guaranteed by this call; ask directly instead.
-	handle(t, h.svc, h.rec, appload.MessageListSources, `{}`)
-	h.rec.wait(t, appload.MessageSources)
 
 	if err := h.svc.FrontendAttached(h.rec); err != nil {
 		t.Fatal(err)
@@ -696,6 +694,64 @@ func TestMarkingASourcePrivateDropsItsWatchFromTheOrdinaryList(t *testing.T) {
 	}
 	if got := h.store.Watches(); len(got) != 1 {
 		t.Fatalf("the watch itself was deleted rather than merely hidden: %+v", got)
+	}
+}
+
+// TestMarkingASourcePrivateMovesItsWatchToThePrivateList is the other half of
+// the test above: the watch that vanished from the ordinary list is not gone,
+// it is on the private one — checkWatched now checks private watches too, so
+// it lands there with a result rather than sitting unchecked forever.
+func TestMarkingASourcePrivateMovesItsWatchToThePrivateList(t *testing.T) {
+	h := newWatchHarness(t, chaptersSeen())
+	h.openSeries()
+	h.watch()
+
+	if err := h.store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+	h.forget()
+
+	if err := h.svc.FrontendAttached(h.rec); err != nil {
+		t.Fatal(err)
+	}
+	env := h.listMsg()
+	if len(env.PrivateWatched) != 1 || env.PrivateWatched[0].SeriesID != seriesPath {
+		t.Fatalf("privateWatched = %+v, want the moved watch", env.PrivateWatched)
+	}
+	if !env.PrivateWatched[0].Private {
+		t.Errorf("privateWatched row does not say private: %+v", env.PrivateWatched[0])
+	}
+}
+
+// TestMarkingASourcePublicMovesItsWatchBackToTheOrdinaryList is
+// TestMarkingASourcePrivateMovesItsWatchToThePrivateList run in reverse: a
+// source marked private and then public again gets its watch back on the
+// ordinary list, still the same watch throughout.
+func TestMarkingASourcePublicMovesItsWatchBackToTheOrdinaryList(t *testing.T) {
+	h := newWatchHarness(t, chaptersSeen())
+	h.openSeries()
+	h.watch()
+
+	if err := h.store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SetPrivate("example-reader", false); err != nil {
+		t.Fatal(err)
+	}
+	h.forget()
+
+	if err := h.svc.FrontendAttached(h.rec); err != nil {
+		t.Fatal(err)
+	}
+	env := h.listMsg()
+	if len(env.Watched) != 1 || env.Watched[0].SeriesID != seriesPath {
+		t.Fatalf("watched = %+v, want the watch back on the ordinary list", env.Watched)
+	}
+	if len(env.PrivateWatched) != 0 {
+		t.Fatalf("privateWatched = %+v, want it emptied", env.PrivateWatched)
+	}
+	if got := h.store.Watches(); len(got) != 1 {
+		t.Fatalf("the watch was duplicated or lost across the round trip: %+v", got)
 	}
 }
 

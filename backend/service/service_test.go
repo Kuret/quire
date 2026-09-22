@@ -626,10 +626,12 @@ func TestPrivateSourceNeverAppearsOnTheNormalList(t *testing.T) {
 	}
 }
 
-// TestWatchSeriesOnAPrivateSourceIsRefused is the message-level face of
-// state.ErrSourceIsPrivate: the action a series screen offers must not create
-// a watch that could only ever leak onto the ordinary Watching list.
-func TestWatchSeriesOnAPrivateSourceIsRefused(t *testing.T) {
+// TestWatchSeriesOnAPrivateSourceLandsOnThePrivateList is the message-level
+// face of the private-sources feature's watch side: watching a private
+// source's series succeeds, and the result rides on MessageWatchList's
+// privateWatched — never on watched, which is the ordinary "Watching · 3 new"
+// badge's source of truth and must never count a private series.
+func TestWatchSeriesOnAPrivateSourceLandsOnThePrivateList(t *testing.T) {
 	svc, store, rec := newService(t, routes())
 	if _, err := store.Add(&theme.Source{
 		Name: "Example Reader", Lang: "en", Theme: madara.ID,
@@ -644,16 +646,20 @@ func TestWatchSeriesOnAPrivateSourceIsRefused(t *testing.T) {
 	handle(t, svc, rec, appload.MessageWatchSeries,
 		`{"sourceId":"example-reader","seriesId":"/manga/the-lantern-keeper/","title":"The Lantern Keeper"}`)
 
-	var e struct {
-		Code string `json:"code"`
+	var env struct {
+		Watched        []struct{}       `json:"watched"`
+		PrivateWatched []map[string]any `json:"privateWatched"`
 	}
-	if err := json.Unmarshal(rec.wait(t, appload.MessageError), &e); err != nil {
+	if err := json.Unmarshal(rec.wait(t, appload.MessageWatchList), &env); err != nil {
 		t.Fatal(err)
 	}
-	if e.Code != "source_is_private" {
-		t.Errorf("code %q, want source_is_private", e.Code)
+	if len(env.Watched) != 0 {
+		t.Fatalf("watched = %+v, want the private series left off the ordinary list", env.Watched)
 	}
-	if got := store.Watches(); len(got) != 0 {
-		t.Fatalf("a watch was written anyway: %+v", got)
+	if len(env.PrivateWatched) != 1 {
+		t.Fatalf("privateWatched = %+v, want the one private watch", env.PrivateWatched)
+	}
+	if got := store.Watches(); len(got) != 1 {
+		t.Fatalf("watch was not written: %+v", got)
 	}
 }

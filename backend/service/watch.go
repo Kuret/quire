@@ -72,6 +72,12 @@ type watchView struct {
 	Detail string `json:"detail,omitempty"`
 
 	CheckedAt string `json:"checkedAt,omitempty"`
+
+	// Private says whether this watch's source is marked private. It is what
+	// lets a streamed MessageWatchUpdate route to the right list — the
+	// ordinary Watching screen or the private one — without either side
+	// having to look the source up again.
+	Private bool `json:"private"`
 }
 
 const (
@@ -82,18 +88,35 @@ const (
 	watchStateUnchecked = "unchecked"
 )
 
-// watchListView turns the store's watches into rows, in stored order.
+// watchListView turns the store's watches into rows, in stored order,
+// excluding any watch whose source is private.
 //
-// A watch whose source is private is left out. state.Store.Watch already
-// refuses to create one, but a source can be marked private *after* a series
-// on it was watched, and this is the point that has to notice: it is the one
-// place every render of the ordinary Watching list goes through, exactly like
-// sendSources and newSearchAllPager are the one place each of their lists do.
+// A watch on a private source is left out here — it renders on
+// privateWatchListView instead. A series watched *before* its source was
+// marked private still has a watch in the store; this is the point that has
+// to notice the move, exactly like sendSources and newSearchAllPager are the
+// one place each of their lists do.
 func (s *Service) watchListView() []watchView {
 	watches := s.store.Watches()
 	views := make([]watchView, 0, len(watches))
 	for _, w := range watches {
 		if src, ok := s.store.Get(w.SourceID); ok && src.IsPrivate() {
+			continue
+		}
+		views = append(views, s.viewOf(w, ""))
+	}
+	return views
+}
+
+// privateWatchListView is watchListView's mirror: every watch whose source is
+// private, and nothing else. A source marked private after its series were
+// watched moves here; marked public again, it moves back — the watch itself
+// is never touched, only which of these two functions renders it.
+func (s *Service) privateWatchListView() []watchView {
+	watches := s.store.Watches()
+	views := make([]watchView, 0)
+	for _, w := range watches {
+		if src, ok := s.store.Get(w.SourceID); !ok || !src.IsPrivate() {
 			continue
 		}
 		views = append(views, s.viewOf(w, ""))
@@ -111,6 +134,7 @@ func (s *Service) viewOf(w *state.Watch, override string) watchView {
 	}
 	if src, ok := s.store.Get(w.SourceID); ok {
 		v.SourceName = src.Name
+		v.Private = src.IsPrivate()
 	}
 	if !w.CheckedAt.IsZero() {
 		v.CheckedAt = w.CheckedAt.UTC().Format(time.RFC3339)
@@ -263,9 +287,16 @@ func countOfSeries(n int) string { return fmt.Sprintf("%d", n) }
 
 func (s *Service) sendWatchList(out Sender) error {
 	rows := s.watchListView()
+	privateRows := s.privateWatchListView()
 	return send(out, appload.MessageWatchList, map[string]any{
+		// watched/summary stay ordinary-only: the "Watching · 3 new" badge on
+		// the normal source list must never count a private series.
 		"watched": rows,
 		"summary": summarise(rows),
+		// privateWatched/privateSummary are the same shapes, computed only
+		// from private sources' watches, for the private Watching screen.
+		"privateWatched": privateRows,
+		"privateSummary": summarise(privateRows),
 	})
 }
 
@@ -285,12 +316,8 @@ func (s *Service) watchSeries(out Sender, sourceID, seriesID, title string) erro
 	seed := s.lastServedChapters(sourceID, seriesID)
 	w, err := s.store.Watch(sourceID, seriesID, title, seed, s.now())
 	if err != nil {
-		switch {
-		case errors.Is(err, state.ErrNotFound):
+		if errors.Is(err, state.ErrNotFound) {
 			return s.sendError(out, "not_found", "Quire has no source by that name any more.")
-		case errors.Is(err, state.ErrSourceIsPrivate):
-			return s.sendError(out, "source_is_private",
-				"A private source's series can't be watched — that would put it on the ordinary Watching list.")
 		}
 		return s.sendError(out, "not_watched", plain(err))
 	}
@@ -535,17 +562,6 @@ func (s *Service) checkWatched(ctx context.Context, out Sender, force bool, only
 			// A disabled source is one the user has switched off. Polling it
 			// anyway would be the app overruling them.
 			s.log.Debug("skipped a watched series on a disabled source",
-				"source", w.SourceID, "series", w.SeriesID)
-			continue
-		}
-		if src.IsPrivate() {
-			// The watch cannot appear anywhere (watchListView drops it), so
-			// checking it would only spend a request, and a failure would
-			// still reach maybeReprobe and its sendError — a banner naming
-			// the source on whatever screen happens to be open. See
-			// state.ErrSourceIsPrivate for why a watch like this can only
-			// exist if the source was marked private after being watched.
-			s.log.Debug("skipped a watched series on a private source",
 				"source", w.SourceID, "series", w.SeriesID)
 			continue
 		}
