@@ -34,6 +34,7 @@ import (
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/logging"
 	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/asurascans"
@@ -584,6 +585,16 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	}
 	log.Info("library store opened", "path", libStore.Path(), "volumes", len(libStore.List()))
 
+	// The shelf store holds "Saved in Quire"'s chapters — library.Store's
+	// equivalent for Quire's own storage, opened the same way and for the
+	// same reason: losing it means losing OpenSaved's ability to find pages
+	// that are still sitting right there on disk.
+	shelfStore, err := shelf.OpenStore(stateDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Info("shelf store opened", "path", shelfStore.Path(), "chapters", len(shelfStore.List()))
+
 	lib := library.New(library.Options{Log: log})
 
 	// The loopback alias is added here as well as before every upload. Doing
@@ -610,6 +621,13 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		Library:      lib,
 		LibraryStore: libStore,
 		DownloadDir:  filepath.Join(dir, "downloads"),
+
+		// SavedDir is a sibling of DownloadDir and of Try's own cache
+		// (tryreader.New above): comics and manga downloads land here by
+		// default (see backend/service/download.go's package comment),
+		// indexed by ShelfStore the way LibraryStore indexes the library.
+		SavedDir:   filepath.Join(dir, "saved"),
+		ShelfStore: shelfStore,
 
 		PreviousSessionCrashed: previousCrashed,
 	})
