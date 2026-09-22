@@ -71,6 +71,10 @@ func TestMessageTypeValues(t *testing.T) {
 		"SetSourceProxy":        76,
 		"AllowSourceHost":       77,
 		"RevokeSourceHost":      78,
+		"SetSourcePrivate":      79,
+		"ListPrivateSources":    80,
+		"PrivateSources":        81,
+		"SearchAllPrivate":      82,
 		"Error":                 90,
 	}
 	if len(messageNames) != len(want) {

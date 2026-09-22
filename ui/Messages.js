@@ -125,4 +125,16 @@ var SetSourceProxy = 76
 var AllowSourceHost = 77
 var RevokeSourceHost = 78
 
+// Private sources: kept off the normal source list and the normal combined
+// search, and given a list and a combined search of their own. No reply of
+// its own for the toggle — a fresh Sources and PrivateSources both follow,
+// since marking or unmarking moves a source between the two lists.
+var SetSourcePrivate = 79
+var ListPrivateSources = 80
+var PrivateSources = 81
+
+// The private list's own combined search, parallel to SearchAll. Its reply is
+// SearchAllResults, unchanged.
+var SearchAllPrivate = 82
+
 var Error = 90

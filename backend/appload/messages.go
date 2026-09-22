@@ -456,6 +456,41 @@ const (
 	MessageAllowSourceHost  MessageType = 77
 	MessageRevokeSourceHost MessageType = 78
 
+	// Private sources: a source marked private is kept off the normal source
+	// list and out of the normal combined search, and lives in a list of its
+	// own with its own combined search — the discretion feature described
+	// beside theme.Source.Private.
+	//
+	// MessageSetSourcePrivate is UI→BE, JSON {sourceId, private}: the same
+	// shape as MessageSetSourceEnabled, and for the same reason it is a
+	// distinct message rather than a field bolted onto one of the rename/proxy
+	// calls — one message, one meaning. There is no reply of its own; both
+	// MessageSources and MessagePrivateSources follow, because marking or
+	// unmarking a source moves it from one list to the other and either
+	// screen, if open, has to redraw.
+	MessageSetSourcePrivate MessageType = 79
+
+	// MessageListPrivateSources is UI→BE, no payload: the private source
+	// list's own fetch, parallel to MessageListSources. MessagePrivateSources
+	// is BE→UI, JSON {sources: [...]} — the same sourceView shape
+	// MessageSources uses, containing only the sources marked private.
+	MessageListPrivateSources MessageType = 80
+	MessagePrivateSources     MessageType = 81
+
+	// MessageSearchAllPrivate is UI→BE, JSON {query, page, pageSize}: the
+	// private list's own combined search. It is a distinct message rather than
+	// a flag on MessageSearchAll so that "which sources this touches" is
+	// decided by which message was sent, not by a field a bug could leave at
+	// its zero value — a boolean that defaults to "search everything" would
+	// turn any dropped field into exactly the leak this feature exists to
+	// prevent.
+	//
+	// The reply is MessageSearchAllResults, unchanged: it is already keyed to
+	// one screen's request by page and query, and the private and normal
+	// searches never run at the same time (see Service.searchAllPagerFor's
+	// scoped cache key).
+	MessageSearchAllPrivate MessageType = 82
+
 	MessageError MessageType = 90
 )
 
@@ -523,6 +558,10 @@ var messageNames = map[MessageType]string{
 	MessageSetSourceProxy:        "SetSourceProxy",
 	MessageAllowSourceHost:       "AllowSourceHost",
 	MessageRevokeSourceHost:      "RevokeSourceHost",
+	MessageSetSourcePrivate:      "SetSourcePrivate",
+	MessageListPrivateSources:    "ListPrivateSources",
+	MessagePrivateSources:        "PrivateSources",
+	MessageSearchAllPrivate:      "SearchAllPrivate",
 	MessageError:                 "Error",
 }
 
