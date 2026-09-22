@@ -9,7 +9,7 @@ import (
 
 // The feature: a folder that was listed and came back empty may go.
 func TestAnEmptyFolderMayBeRemoved(t *testing.T) {
-	ok, why := folderVerdict("lantern", "comics", nil, nil)
+	ok, why := folderVerdict("lantern", "comics", "books", nil, nil)
 	if !ok {
 		t.Errorf("an empty series folder was refused: %s", why)
 	}
@@ -19,7 +19,7 @@ func TestAnEmptyFolderMayBeRemoved(t *testing.T) {
 // on the reconcile pass: an answer that could not be obtained must never be
 // read as "nothing there".
 func TestAFolderThatCouldNotBeListedIsLeftAlone(t *testing.T) {
-	ok, why := folderVerdict("lantern", "comics", nil, errors.New("the web interface did not answer"))
+	ok, why := folderVerdict("lantern", "comics", "books", nil, errors.New("the web interface did not answer"))
 	if ok {
 		t.Error("a folder was deleted on the strength of a failed listing")
 	}
@@ -32,7 +32,7 @@ func TestAFolderThatCouldNotBeListedIsLeftAlone(t *testing.T) {
 // user may have put something of their own there, and it is theirs.
 func TestAFolderWithSomethingInItIsLeftAlone(t *testing.T) {
 	entries := []library.Entry{{ID: "something", Parent: "lantern", VisibleName: "A note of mine"}}
-	if ok, _ := folderVerdict("lantern", "comics", entries, nil); ok {
+	if ok, _ := folderVerdict("lantern", "comics", "books", entries, nil); ok {
 		t.Error("a folder with something in it was deleted")
 	}
 }
@@ -40,31 +40,68 @@ func TestAFolderWithSomethingInItIsLeftAlone(t *testing.T) {
 // **Never Comics.** A user who deletes their only series should still have the
 // folder every future download goes into.
 func TestComicsItselfIsNeverRemoved(t *testing.T) {
-	if ok, _ := folderVerdict("comics", "comics", nil, nil); ok {
+	if ok, _ := folderVerdict("comics", "comics", "books", nil, nil); ok {
 		t.Error("Comics was deleted")
+	}
+}
+
+// **Never Books**, checked the same way and for the same reason: an empty
+// Books is where the next downloaded book lands, not litter to clear away.
+//
+// This is the guard the 2026-09-22 incident needed: a legacy record whose
+// FolderPath had been mislabelled to look like a two-element per-series path
+// handed `folderID` straight through as the resolved Books id, and only
+// xochitl's own "must be in Trash" guard — not this one — refused it. See
+// seriesFolderOf for how that label can be wrong.
+func TestBooksItselfIsNeverRemoved(t *testing.T) {
+	if ok, _ := folderVerdict("books", "comics", "books", nil, nil); ok {
+		t.Error("Books was deleted")
 	}
 }
 
 // And never the top level, which is what a record from before series folders
 // existed points at.
 func TestTheTopLevelIsNeverRemoved(t *testing.T) {
-	if ok, _ := folderVerdict(library.RootID, "comics", nil, nil); ok {
+	if ok, _ := folderVerdict(library.RootID, "comics", "books", nil, nil); ok {
 		t.Error("the top level was deleted")
 	}
 }
 
 // Without knowing which folder is Comics, the guard above cannot be applied at
-// all, so nothing may be deleted.
+// all, so nothing may be deleted. `folderUnresolved` is genuinely "could not
+// find out" — not to be confused with "" below, which is "asked, and there
+// isn't one".
 func TestAFolderIsLeftAloneWhenComicsCannotBeResolved(t *testing.T) {
-	if ok, _ := folderVerdict("lantern", "", nil, nil); ok {
+	if ok, _ := folderVerdict("lantern", folderUnresolved, "books", nil, nil); ok {
 		t.Error("a folder was deleted without establishing which folder is Comics")
+	}
+}
+
+// And the same when Books cannot be resolved: the "never Books" guard cannot
+// be applied against an id nobody was able to establish, so nothing goes.
+func TestAFolderIsLeftAloneWhenBooksCannotBeResolved(t *testing.T) {
+	if ok, _ := folderVerdict("lantern", "comics", folderUnresolved, nil, nil); ok {
+		t.Error("a folder was deleted without establishing which folder is Books")
+	}
+}
+
+// **A folder that simply has not been created yet is not "unknown".** Most
+// devices have no Books folder at all until the first book is downloaded, and
+// that must not stop every comic's per-series folder from ever being tidied —
+// requirement 3 is as real as 1 and 2. "" here means Comics or Books were
+// asked about and confirmed absent, which is a different fact from
+// `folderUnresolved`.
+func TestAMissingBooksFolderDoesNotBlockTidyingAComicsFolder(t *testing.T) {
+	ok, why := folderVerdict("lantern", "comics", "", nil, nil)
+	if !ok {
+		t.Errorf("a series folder was refused just because Books does not exist yet: %s", why)
 	}
 }
 
 // Only a folder Quire recorded. Documents filed by hand are filed where the
 // user wanted them.
 func TestAnUnrecordedFolderIsLeftAlone(t *testing.T) {
-	if ok, _ := folderVerdict("", "comics", nil, nil); ok {
+	if ok, _ := folderVerdict("", "comics", "books", nil, nil); ok {
 		t.Error("an unrecorded folder was deleted")
 	}
 }

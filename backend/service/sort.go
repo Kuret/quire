@@ -341,8 +341,16 @@ func (s *Service) recordedFolder(sourceID, seriesID string) string {
 		// existed points straight at Comics, which is not a series folder —
 		// and a filed book's path is Books alone, one name, so this also
 		// correctly says "no per-series folder" for a book without needing to
-		// ask what kind rec is. That is what keeps deleteSeries from ever
-		// treating the Books folder itself as a per-series folder to tidy up.
+		// ask what kind rec is, in the ordinary case where FolderPath was
+		// written correctly.
+		//
+		// **This is a naming convention, not the guard.** It relies on
+		// FolderPath having been labelled right when it was written, and a
+		// mislabelled or legacy record can still make this return an id that
+		// names Books or Comics themselves — measured on a real device, see
+		// seriesFolderOf. `folderVerdict` is what actually keeps deleteSeries
+		// from tidying up Books or Comics, by checking the resolved id, not by
+		// this function refusing to hand one over.
 		if rec.FolderUUID != "" && len(rec.FolderPath) == 2 {
 			return rec.FolderUUID
 		}

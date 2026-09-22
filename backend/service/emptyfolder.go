@@ -31,14 +31,54 @@ import (
 // (PLAN §12.4) and for the same reason — an answer that could not be obtained
 // must never be read as "nothing there".
 
+// folderUnresolved marks a top-level folder id that an attempt to resolve
+// could not establish — as distinct from "", which means the resolve
+// succeeded and found no such folder. It is never a real reMarkable folder
+// id, so it can only ever compare unequal to one.
+const folderUnresolved = "\x00 unresolved"
+
+// resolveTopLevel is Comics or Books, resolved to an id, "" (confirmed not to
+// exist), or folderUnresolved (the attempt failed and it is unknown).
+//
+// Both callers in tidySeriesFolder need exactly this three-way answer, so it
+// lives once: a folder that simply hasn't been created yet must not read the
+// same as one nobody could ask about.
+func (s *Service) resolveTopLevel(ctx context.Context, name string) string {
+	place, err := s.library.Resolve(ctx, name)
+	if err != nil {
+		return folderUnresolved
+	}
+	if len(place.Path) == 1 {
+		return place.FolderID
+	}
+	return ""
+}
+
 // folderVerdict decides whether a folder may be deleted, and says why not.
 //
 // Pure, and separate from the plumbing, because every interesting case here is
 // a refusal and a refusal is hard to assert through an asynchronous send.
 //
 // `listErr` is the listing's own error. `entries` is what came back. `comicsID`
-// is the id of the user's Comics folder, or "" if it could not be established.
-func folderVerdict(folderID, comicsID string, entries []library.Entry, listErr error) (bool, string) {
+// and `booksID` are the resolved ids of the user's Comics and Books folders:
+// `""` when the folder was positively confirmed not to exist yet, and
+// `folderUnresolved` when the attempt to find out failed and it is genuinely
+// unknown. The two must not be conflated — a device with no Books folder at
+// all (most of them, before a first book is ever downloaded) must not stop
+// every comic's per-series folder from ever being tidied, but a resolve that
+// merely failed must never be read as "so there is no Books to worry about".
+//
+// **Comics and Books are checked by resolved id, not inferred from anything
+// about the recorded folder's shape.** `seriesFolderOf` and `recordedFolder`
+// carry a heuristic — a book's path is one name, a comic's per-series path is
+// two — that is meant to keep the top-level folders out of `folderID` in the
+// first place, but that heuristic reads a label this package writes onto a
+// record, not a fact re-checked against the device. A record from before that
+// distinction existed, or one mislabelled some other way, can still hand this
+// function a `folderID` that names Comics or Books, and this is the guard that
+// must catch it regardless — the same reason `folderID == comicsID` was
+// already checked here rather than trusted to never arrive.
+func folderVerdict(folderID, comicsID, booksID string, entries []library.Entry, listErr error) (bool, string) {
 	switch {
 	case folderID == "":
 		// Not a folder Quire recorded. The documents may well have been filed
@@ -46,19 +86,31 @@ func folderVerdict(folderID, comicsID string, entries []library.Entry, listErr e
 		return false, "no series folder was recorded for those downloads"
 	case folderID == library.RootID:
 		return false, "the recorded folder is the top level"
-	case comicsID == "":
-		// Without knowing which folder is Comics, the guard below cannot be
-		// applied, so nothing may be deleted at all.
-		return false, "Comics could not be resolved, so the guard cannot be applied"
+	case comicsID == folderUnresolved || booksID == folderUnresolved:
+		// Not "no such folder" — genuinely unknown. Without knowing which
+		// folders are Comics and Books, the guards below cannot be applied, so
+		// nothing may be deleted at all.
+		return false, "Comics or Books could not be resolved, so the guard cannot be applied"
 	case folderID == comicsID:
 		// **Never Comics.** A user who deletes their only series should still
 		// have the folder every future download goes into, and an empty Comics
 		// is an ordinary state rather than litter.
 		return false, "the recorded folder is Comics itself"
+	case folderID == booksID:
+		// **Never Books**, for the same reason and checked the same way: an
+		// empty Books is where the next downloaded book goes, not litter, and
+		// this is positive against the resolved id rather than assumed from
+		// how the folder was labelled.
+		return false, "the recorded folder is Books itself"
 	case listErr != nil:
 		// A listing that failed is not an empty folder.
 		return false, "the folder could not be listed: " + listErr.Error()
 	case len(entries) > 0:
+		// The folder has something in it that is not accounted for by what
+		// Quire just deleted — the user's own document, filed there by hand,
+		// most likely. Ownership of what is inside a folder Quire manages is
+		// never inferred from the folder alone; only an empty listing, checked
+		// here, says nothing of the user's is in it.
 		return false, "the folder still has something in it"
 	}
 	return true, ""
@@ -111,15 +163,27 @@ func (s *Service) considerEmptyFolder(ctx context.Context, out Sender, sourceID,
 //
 // Only a folder *inside* Comics counts, by the same rule recordedFolder uses: a
 // record from before series folders existed points straight at Comics, and
-// Comics is never a series folder. folderVerdict guards that again by id; this
-// is the cheaper check that gets there first.
+// Comics is never a series folder.
 //
 // A book's finished path is Books alone — one name, the same length as an
 // unfiled comic's — so this returns "" for a book exactly as it does for an
-// unsorted comic, and considerEmptyFolder never runs on the Books folder at
-// all. That is the guard PLAN's Books design relies on: there is no per-title
-// folder to ever be found empty, so the sweep never has an id to check
-// folderVerdict's "never Comics"-shaped guard against.
+// unsorted comic, and in the ordinary case considerEmptyFolder never runs on
+// the Books folder at all.
+//
+// **That is a convention this function tries to keep, not a guarantee this
+// function can enforce.** `FolderPath` is a label `rememberFolder` writes from
+// what a sort reported, not a fact re-derived from the device each time it is
+// read, so a record mislabelled once — by a bug in the sort path, or one
+// carried over from before this file existed — can still have a two-element
+// path pointing straight at Books' own id, and this function has no way to
+// tell that apart from a genuine per-series folder. It was read that way once
+// on a real device: the resolved Books id and a document the owner filed there
+// by hand both survived a delete only because xochitl's own Trash guard
+// happened to refuse them, not because anything here did. `folderVerdict` is
+// where Comics and Books are actually kept safe — checked against their
+// resolved ids, every time, regardless of what a record claims — and this
+// function's job is only to name a candidate for that check to accept or
+// refuse.
 func seriesFolderOf(rec library.Record) string {
 	if rec.FolderUUID != "" && len(rec.FolderPath) == 2 {
 		return rec.FolderUUID
@@ -140,13 +204,11 @@ func (s *Service) tidySeriesFolder(ctx context.Context, out Sender, folderID, na
 	// Tying this to the message's context would abandon the tidy-up halfway
 	// through for no reason the user could see.
 	s.bg.start(context.WithoutCancel(ctx), func(bgCtx context.Context) {
-		comicsID := ""
-		if place, err := s.library.Resolve(bgCtx, library.ComicsFolder); err == nil && len(place.Path) == 1 {
-			comicsID = place.FolderID
-		}
+		comicsID := s.resolveTopLevel(bgCtx, library.ComicsFolder)
+		booksID := s.resolveTopLevel(bgCtx, library.BooksFolder)
 
 		entries, listErr := s.library.List(bgCtx, folderID)
-		ok, why := folderVerdict(folderID, comicsID, entries, listErr)
+		ok, why := folderVerdict(folderID, comicsID, booksID, entries, listErr)
 		if !ok {
 			// Left alone, and said out loud in the log rather than nowhere: a
 			// folder quietly surviving is exactly the sort of thing that looks
@@ -171,9 +233,15 @@ type folderDeletedRequest struct {
 	FolderID   string `json:"folderId"`
 	FolderName string `json:"folderName"`
 
+	// Deleted means the folder is gone from Comics outright — folders and
+	// documents are both entries to the same `deleteEntries` call.
+	//
+	// The wire key is still "trashed": that is the field name ui/Main.qml
+	// sends, a holdover from when this went by way of the Trash, and this
+	// struct decodes it rather than requiring a frontend change that has not
+	// landed yet.
 	// Trashed means the folder is out of Comics. Removed means it was taken
-	// out of the Trash as well, which is the same two-step delete a document
-	// gets — folders and documents are both entries to that API.
+	// out of the Trash too.
 	Trashed bool `json:"trashed,omitempty"`
 	Removed bool `json:"removed,omitempty"`
 
@@ -190,7 +258,7 @@ type folderDeletedRequest struct {
 func (s *Service) folderDeleted(out Sender, req folderDeletedRequest) error {
 	if !req.Removed {
 		s.log.Info("an empty series folder was not removed",
-			"folder", req.FolderID, "trashed", req.Trashed, "detail", req.Detail)
+			"folder", req.FolderID, "detail", req.Detail)
 		return nil
 	}
 	s.log.Info("an empty series folder was removed", "folder", req.FolderID)
