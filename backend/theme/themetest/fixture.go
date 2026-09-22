@@ -60,6 +60,14 @@ type Request struct {
 	// and PLAN §7.6 turns on the first one being what a caller who cannot name
 	// a page gets. Assert absence with Referrer.IsZero().
 	Referrer fetch.Referrer
+
+	// Policy is the *fetch.Policy the caller built for this request. It is
+	// recorded, rather than consulted here, so a test can check what a call
+	// site actually handed the fetcher — in particular, whether it went
+	// through theme.PolicyFor (Policy.Headers / Policy.Cookies carry a
+	// theme's SourceHeaders / CookieUser) or bypassed it with a bare
+	// Source.Policy() (both nil).
+	Policy *fetch.Policy
 }
 
 // Route answers one request. Body is either inline or loaded from a file under
@@ -130,25 +138,25 @@ func (f *Fetcher) routeKeys() []string {
 
 // Get implements theme.Fetcher.
 func (f *Fetcher) Get(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil, fetch.Referrer{})
+	return f.answer(ctx, p, fetch.KindDiscovery, http.MethodGet, rawurl, nil, fetch.Referrer{})
 }
 
 // GetFrom implements theme.Fetcher, recording the Referrer it was given.
 func (f *Fetcher) GetFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindDiscovery, http.MethodGet, rawurl, nil, from)
+	return f.answer(ctx, p, fetch.KindDiscovery, http.MethodGet, rawurl, nil, from)
 }
 
 // GetRetrieval records the PLAN §7.4 request kind alongside the URL, so a
 // theme test can assert that a call the user asked for was made as retrieval
 // and — just as importantly — that a search or a listing was not.
 func (f *Fetcher) GetRetrieval(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil, fetch.Referrer{})
+	return f.answer(ctx, p, fetch.KindRetrieval, http.MethodGet, rawurl, nil, fetch.Referrer{})
 }
 
 // GetRetrievalFrom implements theme.Fetcher, recording the Referrer it was
 // given. It is the call the download queue makes for a page image.
 func (f *Fetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindRetrieval, http.MethodGet, rawurl, nil, from)
+	return f.answer(ctx, p, fetch.KindRetrieval, http.MethodGet, rawurl, nil, from)
 }
 
 // GetSlow mirrors fetch.Client.GetSlow: the same routes, recorded as a slow
@@ -158,7 +166,7 @@ func (f *Fetcher) GetRetrievalFrom(ctx context.Context, p *fetch.Policy, rawurl 
 // one-method interface — but the fixture fetcher answers it so that theme can
 // be tested offline like every other.
 func (f *Fetcher) GetSlow(ctx context.Context, p *fetch.Policy, rawurl string) (*fetch.Response, error) {
-	return f.route(ctx, Request{Method: http.MethodGet, URL: rawurl, Kind: fetch.KindDiscovery, Slow: true})
+	return f.route(ctx, Request{Method: http.MethodGet, URL: rawurl, Kind: fetch.KindDiscovery, Slow: true, Policy: p})
 }
 
 // GetFileRetrieval mirrors fetch.Client.GetFileRetrieval: the fetch of one
@@ -167,12 +175,12 @@ func (f *Fetcher) GetSlow(ctx context.Context, p *fetch.Policy, rawurl string) (
 // can actually carry a book?" is a claim a test should be able to check.
 func (f *Fetcher) GetFileRetrieval(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
 	return f.route(ctx, Request{Method: http.MethodGet, URL: rawurl, Kind: fetch.KindRetrieval,
-		Referrer: from, Slow: true})
+		Referrer: from, Slow: true, Policy: p})
 }
 
 // PostForm implements theme.Fetcher.
 func (f *Fetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, form url.Values) (*fetch.Response, error) {
-	return f.answer(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, form, fetch.Referrer{})
+	return f.answer(ctx, p, fetch.KindDiscovery, http.MethodPost, rawurl, form, fetch.Referrer{})
 }
 
 // PostJSON mirrors fetch.Client.PostJSON. It is not on theme.Fetcher — only
@@ -180,15 +188,15 @@ func (f *Fetcher) PostForm(ctx context.Context, p *fetch.Policy, rawurl string, 
 // interface — but the fixture fetcher answers it so that theme can be tested
 // offline like every other.
 func (f *Fetcher) PostJSON(ctx context.Context, p *fetch.Policy, rawurl string, body []byte) (*fetch.Response, error) {
-	return f.answerJSON(ctx, fetch.KindDiscovery, http.MethodPost, rawurl, body)
+	return f.answerJSON(ctx, p, fetch.KindDiscovery, http.MethodPost, rawurl, body)
 }
 
-func (f *Fetcher) answer(ctx context.Context, kind fetch.Kind, method, rawurl string, form url.Values, from fetch.Referrer) (*fetch.Response, error) {
-	return f.route(ctx, Request{Method: method, URL: rawurl, Form: form, Kind: kind, Referrer: from})
+func (f *Fetcher) answer(ctx context.Context, p *fetch.Policy, kind fetch.Kind, method, rawurl string, form url.Values, from fetch.Referrer) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: method, URL: rawurl, Form: form, Kind: kind, Referrer: from, Policy: p})
 }
 
-func (f *Fetcher) answerJSON(ctx context.Context, kind fetch.Kind, method, rawurl string, body []byte) (*fetch.Response, error) {
-	return f.route(ctx, Request{Method: method, URL: rawurl, JSON: append([]byte(nil), body...), Kind: kind})
+func (f *Fetcher) answerJSON(ctx context.Context, p *fetch.Policy, kind fetch.Kind, method, rawurl string, body []byte) (*fetch.Response, error) {
+	return f.route(ctx, Request{Method: method, URL: rawurl, JSON: append([]byte(nil), body...), Kind: kind, Policy: p})
 }
 
 func (f *Fetcher) route(ctx context.Context, req Request) (*fetch.Response, error) {

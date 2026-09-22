@@ -123,7 +123,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	// one file the user named, not a crawl. See fetchFile for the two ways it
 	// differs from a page image, both of them about size and time.
 	step(phaseFetching, fmt.Sprintf("Downloading %s…", name))
-	file, err := s.fetchFile(ctx, src, fileURL)
+	file, err := s.fetchFile(ctx, th, src, fileURL)
 	if err != nil {
 		if cancelled(err) {
 			stopped()
@@ -222,12 +222,12 @@ type fileRetriever interface {
 // fetch.FileRetrievalMaxResponseBytes is refused here, in one sentence, rather
 // than at the end of a 90 MB transfer the device would have reset anyway (see
 // that constant).
-func (s *Service) fetchFile(ctx context.Context, src *theme.Source, rawurl string) ([]byte, error) {
+func (s *Service) fetchFile(ctx context.Context, th theme.Theme, src *theme.Source, rawurl string) ([]byte, error) {
 	r, ok := s.fetch.(fileRetriever)
 	if !ok {
 		return nil, fmt.Errorf("this build cannot download a whole file, only page images")
 	}
-	pol, err := src.Policy()
+	pol, err := theme.PolicyFor(th, src)
 	if err != nil {
 		return nil, err
 	}

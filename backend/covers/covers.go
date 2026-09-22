@@ -100,7 +100,7 @@ func (c *Cache) Dir() string { return c.dir }
 // The zero fetch.Referrer sends no header, which is the right answer for every
 // host that does not ask — mangadex's among them — and the right answer when
 // we do not know.
-func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string, from fetch.Referrer) (string, error) {
+func (c *Cache) Path(ctx context.Context, th theme.Theme, src *theme.Source, rawurl string, from fetch.Referrer) (string, error) {
 	if rawurl == "" {
 		return "", fmt.Errorf("covers: no cover URL")
 	}
@@ -139,7 +139,7 @@ func (c *Cache) Path(ctx context.Context, src *theme.Source, rawurl string, from
 		return "", fmt.Errorf("covers: %w", err)
 	}
 
-	pol, err := src.Policy()
+	pol, err := theme.PolicyFor(th, src)
 	if err != nil {
 		return "", fmt.Errorf("covers: %w", err)
 	}

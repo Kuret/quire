@@ -160,18 +160,18 @@ func (s *Service) runCover(ctx context.Context, out Sender, sourceID, seriesID, 
 	if s.covers == nil {
 		return
 	}
-	src, ok := s.store.Get(sourceID)
-	if !ok {
+	th, src, err := s.themeFor(sourceID)
+	if err != nil {
 		return
 	}
-	from, err := theme.CoverRefererFrom(s.coverReferrerFor(sourceID, url))
-	if err != nil {
+	from, refErr := theme.CoverRefererFrom(s.coverReferrerFor(sourceID, url))
+	if refErr != nil {
 		// A theme named something it cannot have fetched. PLAN §7.6: do not
 		// invent a replacement — say so and send no header, which is what the
 		// zero Referrer CoverRefererFrom hands back does.
-		s.log.Warn("cover referrer unusable", "source", sourceID, "series", seriesID, "err", err)
+		s.log.Warn("cover referrer unusable", "source", sourceID, "series", seriesID, "err", refErr)
 	}
-	path, err := s.covers.Path(ctx, src, url, from)
+	path, err := s.covers.Path(ctx, th, src, url, from)
 	if err != nil {
 		// A missing cover is a blank tile, not an error dialogue: the grid is
 		// still usable and the titles are still readable.

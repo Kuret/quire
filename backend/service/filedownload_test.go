@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,19 @@ type bookTheme struct {
 
 	// retrieved is every chapter id Retrieve was asked for.
 	retrieved []string
+
+	// headers, when non-nil, makes bookTheme implement theme.SourceHeaders —
+	// standing in for a theme like globalcomix whose source needs a static
+	// header attached to its own requests, including the file fetch
+	// fetchFile performs.
+	headers http.Header
+
+	// useCookies, when true, makes bookTheme implement theme.CookieUser.
+	useCookies bool
 }
+
+func (b *bookTheme) SourceHeaders(*theme.Source) http.Header { return b.headers }
+func (b *bookTheme) UsesCookies(*theme.Source) bool          { return b.useCookies }
 
 func (b *bookTheme) ID() string                             { return bookThemeID }
 func (b *bookTheme) Fingerprint(*probe.Page) int            { return 0 }
@@ -695,5 +708,58 @@ func TestTheFileRetrievalCapIsTheUploadBudget(t *testing.T) {
 	if library.UploadBudgetBytes >= library.MaxUploadBytes {
 		t.Errorf("the upload budget %d is not below the device's %d hard limit",
 			library.UploadBudgetBytes, library.MaxUploadBytes)
+	}
+}
+
+// TestBookFileFetchCarriesSourceHeaders is the mutation (a) test for
+// filedownload.go's fetchFile: reverting its policy construction from
+// theme.PolicyFor(th, src) back to the bare src.Policy() it used to call
+// makes this fail, because a bare Source.Policy() never carries a theme's
+// SourceHeaders — theme.PolicyFor is the only place that side interface is
+// consulted.
+func TestBookFileFetchCarriesSourceHeaders(t *testing.T) {
+	th := &bookTheme{headers: http.Header{"X-Reading-Grant": []string{"granted-token"}}}
+	env := newBookService(t, th)
+
+	downloadTheBook(t, env.svc, env.rec)
+	waitForPhase(t, env.rec, "done")
+
+	var found bool
+	for _, c := range env.fetcher.Calls() {
+		if !strings.Contains(c.URL, "/api/localdownload") {
+			continue
+		}
+		found = true
+		if c.Policy == nil || c.Policy.Headers.Get("X-Reading-Grant") != "granted-token" {
+			t.Errorf("the file was fetched with policy %+v, want X-Reading-Grant: granted-token", c.Policy)
+		}
+	}
+	if !found {
+		t.Fatal("the file was never fetched")
+	}
+}
+
+// TestBookFileFetchCarriesCookieJar is the same mutation (a) proof for
+// theme.CookieUser: without going through theme.PolicyFor, a theme that opts
+// into cookies never gets a jar on the policy the file fetch is made with.
+func TestBookFileFetchCarriesCookieJar(t *testing.T) {
+	th := &bookTheme{useCookies: true}
+	env := newBookService(t, th)
+
+	downloadTheBook(t, env.svc, env.rec)
+	waitForPhase(t, env.rec, "done")
+
+	var found bool
+	for _, c := range env.fetcher.Calls() {
+		if !strings.Contains(c.URL, "/api/localdownload") {
+			continue
+		}
+		found = true
+		if c.Policy == nil || c.Policy.Cookies == nil {
+			t.Errorf("the file was fetched with policy %+v, want a cookie jar", c.Policy)
+		}
+	}
+	if !found {
+		t.Fatal("the file was never fetched")
 	}
 }

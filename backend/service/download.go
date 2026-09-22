@@ -629,7 +629,7 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 	// by skipping files that exist (PLAN §6 M4), so cancelling at page 300 of
 	// 325 and starting again must not refetch 300 pages. Cancel means stop,
 	// not discard.
-	pages, stats, err := s.downloadPages(ctx, out, src, dir, chs, &p)
+	pages, stats, err := s.downloadPages(ctx, out, th, src, dir, chs, &p)
 	if err != nil {
 		if cancelled(err) {
 			stopped()
@@ -763,7 +763,7 @@ func (s *Service) runDownload(parent context.Context, out Sender, req downloadRe
 }
 
 // downloadPages runs the page queue, streaming progress to the frontend.
-func (s *Service) downloadPages(ctx context.Context, out Sender, src *theme.Source, dir string,
+func (s *Service) downloadPages(ctx context.Context, out Sender, th theme.Theme, src *theme.Source, dir string,
 	chs []download.Chapter, p *downloadProgress) ([]assemble.Chapter, download.Stats, error) {
 
 	opts := s.downloadOptions
@@ -792,7 +792,7 @@ func (s *Service) downloadPages(ctx context.Context, out Sender, src *theme.Sour
 		s.log.Warn("download is large", "bytes", stored, "threshold", threshold, "dir", dir)
 	}
 
-	q := download.New(&sourceFetcher{fetch: s.fetch, src: src}, opts)
+	q := download.New(&sourceFetcher{fetch: s.fetch, th: th, src: src}, opts)
 	return q.Run(ctx, dir, chs)
 }
 
@@ -1460,6 +1460,7 @@ func safeSegment(id string) string {
 // a CDN outside the source's registrable domain is refused.
 type sourceFetcher struct {
 	fetch theme.Fetcher
+	th    theme.Theme
 	src   *theme.Source
 }
 
@@ -1472,7 +1473,7 @@ type sourceFetcher struct {
 // fetch.Referrer, which sends no header at all — PLAN §7.6's answer for "we do
 // not know", and never a stand-in.
 func (f *sourceFetcher) Get(ctx context.Context, rawurl, referer string) (io.ReadCloser, error) {
-	pol, err := f.src.Policy()
+	pol, err := theme.PolicyFor(f.th, f.src)
 	if err != nil {
 		return nil, err
 	}

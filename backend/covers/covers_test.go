@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,7 +62,7 @@ func TestCoverIsDownscaledOnceAndReused(t *testing.T) {
 	})
 	c := covers.New(t.TempDir(), f)
 
-	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	path, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestCoverIsDownscaledOnceAndReused(t *testing.T) {
 	// A second request must not fetch again: the fixture fetcher records every
 	// call, so this is checkable rather than a matter of faith.
 	before := len(f.Calls())
-	again, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	again, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestForgetDropsOnlyThatSource(t *testing.T) {
 	})
 	dir := t.TempDir()
 	c := covers.New(dir, f)
-	if _, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{}); err != nil {
+	if _, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{}); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(dir, "another-source", "keep.jpg")
@@ -144,7 +145,7 @@ func TestOddSourceIDStaysInsideTheCache(t *testing.T) {
 
 	src := source()
 	src.ID = "../../escape"
-	path, err := c.Path(context.Background(), src, coverURL, fetch.Referrer{})
+	path, err := c.Path(context.Background(), madara.New(nil), src, coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestCoverReferrerReachesTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Path(context.Background(), source(), coverURL, from); err != nil {
+	if _, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, from); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,6 +185,75 @@ func TestCoverReferrerReachesTheRequest(t *testing.T) {
 	}
 }
 
+// headeredTheme is madara.Theme plus theme.SourceHeaders, standing in for a
+// theme like globalcomix whose source needs a static header attached to its
+// own requests — including the cover fetch Cache.Path performs.
+type headeredTheme struct {
+	*madara.Theme
+	headers http.Header
+}
+
+func (h headeredTheme) SourceHeaders(*theme.Source) http.Header { return h.headers }
+
+// cookieTheme is madara.Theme plus theme.CookieUser, standing in for a theme
+// whose source carries a server-issued session cookie into the cover fetches
+// that follow a grant.
+type cookieTheme struct {
+	*madara.Theme
+	use bool
+}
+
+func (c cookieTheme) UsesCookies(*theme.Source) bool { return c.use }
+
+// TestCoverFetchCarriesSourceHeaders is the mutation (a) test for
+// covers.go's Cache.Path: reverting its policy construction from
+// theme.PolicyFor(th, src) back to the bare src.Policy() it used to call
+// makes this fail, because a bare Source.Policy() never carries a theme's
+// SourceHeaders — theme.PolicyFor is the only place that side interface is
+// consulted.
+func TestCoverFetchCarriesSourceHeaders(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: bigPNG(t)},
+	})
+	c := covers.New(t.TempDir(), f)
+	th := headeredTheme{Theme: madara.New(f), headers: http.Header{"X-Reading-Grant": []string{"granted-token"}}}
+
+	if _, err := c.Path(context.Background(), th, source(), coverURL, fetch.Referrer{}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d requests, want 1", len(calls))
+	}
+	if calls[0].Policy == nil || calls[0].Policy.Headers.Get("X-Reading-Grant") != "granted-token" {
+		t.Errorf("the cover was fetched with policy %+v, want X-Reading-Grant: granted-token", calls[0].Policy)
+	}
+}
+
+// TestCoverFetchCarriesCookieJar is the same mutation (a) proof for
+// theme.CookieUser: without going through theme.PolicyFor, a theme that opts
+// into cookies never gets a jar on the policy the cover cache fetches with.
+func TestCoverFetchCarriesCookieJar(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /wp-content/uploads/2026/01/lantern-keeper.png": {Body: bigPNG(t)},
+	})
+	c := covers.New(t.TempDir(), f)
+	th := cookieTheme{Theme: madara.New(f), use: true}
+
+	if _, err := c.Path(context.Background(), th, source(), coverURL, fetch.Referrer{}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d requests, want 1", len(calls))
+	}
+	if calls[0].Policy == nil || calls[0].Policy.Cookies == nil {
+		t.Errorf("the cover was fetched with policy %+v, want a cookie jar", calls[0].Policy)
+	}
+}
+
 // The other half of the same rule, and the reason mangadex is untouched: a
 // source whose cover host asks for nothing gets **no header at all**, asserted
 // by absence rather than by an empty string.
@@ -193,7 +263,7 @@ func TestNoCoverReferrerSendsNoHeader(t *testing.T) {
 	})
 	c := covers.New(t.TempDir(), f)
 
-	if _, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{}); err != nil {
+	if _, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +301,7 @@ func TestACoverKeepsItsColour(t *testing.T) {
 	})
 	c := covers.New(t.TempDir(), f)
 
-	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	path, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +337,7 @@ func TestTheRenderVersionIsPartOfTheKey(t *testing.T) {
 	dir := t.TempDir()
 	c := covers.New(dir, f)
 
-	path, err := c.Path(context.Background(), source(), coverURL, fetch.Referrer{})
+	path, err := c.Path(context.Background(), madara.New(nil), source(), coverURL, fetch.Referrer{})
 	if err != nil {
 		t.Fatal(err)
 	}
