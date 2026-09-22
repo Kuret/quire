@@ -6,6 +6,7 @@ import (
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/shelf"
 )
 
 // downloadedRow is one line of the downloaded overview.
@@ -50,6 +51,17 @@ type downloadedRow struct {
 	// has been removed: there is nothing left to ask, and guessing would be
 	// inventing an answer about files the user still has.
 	Kind string `json:"kind,omitempty"`
+
+	// SavedCount is how many of this series' chapters are saved in Quire's own
+	// storage — a separate count from the library's, because the two are
+	// independent copies of a chapter and a series can have both, either, or
+	// (unlike before this existed) neither with a row still worth showing.
+	SavedCount int `json:"savedCount,omitempty"`
+
+	// LatestSavedChapterID is the most recently saved chapter of this series,
+	// for a "read latest" affordance that opens it with OpenSaved. Empty when
+	// nothing is saved.
+	LatestSavedChapterID string `json:"latestSavedChapterId,omitempty"`
 }
 
 // RemovedSourceNote is what a row says when the source it came from is gone.
@@ -93,41 +105,89 @@ func (s *Service) sendDownloaded(out Sender) error {
 
 // downloadedRows groups the library records into one row per (source, series).
 func (s *Service) downloadedRows() []downloadedRow {
-	if s.libStore == nil {
+	if s.libStore == nil && s.shelfStore == nil {
 		return nil
 	}
 
 	type key struct{ source, series string }
 	var order []key
-	group := map[key][]library.Record{}
-
-	// Store order is newest first, so the order groups are first seen in is the
-	// order they should come out in.
-	for _, rec := range s.libStore.List() {
-		if rec.DocumentUUID == "" {
-			continue
-		}
-		k := key{rec.Source, rec.Series}
-		if _, seen := group[k]; !seen {
+	seen := map[key]bool{}
+	addKey := func(k key) {
+		if !seen[k] {
+			seen[k] = true
 			order = append(order, k)
 		}
-		group[k] = append(group[k], rec)
+	}
+
+	// Private content is reached only via the private source list — never
+	// this overview, whether it is a library document or a chapter saved in
+	// Quire.
+	isPrivate := func(sourceID string) bool {
+		src, ok := s.store.Get(sourceID)
+		return ok && src.IsPrivate()
+	}
+
+	libGroup := map[key][]library.Record{}
+	if s.libStore != nil {
+		// Store order is newest first, so the order groups are first seen in
+		// is the order they should come out in.
+		for _, rec := range s.libStore.List() {
+			if rec.DocumentUUID == "" || isPrivate(rec.Source) {
+				continue
+			}
+			k := key{rec.Source, rec.Series}
+			addKey(k)
+			libGroup[k] = append(libGroup[k], rec)
+		}
+	}
+
+	savedGroup := map[key][]shelf.Record{}
+	if s.shelfStore != nil {
+		// shelf.Store.List is likewise newest first (shelf.Store.sort), so a
+		// series with saved chapters but no library record still gets a row
+		// even if nothing is in the library — the whole point of a row that
+		// only saved chapters put here.
+		for _, rec := range s.shelfStore.List() {
+			if isPrivate(rec.Source) {
+				continue
+			}
+			k := key{rec.Source, rec.Series}
+			addKey(k)
+			savedGroup[k] = append(savedGroup[k], rec)
+		}
 	}
 
 	rows := make([]downloadedRow, 0, len(order))
 	for _, k := range order {
-		recs := group[k]
+		recs := libGroup[k]
+		savedRecs := savedGroup[k]
+
+		title := downloadedTitle(recs)
+		if len(recs) == 0 {
+			title = savedSeriesTitle(savedRecs)
+		}
+
 		row := downloadedRow{
-			SourceID:   k.source,
-			SeriesID:   k.series,
-			Title:      downloadedTitle(recs),
-			Detail:     downloadCount(len(recs)),
-			CoverURL:   s.store.CoverURL(k.source, k.series),
+			SourceID: k.source,
+			SeriesID: k.series,
+			Title:    title,
+			Detail:   downloadedDetail(len(recs), len(savedRecs)),
+			CoverURL: s.store.CoverURL(k.source, k.series),
+			// LatestUUID is "" (omitted) for a series with no library record
+			// at all, which is the truth: there is nothing here
+			// MessageOpenInReader could open.
 			LatestUUID: latestUUID(recs),
 			// Asked unconditionally, and answered "" when there is nothing left
 			// to ask: a removed source, or one whose theme this build no longer
 			// has. See kindForSource.
-			Kind: s.kindForSource(k.source),
+			Kind:       s.kindForSource(k.source),
+			SavedCount: len(savedRecs),
+		}
+		if len(savedRecs) > 0 {
+			// shelf.Store.List is newest-first, so ForSeries' own order
+			// (which preserves it) puts the most recently saved chapter
+			// first.
+			row.LatestSavedChapterID = savedRecs[0].Chapter
 		}
 		if src, ok := s.store.Get(k.source); ok {
 			row.SourceName, row.Openable = src.Name, true
@@ -139,6 +199,29 @@ func (s *Service) downloadedRows() []downloadedRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// downloadedDetail is what a row says about its downloads, covering both
+// kinds when there are both: "3 chapters saved in Quire · 2 in your library".
+// A series with only one kind keeps the plain wording that kind has always
+// had, so a download that has never touched Quire's own storage reads exactly
+// as it did before this existed.
+func downloadedDetail(libCount, savedCount int) string {
+	if savedCount == 0 {
+		return downloadCount(libCount)
+	}
+	saved := fmt.Sprintf("%d chapters saved in Quire", savedCount)
+	if savedCount == 1 {
+		saved = "1 chapter saved in Quire"
+	}
+	if libCount == 0 {
+		return saved
+	}
+	lib := fmt.Sprintf("%d in your library", libCount)
+	if libCount == 1 {
+		lib = "1 in your library"
+	}
+	return saved + " · " + lib
 }
 
 // downloadedTitle is the series' name, by the same rule the attach-time filing
