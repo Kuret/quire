@@ -623,6 +623,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.openSaved(out, req)
 
+	case appload.MessageSavePosition:
+		var req savePositionRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.savePosition(req)
+
 
 	case robotsMessage:
 		return s.handleRobots(out, payload)
