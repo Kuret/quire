@@ -3261,11 +3261,31 @@ single saved thing a volume row could point at otherwise. A new top-level
 library" without a round trip. The Downloaded overview's rows now come from
 two stores merged by (source, series): a series with only saved chapters gets
 a row (`savedCount`, `latestSavedChapterId`) exactly as one with only library
-downloads always has, the two counts share one sentence when both are nonzero
-("3 chapters saved in Quire · 2 in your library"), and rows for **private**
-sources are excluded from this overview entirely — private content is reached
-only through the private source list, never here, whether what is being asked
-about is a library document or a chapter saved in Quire.
+downloads always has, and the two counts share one sentence when both are
+nonzero ("3 chapters saved in Quire · 2 in your library").
+
+> **Round 2, 2026-09-22: a private source gets its own Downloaded and
+> Watching, instead of being excluded outright.** The paragraph above used to
+> end "and rows for **private** sources are excluded from this overview
+> entirely — private content is reached only through the private source
+> list, never here." That held until the private source list asked for the
+> same two screens the ordinary one has (`ui/SourceList.qml`'s bottom row):
+> `MessageListDownloaded` gains `private: bool` — false is exactly the
+> overview above, true is the mirror image, only private sources' series —
+> and the reply echoes which one it answered. Watching a private source's
+> series is likewise allowed now rather than refused
+> (`state.Store.Watch` no longer holds `theme.Source.IsPrivate` against it);
+> `MessageWatchList` gains `privateWatched`/`privateSummary`, the same
+> shapes as `watched`/`summary` computed from private sources' watches only,
+> so the ordinary "Watching · 3 new" badge still never counts a private
+> series. A source marked private after its series were watched has its
+> watches move to the private list, not deleted; marked public again, they
+> move back — in both directions this is a change of which list *renders*
+> the watch, never of the watch itself. Discretion is still scoped to the
+> list and the combined search, never to a screen a source's series can
+> reach some other way (the chapter list's Watch action, "Send to library"'s
+> own refusal): those were never about hiding that a series exists, only
+> about keeping it off the screens meant for browsing everything at once.
 
 **UI (out of scope for this section — see the QML side of this feature):**
 `ui/TryReader.qml` gains a `saved` mode entered from `SavedOpened`, with no
@@ -3277,3 +3297,56 @@ list's non-book rows become `[Delete] [Read]` for anything saved (in
 preference to `[Try] [Download]`), `Read` sending `OpenSaved` and `Delete`
 sending `DeleteSaved`; and a selection ("Download selected", "Download all")
 always asks for `destination: "quire"`. Books are unchanged throughout.
+
+### 12.7 Round 2: deleting a whole saved volume, and storage figures — 2026-09-22
+
+Two smaller requests that landed with the private Downloaded/Watching work
+above (§12.6's addendum).
+
+**Deleting a whole volume from Quire in one tap, not one chapter at a time.**
+`volumeRows` (`backend/service/download.go`) gains `chapterIds` — the volume's
+own chapters, in reading order — and `savedCount`, how many of them are saved
+in Quire right now. `MessageDeleteSaved`'s payload takes optional
+`volumeLabel` and `chapterIds`; when `chapterIds` is non-empty this deletes
+every one of them that is actually saved (ignoring any that are not — the row
+only knows what the volume contains, not which of its chapters Quire has),
+through the same `removeSavedChapter` a single-chapter delete already uses —
+no second removal path. The confirm question and the "done" sentence are
+singular-aware ("Its 1 saved chapter…" / "Its 8 saved chapters…"), and
+`SavedDeleted`'s reply gains `chapterIds`: the ones actually deleted, so the
+UI clears each row's saved flag without a refetch. **The volume row's Delete
+button targets the saved chapters whenever there are any** (`savedCount >
+0`), whether the volume is fully or only partly saved, and whether or not it
+is *also* a library document — the library delete (unchanged, `documentUuid`
+and nothing saved) is offered again only once nothing is saved any more; the
+library document itself stays reachable from the chapter rows throughout. A
+fully saved volume's button still reads "Read"; a partly saved one reads
+"Download", which saves the rest through the existing per-chapter-in-a-volume
+save path — nothing new there.
+
+**Storage figures: what Quire's own storage is holding, and how much room is
+left.** `backend/service/cache.go` gains `storageStatus`: `savedBytes` (a
+tree-size walk of the saved root, exactly like the existing `cacheSize` walks
+the download cache), `cacheBytes` (the existing figure, unchanged), and
+`freeBytes` via a statfs on the saved root's filesystem — `/home` on the
+device. The statfs itself is `download.FreeSpace`, an exported wrapper around
+the unexported `freeSpace` a download's own pre-flight check already used
+(`backend/download/freespace_unix.go` / `freespace_other.go`); off unix it
+reports unknown, and the composed sentence omits the free-space clause
+entirely rather than invent a number for the occasion. One sentence, always
+(PLAN §2): `"Quire is using 1.4 GB — 1.1 GB of saved chapters and 300 MB of
+download cache. 18.2 GB free on this reMarkable."`, with a zero part dropped
+rather than said as "0 bytes" (`"Quire is using 1.1 GB of saved chapters. …"`).
+It rides on `MessageCacheStatus` (`savedBytes`, `freeBytes`, `storage` added;
+`bytes`/`message` unchanged — a frontend that only ever read the cache's own
+figure keeps reading exactly that) and on `MessageDownloadedList` (`storage`
+added, same sentence, on both the ordinary and the private reply — **the
+total covers everything, private sources included; there is one number, not
+one per mode**, because this is a disk fact, not a list a private source
+needs keeping off). The Downloaded screen shows it as a muted line at the
+top, in both modes; Settings shows it under the existing cache-only line.
+Refreshed by asking again: `DownloadedList` computes it fresh on every
+request rather than caching it, and the UI re-requests the list after a saved
+delete if a Downloaded screen happens to be open — simpler than threading a
+fresher figure through `SavedDeleted`'s own reply, and correct either way
+since nothing here is pushed.
