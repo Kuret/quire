@@ -596,7 +596,7 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		log.Warn("the reMarkable library is not reachable yet", "err", err)
 	}
 
-	return service.New(service.Options{
+	svc := service.New(service.Options{
 		Store:        store,
 		Registry:     reg,
 		Fetcher:      client,
@@ -607,5 +607,15 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		DownloadDir:  filepath.Join(dir, "downloads"),
 
 		PreviousSessionCrashed: previousCrashed,
-	}), session, nil
+	})
+
+	// The allowedHosts editor's record-and-offer sink (PLAN). It is wired
+	// here, after the service exists, rather than through fetch.Options at
+	// NewClient time above: the client has to exist before the themes that
+	// are built over it, and the service — the sink's owner — cannot exist
+	// before the store and the themes it holds. No request has been made yet,
+	// so there is no race to set this after client is otherwise ready.
+	client.SetOffDomainHook(svc.RecordOffDomainHost)
+
+	return svc, session, nil
 }

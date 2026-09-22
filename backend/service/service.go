@@ -167,20 +167,27 @@ type Service struct {
 	mu      sync.Mutex
 	probing *probeSession
 	drafts  map[string]*theme.Source
+
+	// pending is the record-and-offer sink for allowedHosts: a fetch refused
+	// for being off a source's registrable domain is noted here rather than
+	// interrupting anything, and offered from the source list. See
+	// pendinghosts.go and RecordOffDomainHost.
+	pending *pendingHosts
 }
 
 // New builds a Service.
 func New(opts Options) *Service {
 	s := &Service{
-		store:  opts.Store,
-		reg:    opts.Registry,
-		fetch:  opts.Fetcher,
-		covers: opts.Covers,
-		log:    opts.Log,
-		now:    opts.Now,
-		guard:  opts.ProbeGuard,
-		drafts: map[string]*theme.Source{},
-		bg:     newBackground(),
+		store:   opts.Store,
+		reg:     opts.Registry,
+		fetch:   opts.Fetcher,
+		covers:  opts.Covers,
+		log:     opts.Log,
+		now:     opts.Now,
+		guard:   opts.ProbeGuard,
+		drafts:  map[string]*theme.Source{},
+		bg:      newBackground(),
+		pending: newPendingHosts(),
 
 		library:         opts.Library,
 		libStore:        opts.LibraryStore,
@@ -264,6 +271,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := s.store.Remove(req.SourceID); err != nil {
 			return true, s.sendError(out, "not_found", err.Error())
 		}
+		// A removed source's pending hosts belong to an id nothing can act on
+		// any more.
+		s.pending.clearSource(req.SourceID)
 		// The thumbnails are ours and are worthless now. Downloaded volumes are
 		// the user's documents by this point and are left alone.
 		if s.covers != nil {
@@ -448,6 +458,26 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.setSourceProxy(out, req.SourceID, req.Proxy)
 
+	case appload.MessageAllowSourceHost:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			Host     string `json:"host"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.allowSourceHost(out, req.SourceID, req.Host)
+
+	case appload.MessageRevokeSourceHost:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			Host     string `json:"host"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.revokeSourceHost(out, req.SourceID, req.Host)
+
 	case appload.MessageCancelDownload:
 		var req downloadRequest
 		if err := decode(payload, &req); err != nil {
@@ -571,6 +601,19 @@ type sourceView struct {
 	// the proxy rather than on a resolved address — the UI needs this to warn
 	// before clearing a proxy takes the confirmation with it.
 	SelfHostedViaProxy bool `json:"selfHostedViaProxy,omitempty"`
+
+	// AllowedHosts is what has already been granted: the allowedHosts editor
+	// this feature adds needs to show, and let the owner revoke, what is
+	// already in force — not only what is pending.
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+
+	// PendingHosts are hosts a fetch on this source's behalf was refused for
+	// being off its registrable domain (fetch.GuardError.OffDomain),
+	// recorded rather than asked about at the moment of refusal — see
+	// pendinghosts.go for why. Each names the host and what Quire was
+	// fetching when it was refused, because a bare hostname beside an Allow
+	// button is exactly the reflexive "yes" record-and-offer exists to avoid.
+	PendingHosts []pendingHost `json:"pendingHosts,omitempty"`
 }
 
 func (s *Service) sendSources(out Sender) error {
@@ -590,6 +633,12 @@ func (s *Service) sendSources(out Sender) error {
 		}
 		if src.SelfHosted != nil {
 			v.SelfHostedViaProxy = src.SelfHosted.ViaProxy
+		}
+		if len(src.AllowedHosts) > 0 {
+			v.AllowedHosts = append([]string(nil), src.AllowedHosts...)
+		}
+		if pending := s.pending.forSource(src.ID); len(pending) > 0 {
+			v.PendingHosts = pending
 		}
 		if src.LastProbe != nil {
 			v.Status = VerdictHeadline(src.LastProbe.Verdict)
@@ -623,6 +672,42 @@ func (s *Service) setSourceProxy(out Sender, sourceID, proxy string) error {
 		return s.sendError(out, "bad_proxy",
 			"A proxy has to be an http://, https:// or socks5:// address.")
 	case err != nil:
+		return s.sendError(out, "not_found", plain(err))
+	}
+	return s.sendSources(out)
+}
+
+// allowSourceHost handles MessageAllowSourceHost: the owner reviewing a
+// pending host from the source list and granting it. It widens exactly one
+// source's allowedHosts by exactly one host — state.Store.AllowHost is the
+// only writer of that field once a source exists, for the reason its own
+// comment gives — and the granted host is dropped from the pending list it
+// came from, because it no longer needs asking about.
+//
+// A host that was never pending can still be allowed this way: nothing here
+// requires the owner to have seen it refused first, since a source entry may
+// also be hand-edited or imported with a CDN already known. What it never
+// does is guess — the host named is the host granted, to the source named
+// and no other, exactly what the caller asked for.
+func (s *Service) allowSourceHost(out Sender, sourceID, host string) error {
+	switch err := s.store.AllowHost(sourceID, host); {
+	case errors.Is(err, state.ErrHostAlreadyAllowed):
+		// Not an error worth stopping on: the end state the owner wants —
+		// this host allowed for this source — is already true. Still drop it
+		// from pending below, in case it is both already-allowed and still
+		// listed as pending from before the two diverged.
+	case err != nil:
+		return s.sendError(out, "not_found", plain(err))
+	}
+	s.pending.clearHost(sourceID, host)
+	return s.sendSources(out)
+}
+
+// revokeSourceHost handles MessageRevokeSourceHost: taking back a host that
+// was allowed. Like RevokeSelfHosted, this direction only ever narrows what
+// the guard will permit and needs no evidence — see state.Store.RevokeHost.
+func (s *Service) revokeSourceHost(out Sender, sourceID, host string) error {
+	if err := s.store.RevokeHost(sourceID, host); err != nil {
 		return s.sendError(out, "not_found", plain(err))
 	}
 	return s.sendSources(out)
