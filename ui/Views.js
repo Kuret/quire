@@ -35,9 +35,13 @@ var LIST = "list"
 function wireName(screen) {
     if (screen === "browse" || screen === "searchall")
         return "search"
-    if (screen === "downloaded")
+    // The private Downloaded / Watching screens (round 2) share their
+    // ordinary counterpart's setting: one layout preference per kind of
+    // screen, not a second one for private mode nobody asked to set
+    // separately.
+    if (screen === "downloaded" || screen === "downloadedPrivate")
         return "downloaded"
-    if (screen === "watching")
+    if (screen === "watching" || screen === "watchingPrivate")
         return "watching"
     return ""
 }

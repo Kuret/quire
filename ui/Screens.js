@@ -41,11 +41,20 @@
 function refreshOnShow(screen) {
     if (screen === "downloaded")
         return "listDownloaded"
+    // The private Downloaded screen (round 2), exactly like the ordinary
+    // one: no push, so a download or delete on a private source shows up the
+    // next time this screen is opened.
+    if (screen === "downloadedPrivate")
+        return "listDownloadedPrivate"
     // The private source list, like Downloaded: no push of its own, so a
     // mark or unmark made elsewhere shows up the next time this screen is
     // opened — which includes being returned to (see showScreen).
     if (screen === "privateSources")
         return "listPrivateSources"
+    // watchingPrivate needs nothing of its own: it is filled from the same
+    // pushed MessageWatchList (privateWatched) the ordinary Watching screen
+    // is, which arrives on attach and after every change — see "watching"'s
+    // own comment above for why that means no refetch on entry either.
     return ""
 }
 
