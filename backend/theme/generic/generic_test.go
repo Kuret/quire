@@ -91,6 +91,86 @@ func TestSearchFromSelectorsAlone(t *testing.T) {
 	}
 }
 
+// TestSearchWithNoBrowsePathIsUnaffected pins requirement 1: a source that
+// never set browsePath must behave byte-identically to before this feature
+// existed, using searchPath for the browse (empty-query) case exactly as it
+// already does for a text query.
+func TestSearchWithNoBrowsePathIsUnaffected(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /search": {File: "listing.html"},
+	})
+	th := generic.NewWithClock(f, clock)
+
+	got, err := th.Search(context.Background(), selectorSource(), "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d results, want 2: %+v", len(got), got)
+	}
+	calls := f.Calls()
+	if len(calls) != 1 || !strings.Contains(calls[0].URL, "/search") {
+		t.Fatalf("calls = %+v, want exactly one request to searchPath", calls)
+	}
+}
+
+// browseSource adds a browsePath distinct from searchPath, modelling the site
+// this feature was built for: search and browse live at different URLs.
+func browseSource() *theme.Source {
+	src := selectorSource()
+	src.Selectors[generic.BrowsePath] = "/browse?p={page}"
+	return src
+}
+
+// TestBrowsePathIsUsedOnlyForAnEmptyQuery pins requirements 1 and 2: an empty
+// query goes to browsePath (with {page} substituted), and any non-empty query
+// still goes to searchPath even when browsePath is configured.
+func TestBrowsePathIsUsedOnlyForAnEmptyQuery(t *testing.T) {
+	t.Run("empty query uses browsePath", func(t *testing.T) {
+		f := themetest.New(t, map[string]themetest.Route{
+			"GET /browse": {File: "listing.html"},
+		})
+		th := generic.NewWithClock(f, clock)
+
+		got, err := th.Search(context.Background(), browseSource(), "", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("got %d results, want 2: %+v", len(got), got)
+		}
+		calls := f.Calls()
+		if len(calls) != 1 {
+			t.Fatalf("got %d calls, want 1", len(calls))
+		}
+		if !strings.Contains(calls[0].URL, "/browse") {
+			t.Errorf("URL %q was not routed to browsePath", calls[0].URL)
+		}
+		if !strings.Contains(calls[0].URL, "p=3") {
+			t.Errorf("URL %q does not substitute {page}", calls[0].URL)
+		}
+	})
+
+	t.Run("a non-empty query still uses searchPath", func(t *testing.T) {
+		f := themetest.New(t, map[string]themetest.Route{
+			"GET /search": {File: "listing.html"},
+		})
+		th := generic.NewWithClock(f, clock)
+
+		_, err := th.Search(context.Background(), browseSource(), "lantern keeper", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls := f.Calls()
+		if len(calls) != 1 {
+			t.Fatalf("got %d calls, want 1", len(calls))
+		}
+		if !strings.Contains(calls[0].URL, "/search") {
+			t.Errorf("a non-empty query was routed to browsePath (%q), not searchPath", calls[0].URL)
+		}
+	})
+}
+
 func TestSeriesAndChaptersFromSelectorsAlone(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /read/the-lantern-keeper": {File: "listing.html"},
@@ -338,6 +418,7 @@ func TestSelectorVocabularyIsClosed(t *testing.T) {
 	}{
 		{name: "no selectors", selectors: nil},
 		{name: "a known selector", selectors: map[string]string{generic.PageImage: "img"}},
+		{name: "browsePath is a known selector", selectors: map[string]string{generic.BrowsePath: "/browse?p={page}"}},
 		{
 			name:      "a typo is rejected, not ignored",
 			selectors: map[string]string{"pageImages": "img"},

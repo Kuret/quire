@@ -42,6 +42,17 @@
 // s.Resolve(chapterID) call t.doc already makes — so the header states a fact
 // about a request Quire actually made, not a fabrication. See PageReferer
 // below.
+//
+// # searchPath and browsePath
+//
+// Search() is used for both a text query and a browse (empty query), and one
+// measured site could not answer both from the same URL: its search endpoint
+// returned correctly filtered results for a query and zero results for an
+// empty one, while its browse listing lived at a different path and ignored
+// any query it was given. selectors.browsePath exists for exactly that split:
+// it is the template used when the query is empty, falling back to
+// searchPath when absent so a source that never needed the distinction is
+// unaffected. See BrowsePath below.
 package generic
 
 import (
@@ -72,6 +83,20 @@ const (
 	// substituted; {query} is URL-escaped.
 	SearchPath = "searchPath"
 
+	// BrowsePath is a URL template, not a selector, used in place of
+	// SearchPath when the query is empty. It exists because a browse listing
+	// and a text search do not always live at the same URL: one measured site
+	// answers a query at /search/?s={query} but returns zero results there
+	// for an empty one, while its 24-item browse listing lives at / and
+	// ignores any query entirely. Absent BrowsePath, Search behaves exactly
+	// as it always has: SearchPath serves both jobs. {page} is substituted
+	// the same way as in SearchPath; {query} is substituted with the empty
+	// string rather than rejected at validation, because it is always empty
+	// by construction here (this template is only ever used for the
+	// no-query case) and a literal "{query}" left in the URL would be a
+	// worse failure than a silently empty one.
+	BrowsePath = "browsePath"
+
 	SearchItem  = "searchItem"
 	SearchLink  = "searchLink"
 	SearchTitle = "searchTitle"
@@ -97,6 +122,7 @@ const (
 
 // knownSelectors is the closed vocabulary above, sorted for error messages.
 var knownSelectors = []string{
+	BrowsePath,
 	ChapterDate, ChapterItem, ChapterLink, ChapterTitle,
 	PageImage,
 	SearchCover, SearchItem, SearchLink, SearchPath, SearchTitle,
@@ -232,7 +258,15 @@ func (t *Theme) Validate(s *theme.Source) error {
 // Search implements theme.Theme.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
 	sel := s.Selectors
-	path := sel[SearchPath]
+	// An empty query is a browse, not a search: use BrowsePath when the
+	// source configured one, and fall back to SearchPath otherwise so a
+	// source that never set BrowsePath behaves exactly as it always has.
+	var path string
+	if q == "" && sel[BrowsePath] != "" {
+		path = sel[BrowsePath]
+	} else {
+		path = sel[SearchPath]
+	}
 	if path == "" {
 		path = "/?s={query}"
 	}
