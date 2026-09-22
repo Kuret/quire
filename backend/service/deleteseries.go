@@ -6,6 +6,7 @@ import (
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/shelf"
 )
 
 // Deleting every download of one series, from the downloaded overview.
@@ -128,19 +129,34 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 	if !req.Confirmed {
 		// Step one: hand back the question and the documents it is about.
 		// Nothing is touched, and an accidental tap gets no further.
+		//
+		// A series with saved chapters and no library record at all still has
+		// something to delete — the row exists on the Downloaded overview for
+		// exactly that reason (see downloadedRows) — so it is not "not_found"
+		// on its own.
 		recs := s.recordsFor(req.SourceID, req.SeriesID)
-		if len(recs) == 0 {
+		savedRecs := s.savedRecordsFor(req.SourceID, req.SeriesID)
+		if len(recs) == 0 && len(savedRecs) == 0 {
 			return s.sendError(out, "not_found", DeleteSeriesUnknownRemedy)
 		}
 		uuids := make([]string, 0, len(recs))
 		for _, rec := range recs {
 			uuids = append(uuids, rec.DocumentUUID)
 		}
+		var message string
+		if len(recs) > 0 {
+			message = deleteSeriesQuestion(downloadedTitle(recs), len(recs))
+		} else {
+			// Nothing in the library at all — every "download" here is a
+			// chapter saved in Quire, so the library's own wording (which
+			// talks about the reMarkable and the Trash) does not apply.
+			message = deleteSeriesSavedOnlyQuestion(savedSeriesTitle(savedRecs), len(savedRecs))
+		}
 		return send(out, appload.MessageDeleteSeriesConfirm, map[string]any{
 			"sourceId":      req.SourceID,
 			"seriesId":      req.SeriesID,
 			"documentUuids": uuids,
-			"message":       deleteSeriesQuestion(downloadedTitle(recs), len(recs)),
+			"message":       message,
 		})
 	}
 
@@ -172,6 +188,11 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 		"source", req.SourceID, "series", req.SeriesID,
 		"deleted", deleted, "leftInTrash", kept, "failed", failed,
 		"pagesFreedBytes", freed, "pagesFreedMiB", freed>>20)
+
+	// The series' chapters saved in Quire go too — a separate store, but the
+	// same delete, from the user's point of view: they asked for this series
+	// to be gone from Quire's downloads.
+	s.deleteSavedChaptersFor(req.SourceID, req.SeriesID)
 
 	// The list first, whatever else happened: the rows on screen are now wrong
 	// about several series at once — a row can lose a download, lose all of
@@ -227,6 +248,55 @@ func (s *Service) forgetDocument(uuid string) int64 {
 		return s.reclaimPages(rec, s.libStore.List())
 	}
 	return 0
+}
+
+// deleteSeriesSavedOnlyQuestion is deleteSeriesQuestion's counterpart for a
+// series whose downloads are entirely chapters saved in Quire — no library
+// record, no reMarkable document, no Trash to reassure anyone about.
+func deleteSeriesSavedOnlyQuestion(title string, n int) string {
+	what := fmt.Sprintf("all %d chapters saved in Quire", n)
+	if n == 1 {
+		what = "the one chapter saved in Quire"
+	}
+	return "Delete " + what + " of “" + title + "”? It will need downloading again to read."
+}
+
+// savedRecordsFor is every saved chapter for one (source, series) pair.
+func (s *Service) savedRecordsFor(source, series string) []shelf.Record {
+	if s.shelfStore == nil {
+		return nil
+	}
+	return s.shelfStore.ForSeries(source, series)
+}
+
+// savedSeriesTitle is the series title to use in a sentence when there is no
+// library record to take it from — the same fallback shape
+// downloadedTitle uses, applied to shelf.Record's own SeriesTitle field.
+func savedSeriesTitle(recs []shelf.Record) string {
+	for _, rec := range recs {
+		if rec.SeriesTitle != "" {
+			return rec.SeriesTitle
+		}
+	}
+	if len(recs) > 0 && recs[0].Series != "" {
+		return recs[0].Series
+	}
+	return "Untitled series"
+}
+
+// deleteSavedChaptersFor removes every chapter of one series saved in Quire,
+// outright — the same cascade a library delete's forgetDocument runs on the
+// download cache, applied to the saved root instead. It never fails the
+// caller: a chapter that could not be removed is logged and the rest still
+// go, because a series delete that stops halfway for one bad chapter is worse
+// than one that gets on with the ones it can.
+func (s *Service) deleteSavedChaptersFor(source, series string) {
+	for _, rec := range s.savedRecordsFor(source, series) {
+		if err := s.removeSavedChapter(rec.Source, rec.Series, rec.Chapter); err != nil {
+			s.log.Error("could not delete a saved chapter during a series delete",
+				"source", rec.Source, "series", rec.Series, "chapter", rec.Chapter, "err", err)
+		}
+	}
 }
 
 // recordsFor is every record for one (source, series) pair.

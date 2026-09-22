@@ -350,6 +350,11 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		// A removed source's pending hosts belong to an id nothing can act on
 		// any more.
 		s.pending.clearSource(req.SourceID)
+		// Its chapters saved in Quire go too — the source is gone, and unlike
+		// a download in the reMarkable library (left alone; see below) there
+		// is no library document to keep for it, so nothing is worth leaving
+		// behind here.
+		s.deleteSavedChaptersForSource(req.SourceID)
 		// The thumbnails are ours and are worthless now. Downloaded volumes are
 		// the user's documents by this point and are left alone.
 		if s.covers != nil {
@@ -629,6 +634,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		return true, s.savePosition(req)
+
+	case appload.MessageDeleteSaved:
+		var req deleteSavedRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.deleteSaved(out, req)
 
 
 	case robotsMessage:
