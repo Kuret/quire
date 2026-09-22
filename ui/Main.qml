@@ -683,6 +683,20 @@ Rectangle {
             }
             return
 
+        case Msg.SavedDeleted:
+            if (msg && msg.phase === "confirm") {
+                chapterListScreen.confirmingKind = "deleteSaved"
+                chapterListScreen.confirmingId = msg.chapterId
+                chapterListScreen.confirmingMessage = msg.message ? msg.message : ""
+            } else if (msg && msg.phase === "done") {
+                chapterListScreen.closeConfirm()
+                root.clearSavedFlag(msg.chapterId)
+            } else if (msg && msg.phase === "failed") {
+                chapterListScreen.closeConfirm()
+                root.lastError = msg.message ? msg.message : "Something went wrong."
+            }
+            return
+
         case Msg.DownloadDeleted:
             // The backend has forgotten it, so the rows can. This is the only
             // cue that clears them: the store deciding, not the trash call
@@ -946,7 +960,10 @@ Rectangle {
                 "scanlator": list[i].scanlator ? list[i].scanlator : "",
                 "downloadState": list[i].documentUuid ? "done" : "",
                 "downloadMessage": "",
-                "documentUuid": list[i].documentUuid ? list[i].documentUuid : ""
+                "documentUuid": list[i].documentUuid ? list[i].documentUuid : "",
+                // Saved in Quire (independent of documentUuid — a chapter can
+                // be both saved and in the library).
+                "saved": list[i].saved ? true : false
             })
         }
         volumesModel.clear()
@@ -962,13 +979,19 @@ Rectangle {
                 "chapterCount": vols[v].chapterCount,
                 "downloadState": vols[v].documentUuid ? "done" : "",
                 "downloadMessage": "",
-                "documentUuid": vols[v].documentUuid ? vols[v].documentUuid : ""
+                "documentUuid": vols[v].documentUuid ? vols[v].documentUuid : "",
+                // True only when every chapter of the volume is saved.
+                "saved": vols[v].saved ? true : false
             })
         }
 
         chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
         chapterListScreen.synopsis = msg && msg.series && msg.series.description
             ? msg.series.description : ""
+        // Whether this series' source is private — never offered "Send to
+        // library" from the reader, and the flag is only ever this
+        // trustworthy right after a fresh detail reply.
+        chapterListScreen.isPrivate = msg && msg.private ? true : false
 
         // The rows are new objects even when they describe the same chapters,
         // so anything picked before this refill has to be checked against what
@@ -1061,7 +1084,33 @@ Rectangle {
                              msg.phase === "cancelled" ? "" : (msg.message ? msg.message : ""))
             if (msg.documentUuid)
                 rows.setProperty(i, "documentUuid", msg.documentUuid)
+            // The final "done" of a quire download carries saved: true — the
+            // row goes straight to [Delete][Read] (saved) without waiting
+            // for a fresh SeriesDetailResult. Read as a one-way flag: no
+            // other phase ever turns it back off (see clearSavedFlag, which
+            // SavedDeleted's own "done" uses instead).
+            if (msg.saved)
+                rows.setProperty(i, "saved", true)
             return
+        }
+    }
+
+    // clearSavedFlag is SavedDeleted's phase "done": the row goes back to
+    // [Try][Download] (or plain [Delete][Read] if it is still in the
+    // library) without waiting for a refetch, the same immediacy
+    // applyProgressToModel gives the opposite change.
+    function clearSavedFlag(chapterId) {
+        for (var i = 0; i < chaptersModel.count; ++i) {
+            if (chaptersModel.get(i).chapterId === chapterId) {
+                chaptersModel.setProperty(i, "saved", false)
+                break
+            }
+        }
+        for (var j = 0; j < volumesModel.count; ++j) {
+            if (volumesModel.get(j).chapterId === chapterId) {
+                volumesModel.setProperty(j, "saved", false)
+                break
+            }
         }
     }
 
@@ -1760,6 +1809,17 @@ Rectangle {
             // Try (milestone 1): open the reader on this chapter without
             // downloading it.
             onTryRequested: root.openTry(chapterId, title)
+
+            // Saved in Quire: reading and deleting a chapter kept in Quire's
+            // own storage. Read comes back on SavedOpened rather than
+            // switching straight away — see the dispatch above.
+            onReadSavedRequested: root.openSaved(root.currentSourceId, root.currentSeriesId, chapterId)
+            onDeleteSavedRequested: root.send(Msg.DeleteSaved,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "chapterId": chapterId, "confirmed": false})
+            onDeleteSavedConfirmed: root.send(Msg.DeleteSaved,
+                {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
+                 "chapterId": chapterId, "confirmed": true})
 
             // Step one asks the backend for the question; step two does the
             // deleting. Both go through root so the QML that touches xochitl

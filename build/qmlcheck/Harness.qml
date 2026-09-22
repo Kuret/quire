@@ -218,6 +218,14 @@ Window {
     // flushSavePosition — see the reader's own comment.
     property var savePositionWants: []
 
+    // Saved in Quire: what a saved row's Read/Delete asked for.
+    property int readSavedAsks: 0
+    property string readSavedChapterId: ""
+    property int deleteSavedAsks: 0
+    property string deleteSavedAskedAbout: ""
+    property int deleteSavedConfirms: 0
+    property string deleteSavedConfirmedAbout: ""
+
     // What the probe wizard answered with: the choice, and the value typed into
     // the question's own field. A counter, because the field must not turn into
     // an answer by itself — the answer is the option the user tapped.
@@ -528,6 +536,18 @@ Window {
                       win.deleteConfirms++
                       win.deleteConfirmedAbout = documentUuid
                   }
+                  onReadSavedRequested: {
+                      win.readSavedAsks++
+                      win.readSavedChapterId = chapterId
+                  }
+                  onDeleteSavedRequested: {
+                      win.deleteSavedAsks++
+                      win.deleteSavedAskedAbout = chapterId
+                  }
+                  onDeleteSavedConfirmed: {
+                      win.deleteSavedConfirms++
+                      win.deleteSavedConfirmedAbout = chapterId
+                  }
                   synopsis: "A long description that runs on and on. " }
 
     // A second chapter screen with no volumes at all, which is what a source
@@ -698,7 +718,8 @@ Window {
         for (var j = 0; j < 55; ++j)
             chaptersModel.append({"chapterId": "c" + j, "title": "Chapter " + j, "number": j,
                                   "published": "2026-01-01", "scanlator": "Group",
-                                  "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+                                  "downloadState": "", "downloadMessage": "", "documentUuid": "",
+                                  "saved": false})
         for (var w = 0; w < 25; ++w)
             watchedModel.append(WatchJs.row({
                 "sourceId": "src", "seriesId": "w" + w, "sourceName": "Example Reader",
@@ -709,7 +730,8 @@ Window {
             volumesModel.append({"chapterId": "c" + (v * 7), "title": "Volume " + (v + 1),
                                  "detail": "7 chapters, Chapter 1 to Chapter 7",
                                  "chapterCount": 7,
-                                 "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+                                 "downloadState": "", "downloadMessage": "", "documentUuid": "",
+                                 "saved": false})
 
         // Three releases of one book, titled the way the backend titles them.
         // Every role a chapter row has, because it is the same row: the two a
@@ -722,7 +744,7 @@ Window {
             releasesModel.append({"chapterId": "r" + r, "title": releases[r], "number": 0,
                                   "published": "", "scanlator": "",
                                   "downloadState": "", "downloadMessage": "",
-                                  "documentUuid": ""})
+                                  "documentUuid": "", "saved": false})
 
         var log = []
         for (var k = 0; k < 300; ++k)
@@ -1669,6 +1691,82 @@ Window {
         win.want("but Download remains reachable on a book",
                  findByPrefix(bookChapterList, "downloadButton-", []).length > 0, true)
 
+        // ---- saved in Quire: [Delete][Read] instead of [Try][Download] ----
+        //
+        // Three claims: a saved row drops Try in favour of Read/Delete, it
+        // does so whether or not the same chapter is also in the library
+        // (independent copies, one row — PLAN's saved-in-Quire design), and
+        // its own Delete asks a different question (deleteSaved) from the
+        // library's.
+        win.want("buttonLabel with no saved flag is unaffected",
+                 chapterList.buttonLabel("", "", undefined), "Download")
+        win.want("a saved chapter reads Read", chapterList.buttonLabel("", "", true), "Read")
+        win.want("saved wins over an in-library chapter too",
+                 chapterList.buttonLabel("done", "doc-1", true), "Read")
+
+        win.readSavedAsks = 0
+        chapterList.tapped("c3", "", "", true)
+        win.want("tapping a saved row's button asks to read it once", win.readSavedAsks, 1)
+        win.want("naming the chapter", win.readSavedChapterId, "c3")
+
+        // deleteButton/deleteArea are the same objectName on every row (like
+        // visibleDeletes() above), so a row-specific one is found by
+        // filtering for the one row this makes visible, rather than by name
+        // alone.
+        var visibleDeleteButtons = function () {
+            var found = win.findChildren(chapterList, "deleteButton", [])
+            var vis = []
+            for (var i = 0; i < found.length; ++i)
+                if (found[i].visible)
+                    vis.push(found[i])
+            return vis
+        }
+
+        // No forceLayout here or below — the delegates already exist and
+        // their visibility is a live binding on model.saved/documentUuid, so
+        // a plain setProperty is enough (forceLayout is for when the model's
+        // *count* changes, not one of its roles).
+        chaptersModel.setProperty(3, "saved", true)
+        win.want("the saved row offers no Try",
+                 win.findChild(chapterList, "tryButton-c3").visible, false)
+        win.want("its Delete is offered instead", visibleDeleteButtons().length, 1)
+        win.want("and its button reads Read",
+                 win.findChild(chapterList, "downloadButton-c3").children[0].text, "Read")
+
+        // Also true with the same chapter in the library — saved still wins.
+        chaptersModel.setProperty(3, "documentUuid", "doc-3")
+        win.want("saved still offers exactly one Delete with a documentUuid too",
+                 visibleDeleteButtons().length, 1)
+
+        // Its own Delete asks deleteSaved, not the library's delete.
+        win.deleteSavedAsks = 0
+        win.findChild(visibleDeleteButtons()[0], "deleteArea").clicked(null)
+        win.want("Delete on a saved row asks deleteSaved once", win.deleteSavedAsks, 1)
+        win.want("naming the chapter, not a document",
+                 win.deleteSavedAskedAbout, "c3")
+        win.want("the strip opens with the deleteSaved kind",
+                 chapterList.confirmingKind, "deleteSaved")
+
+        chapterList.confirmingId = "c3"
+        chapterList.confirmingMessage = "Delete Chapter 3 from Quire? It will need downloading again to read."
+        win.want("the strip shows the Keep / Delete-for-good shape",
+                 win.findChild(chapterList, "confirmDeleteButton").visible, true)
+        win.want("not the volume Download all button",
+                 win.findChild(chapterList, "confirmDownloadButton").visible, false)
+
+        win.deleteSavedConfirms = 0
+        win.findChild(chapterList, "confirmDeleteArea").clicked(null)
+        win.want("confirming answers deleteSavedConfirmed, not deleteConfirmed",
+                 win.deleteSavedConfirms, 1)
+        win.want("naming the chapter", win.deleteSavedConfirmedAbout, "c3")
+        win.want("and closes the strip",
+                 win.findChild(chapterList, "confirmStrip").visible, false)
+
+        chaptersModel.setProperty(3, "saved", false)
+        chaptersModel.setProperty(3, "documentUuid", "")
+        win.want("clearing saved returns the row to Try/Download",
+                 win.findChild(chapterList, "tryButton-c3").visible, true)
+
         // ---- the reader itself: full screen, three tap zones, the overlay,
         // the honesty line and closing ---------------------------------
         //
@@ -1853,7 +1951,8 @@ Window {
         // model to prove a series that loses its volumes loses the switch.
         volumesModel.append({"chapterId": "c0", "title": "Volume 1",
                              "detail": "7 chapters, Chapter 1 to Chapter 7", "chapterCount": 7,
-                             "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+                             "downloadState": "", "downloadMessage": "", "documentUuid": "",
+                             "saved": false})
         chapterList.showView("volumes")
         // Collected fresh each time: a ListView destroys and rebuilds its
         // delegates when the model changes, so a list held from before an
@@ -2027,7 +2126,8 @@ Window {
         win.want("and the row still listed stays", chapterList.selectedIds[0], "c0")
         chaptersModel.insert(2, {"chapterId": "c2", "title": "Chapter 2", "number": 2,
                                  "published": "2026-01-01", "scanlator": "Group",
-                                 "downloadState": "", "downloadMessage": "", "documentUuid": ""})
+                                 "downloadState": "", "downloadMessage": "", "documentUuid": "",
+                                 "saved": false})
         chapterList.leaveSelection()
 
         // Put the rows back as they were found.
@@ -5228,7 +5328,8 @@ Window {
         volumesModel.append({"chapterId": "c7", "title": "Volume 2",
                              "detail": "7 chapters, Chapter 1 to Chapter 7",
                              "chapterCount": 7, "downloadState": "",
-                             "downloadMessage": "", "documentUuid": ""})
+                             "downloadMessage": "", "documentUuid": "",
+                             "saved": false})
         volumesModel.setProperty(0, "downloadState", "downloading")
         volumesModel.setProperty(0, "downloadMessage", "Page 3 of 200.")
         var accVolumeRows = win.findChild(chapterList, "volumeRows")

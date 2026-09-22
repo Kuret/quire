@@ -1281,6 +1281,60 @@ Window {
         win.want("a cancelled row keeps no message",
                  chapterList.model.get(0).downloadMessage, "")
 
+        // ---- saved in Quire: a quire download's own "done" ---------------------
+        //
+        // The final "done" of a quire download carries saved: true — the row
+        // goes to [Delete][Read] (saved) without waiting for a fresh
+        // SeriesDetailResult, the same immediacy documentUuid already gets.
+        win.want("not saved before the download finishes",
+                 chapterList.model.get(0).saved, false)
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "done", "message": "Chapter 1 is saved in Quire.",
+            "destination": "quire", "saved": true})
+        win.want("a quire download's done marks the row saved",
+                 chapterList.model.get(0).saved, true)
+
+        // Reading and deleting it go through OpenSaved/DeleteSaved, not the
+        // library's own messages.
+        backend.forget()
+        chapterList.readSavedRequested("c1")
+        win.want("reading a saved chapter asks OpenSaved",
+                 backend.countOf(Msg.OpenSaved), 1)
+        win.want("naming the chapter", backend.bodyOf(Msg.OpenSaved).chapterId, "c1")
+
+        backend.forget()
+        chapterList.deleteSavedRequested("c1")
+        win.want("asking to delete a saved chapter sends DeleteSaved unconfirmed",
+                 backend.bodyOf(Msg.DeleteSaved).confirmed, false)
+        chapterList.deleteSavedConfirmed("c1")
+        win.want("confirming sends it again, confirmed",
+                 backend.bodyOf(Msg.DeleteSaved).confirmed, true)
+
+        // SavedDeleted follows MessageDownloadDeleted's own pattern: "confirm"
+        // opens the strip with the backend's question, "done" clears the flag
+        // immediately (no refetch needed), "failed" reports the sentence and
+        // closes the strip without touching the row.
+        win.deliver(Msg.SavedDeleted, {
+            "chapterId": "c1", "phase": "confirm",
+            "message": "Delete Chapter 1 from Quire? It will need downloading again to read."})
+        win.want("a confirm phase opens the strip", chapterList.confirmingId, "c1")
+        win.want("as its own kind", chapterList.confirmingKind, "deleteSaved")
+        win.want("with the backend's question", chapterList.confirmingMessage,
+                 "Delete Chapter 1 from Quire? It will need downloading again to read.")
+
+        win.deliver(Msg.SavedDeleted, {"chapterId": "c1", "phase": "done",
+                                       "message": "Chapter 1 is deleted."})
+        win.want("done clears the saved flag immediately",
+                 chapterList.model.get(0).saved, false)
+        win.want("and closes the strip", chapterList.confirmingId, "")
+
+        win.deliver(Msg.SavedDeleted, {"chapterId": "c1", "phase": "failed",
+                                       "message": "Could not delete Chapter 1."})
+        win.want("a failed delete is reported",
+                 win.app.lastError, "Could not delete Chapter 1.")
+        win.want("without marking the row saved again",
+                 chapterList.model.get(0).saved, false)
+
         // ---- what the series screen sends -------------------------------------
 
         backend.forget()

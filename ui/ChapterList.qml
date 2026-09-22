@@ -62,6 +62,12 @@ Item {
     property string kind: "manga"
     readonly property bool isBook: screen.kind === "book"
 
+    // Whether this series' source is private (SeriesDetailResult's top-level
+    // `private`). Never offered "Send to library" from the reader — that
+    // check is made here rather than trusted to the reader alone, because
+    // this is where the flag arrives.
+    property bool isPrivate: false
+
     // The volume view (PLAN §6 M4, revised 2026-09-16). Chapters are the
     // default and are always here; volumes are a second view of the same
     // series, offered only when the backend sent rows for one.
@@ -141,6 +147,16 @@ Item {
     // has no page images at all, so there is nothing here to preview.
     signal tryRequested(string chapterId, string title)
 
+    // Saved in Quire: reading and deleting a chapter kept in Quire's own
+    // storage rather than the library. A saved row shows [Delete][Read]
+    // whether or not the same chapter is also in the library (see
+    // buttonLabel/tapped) — Read opens Quire's own reader (OpenSaved), never
+    // xochitl's, and Delete asks the same confirm-then-done question as a
+    // library delete but of the saved copy alone.
+    signal readSavedRequested(string chapterId)
+    signal deleteSavedRequested(string chapterId)
+    signal deleteSavedConfirmed(string chapterId)
+
     // Deleting a download (PLAN §12.4). Two signals because it is two steps and
     // the question in between is the backend's: deleteRequested asks for it,
     // deleteConfirmed is the answer. An accidental tap can only ever reach the
@@ -214,6 +230,12 @@ Item {
     //
     // A selection is not one of them any more: it queues without asking.
     property string confirmingKind: "download"
+
+    // Both delete questions share the strip's Keep / Delete-for-good shape;
+    // this is the one place that says so, rather than every visible binding
+    // spelling out "delete or deleteSaved" for itself.
+    readonly property bool confirmingDelete: screen.confirmingKind === "delete"
+                                             || screen.confirmingKind === "deleteSaved"
 
     // ---- selecting several rows --------------------------------------------
     //
@@ -356,6 +378,19 @@ Item {
         screen.deleteRequested(documentUuid)
     }
 
+    // askToDeleteSaved is askToDelete's counterpart for a chapter saved in
+    // Quire: the strip carries the chapter id, since a saved chapter has no
+    // document uuid, and "deleteSaved" is its own confirmingKind so the
+    // answer comes back as deleteSavedConfirmed rather than deleteConfirmed.
+    function askToDeleteSaved(chapterId) {
+        if (!chapterId)
+            return
+        screen.confirmingId = ""
+        screen.confirmingMessage = ""
+        screen.confirmingKind = "deleteSaved"
+        screen.deleteSavedRequested(chapterId)
+    }
+
     // closeConfirm puts the strip away without answering it.
     function closeConfirm() {
         screen.confirmingId = ""
@@ -366,7 +401,11 @@ Item {
     // The phases are backend/service's; the words each maps to are the view's,
     // and they are the only wording this file invents. Every sentence shown to
     // the user is composed in the backend (PLAN §2).
-    function buttonLabel(state, documentUuid) {
+    function buttonLabel(state, documentUuid, saved) {
+        // A saved chapter reads "Read" whether or not the same chapter also
+        // has a documentUuid — see tapped() for why saved wins the row.
+        if (saved)
+            return "Read"
         if (documentUuid)
             return "Read"
         switch (state) {
@@ -413,7 +452,14 @@ Item {
         return true
     }
 
-    function tapped(chapterId, state, documentUuid) {
+    function tapped(chapterId, state, documentUuid, saved) {
+        // Saved wins the row even when the chapter is also in the library
+        // (PLAN's saved-in-Quire design: independent copies, one row) —
+        // Read opens Quire's own reader, never xochitl's.
+        if (saved) {
+            screen.readSavedRequested(chapterId)
+            return
+        }
         if (documentUuid) {
             screen.readRequested(documentUuid)
             return
@@ -435,7 +481,11 @@ Item {
 
     // The volume view's tap. Identical shape, different message: this one asks
     // for the whole volume as one file.
-    function volumeTapped(chapterId, state, documentUuid) {
+    function volumeTapped(chapterId, state, documentUuid, saved) {
+        if (saved) {
+            screen.readSavedRequested(chapterId)
+            return
+        }
         if (documentUuid) {
             screen.readRequested(documentUuid)
             return
@@ -939,7 +989,10 @@ Item {
                         anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: !screen.isBook && !model.documentUuid && !screen.selecting
+                        // A saved chapter offers [Delete][Read] instead —
+                        // see the delete/download buttons below.
+                        visible: !screen.isBook && !model.documentUuid && !model.saved
+                                 && !screen.selecting
                         color: tryArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -965,13 +1018,19 @@ Item {
                     // instead of Read: the download is the thing the user came
                     // for, and a delete that sits where they expect to tap to
                     // read is a delete they will hit by accident.
+                    //
+                    // A saved chapter offers it too — saved or in the library,
+                    // "has something to delete" is true either way — but it
+                    // asks a different question: deleteSaved of the chapter,
+                    // never the library document, when both are true (see
+                    // tapped()).
                     Rectangle {
                         id: deleteButton
                         objectName: "deleteButton"
                         anchors { right: tryButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: model.documentUuid && !screen.selecting ? true : false
+                        visible: (model.saved || model.documentUuid) && !screen.selecting ? true : false
                         color: deleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -989,7 +1048,12 @@ Item {
                             objectName: "deleteArea"
                             anchors.fill: parent
                             enabled: deleteButton.visible
-                            onClicked: screen.askToDelete(model.documentUuid)
+                            onClicked: {
+                                if (model.saved)
+                                    screen.askToDeleteSaved(model.chapterId)
+                                else
+                                    screen.askToDelete(model.documentUuid)
+                            }
                         }
                     }
 
@@ -1016,7 +1080,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: screen.buttonLabel(model.downloadState, model.documentUuid)
+                            text: screen.buttonLabel(model.downloadState, model.documentUuid, model.saved)
                             font.pointSize: Style.smallSize
                             color: Style.ink
                         }
@@ -1027,7 +1091,8 @@ Item {
                             anchors.fill: parent
                             enabled: !screen.selecting
                                      && screen.canTap(model.downloadState, model.documentUuid)
-                            onClicked: screen.tapped(model.chapterId, model.downloadState, model.documentUuid)
+                            onClicked: screen.tapped(model.chapterId, model.downloadState,
+                                                     model.documentUuid, model.saved)
                         }
                     }
 
@@ -1160,7 +1225,7 @@ Item {
                         anchors { right: volumeButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        visible: model.documentUuid && !screen.selecting ? true : false
+                        visible: (model.saved || model.documentUuid) && !screen.selecting ? true : false
                         color: volumeDeleteArea.pressed ? Style.pressed : Style.paper
                         border.width: 2
                         border.color: Style.rule
@@ -1178,7 +1243,12 @@ Item {
                             objectName: "volumeDeleteArea"
                             anchors.fill: parent
                             enabled: volumeDeleteButton.visible
-                            onClicked: screen.askToDelete(model.documentUuid)
+                            onClicked: {
+                                if (model.saved)
+                                    screen.askToDeleteSaved(model.chapterId)
+                                else
+                                    screen.askToDelete(model.documentUuid)
+                            }
                         }
                     }
 
@@ -1194,7 +1264,7 @@ Item {
 
                         Text {
                             anchors.centerIn: parent
-                            text: screen.buttonLabel(model.downloadState, model.documentUuid)
+                            text: screen.buttonLabel(model.downloadState, model.documentUuid, model.saved)
                             font.pointSize: Style.smallSize
                             color: Style.ink
                         }
@@ -1205,7 +1275,7 @@ Item {
                             enabled: !screen.selecting
                                      && screen.canTap(model.downloadState, model.documentUuid)
                             onClicked: screen.volumeTapped(model.chapterId, model.downloadState,
-                                                           model.documentUuid)
+                                                           model.documentUuid, model.saved)
                         }
                     }
 
@@ -1376,7 +1446,7 @@ Item {
         Rectangle {
             id: confirmButton
             objectName: "confirmDownloadButton"
-            visible: screen.confirmingKind !== "delete"
+            visible: !screen.confirmingDelete
             anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
             width: 220
             height: Style.buttonHeight
@@ -1415,7 +1485,7 @@ Item {
         Row {
             anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
             spacing: Style.gap
-            visible: screen.confirmingKind === "delete"
+            visible: screen.confirmingDelete
 
             Rectangle {
                 id: keepButton
@@ -1469,9 +1539,13 @@ Item {
                     objectName: "confirmDeleteArea"
                     anchors.fill: parent
                     onClicked: {
-                        var uuid = screen.confirmingId
+                        var id = screen.confirmingId
+                        var kind = screen.confirmingKind
                         screen.closeConfirm()
-                        screen.deleteConfirmed(uuid)
+                        if (kind === "deleteSaved")
+                            screen.deleteSavedConfirmed(id)
+                        else
+                            screen.deleteConfirmed(id)
                     }
                 }
             }
