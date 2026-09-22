@@ -31,7 +31,9 @@ Window {
         id: sourcesModel
         ListElement { sourceId: "s1"; name: "Example Reader"; baseUrl: "https://example.invalid"
                       theme: "madara"; lang: "en"; enabled: true; status: "Working"; statusDetail: ""
-                      splitStrips: "never"; proxy: "http://localhost:1055"; selfHostedViaProxy: true }
+                      splitStrips: "never"; proxy: "http://localhost:1055"; selfHostedViaProxy: true
+                      allowedHosts: "cdn.example.invalid"
+                      pendingHosts: "[{\"host\":\"images.example.invalid\",\"purpose\":\"cover\"}]" }
         // No splitStrips at all: a source stored before PLAN §12.3 existed. It
         // has to read as Automatic rather than blank.
         ListElement { sourceId: "s2"; name: "Another"; baseUrl: "https://other.invalid"
@@ -83,6 +85,13 @@ Window {
     property int proxyAsks: 0
     property string proxyAskedFor: ""
     property string proxyAskedAbout: ""
+
+    property int allowHostAsks: 0
+    property string allowHostAskedFor: ""
+    property string allowHostAskedAbout: ""
+    property int revokeHostAsks: 0
+    property string revokeHostAskedFor: ""
+    property string revokeHostAskedAbout: ""
 
     property int volumeAsks: 0
     property string volumeAskedFor: ""
@@ -410,6 +419,16 @@ Window {
             win.proxyAsks++
             win.proxyAskedFor = proxy
             win.proxyAskedAbout = sourceId
+        }
+        onAllowHostRequested: {
+            win.allowHostAsks++
+            win.allowHostAskedFor = host
+            win.allowHostAskedAbout = sourceId
+        }
+        onRevokeHostRequested: {
+            win.revokeHostAsks++
+            win.revokeHostAskedFor = host
+            win.revokeHostAskedAbout = sourceId
         }
     }
     AddSource {
@@ -1352,6 +1371,90 @@ Window {
         sourceList.commitProxy()
         win.want("setting a proxy on a bare source asks once", win.proxyAsks, 1)
         win.want("with the typed value", win.proxyAskedFor, "http://localhost:1080")
+
+        // ---- the allowedHosts editor (record-and-offer) ---------------------
+        //
+        // A pending host is offered here and nowhere else — there is no modal
+        // anywhere in Quire for this — and the panel has to say enough that
+        // Allow is not a reflex: the host, the source, and what it was
+        // fetching.
+        var hostsButton = win.findChild(sourceList, "hostsButton")
+        win.want("the Hosts action is offered on the row strip", hostsButton !== null, true)
+
+        var hostsPanel = win.findChild(sourceList, "hostsPanel")
+        win.want("the hosts panel is closed until asked for", hostsPanel.visible, false)
+
+        sourceList.confirmingId = "s1"
+        sourceList.confirmingName = "Example Reader"
+        sourceList.confirmingPendingHosts =
+            "[{\"host\":\"images.example.invalid\",\"purpose\":\"cover\"}]"
+        sourceList.confirmingAllowedHosts = "cdn.example.invalid"
+        sourceList.startHosts(sourceList.confirmingId, sourceList.confirmingName,
+                               sourceList.confirmingPendingHosts,
+                               sourceList.confirmingAllowedHosts)
+        win.want("the panel opens", hostsPanel.visible, true)
+        win.want("opening it closes the row strip", sourceList.confirmingId, "")
+
+        // The pending host is named, and says what it was fetching in words —
+        // never a bare hostname beside a button.
+        var pendingRow = win.findChild(sourceList, "pendingHost-images.example.invalid")
+        win.want("the pending host is shown", pendingRow !== null, true)
+        win.want("nothing pending says so only when the list is empty",
+                 win.findChild(sourceList, "noPendingHosts").visible, false)
+
+        var allowedRow = win.findChild(sourceList, "allowedHost-cdn.example.invalid")
+        win.want("the already-allowed host is shown", allowedRow !== null, true)
+        win.want("none allowed says so only when the list is empty",
+                 win.findChild(sourceList, "noAllowedHosts").visible, false)
+
+        // Allowing sends the exact source and the exact host, once, and moves
+        // the row from Pending to Allowed without waiting for a reply.
+        win.allowHostAsks = 0
+        win.findChild(sourceList, "allowHostArea-images.example.invalid").clicked(null)
+        win.want("allowing asks once", win.allowHostAsks, 1)
+        win.want("it names the source", win.allowHostAskedAbout, "s1")
+        win.want("it names the exact host", win.allowHostAskedFor, "images.example.invalid")
+        win.want("the panel stays open", hostsPanel.visible, true)
+        win.want("the granted host leaves Pending",
+                 win.findChild(sourceList, "pendingHost-images.example.invalid"), null)
+        win.want("nothing pending now reappears",
+                 win.findChild(sourceList, "noPendingHosts").visible, true)
+        win.want("the granted host joins Allowed",
+                 win.findChild(sourceList, "allowedHost-images.example.invalid") !== null, true)
+
+        // Revoking sends the exact source and host and removes it from
+        // Allowed the same way.
+        win.revokeHostAsks = 0
+        win.findChild(sourceList, "revokeHostArea-cdn.example.invalid").clicked(null)
+        win.want("revoking asks once", win.revokeHostAsks, 1)
+        win.want("it names the source", win.revokeHostAskedAbout, "s1")
+        win.want("it names the exact host", win.revokeHostAskedFor, "cdn.example.invalid")
+        win.want("the revoked host leaves Allowed",
+                 win.findChild(sourceList, "allowedHost-cdn.example.invalid"), null)
+
+        // A source with neither pending nor allowed hosts (s2) says so
+        // plainly rather than showing two empty lists with no explanation.
+        sourceList.confirmingId = "s2"
+        sourceList.confirmingName = "Another"
+        sourceList.confirmingPendingHosts = "[]"
+        sourceList.confirmingAllowedHosts = ""
+        sourceList.startHosts(sourceList.confirmingId, sourceList.confirmingName,
+                               sourceList.confirmingPendingHosts,
+                               sourceList.confirmingAllowedHosts)
+        win.want("a source with nothing pending says so",
+                 win.findChild(sourceList, "noPendingHosts").visible, true)
+        win.want("a source with nothing allowed says so",
+                 win.findChild(sourceList, "noAllowedHosts").visible, true)
+
+        // Malformed JSON from an older backend must not crash the panel: it
+        // reads as an empty pending list rather than propagating the parse
+        // failure.
+        sourceList.startHosts("s2", "Another", "not json", "")
+        win.want("malformed pending JSON is treated as empty",
+                 win.findChild(sourceList, "noPendingHosts").visible, true)
+
+        win.findChild(sourceList, "hostsDoneArea").clicked(null)
+        win.want("done closes the panel", hostsPanel.visible, false)
 
         // ---- the volume view (PLAN §6 M4, revised 2026-09-16) --------------
 

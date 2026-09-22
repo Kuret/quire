@@ -58,6 +58,12 @@ Item {
     signal splitStripsRequested(string sourceId, string mode)
     // The proxy a source is reached through. An empty proxy removes it.
     signal proxyRequested(string sourceId, string proxy)
+    // The allowedHosts editor: granting a pending host, or taking back one
+    // already granted. Both name the source and the exact host — never a
+    // domain, never inferred — because a permission a source did not ask for
+    // is not one it should get.
+    signal allowHostRequested(string sourceId, string host)
+    signal revokeHostRequested(string sourceId, string host)
     signal noticeDismissed()
 
     // A quiet line from the backend, above the list. Composed there, not here.
@@ -82,6 +88,13 @@ Item {
     // decide whether clearing the field needs a warning.
     property string confirmingProxy: ""
     property bool confirmingViaProxy: false
+    // The open row's pending hosts (JSON, since a ListModel role cannot
+    // reliably hold an array — see the comment on "authors" in Main.qml's
+    // fillSeries) and already-allowed hosts (comma-joined, the same reason),
+    // carried the same way the proxy fields are: to prefill the hosts panel
+    // and to decide whether the row strip's Hosts button has anything to say.
+    property string confirmingPendingHosts: "[]"
+    property string confirmingAllowedHosts: ""
 
     // The source whose splitting panel is open, and the mode shown as chosen.
     // Kept as a plain string rather than read back through the model on each
@@ -183,6 +196,70 @@ Item {
         screen.proxyRequested(screen.proxyingId, screen.proxyText.trim())
         screen.proxyingId = ""
         screen.proxyText = ""
+    }
+
+    // The source whose allowedHosts panel is open: which hosts are pending
+    // review and which are already granted. Parsed once, on open, into plain
+    // arrays a Repeater can iterate — see confirmingPendingHosts above for
+    // why the row strip carries them as strings.
+    property string hostingId: ""
+    property string hostingName: ""
+    property var hostingPending: []
+    property var hostingAllowed: []
+
+    function startHosts(sourceId, name, pendingJson, allowedCsv) {
+        screen.confirmingId = ""
+        screen.confirmingName = ""
+        screen.splittingId = ""
+        screen.renamingId = ""
+        screen.proxyingId = ""
+        screen.hostingId = sourceId
+        screen.hostingName = name
+        var pending = []
+        try {
+            pending = JSON.parse(pendingJson)
+        } catch (e) {
+            pending = []
+        }
+        screen.hostingPending = pending ? pending : []
+        screen.hostingAllowed = allowedCsv && allowedCsv.length > 0
+                                 ? allowedCsv.split(",") : []
+    }
+
+    // Allowing moves a host from Pending to Allowed on the same source; the
+    // backend answers with a fresh source list, and the panel's own arrays
+    // are updated here so the row does not wait for that round trip to stop
+    // showing a host that was just granted.
+    function allowHost(host) {
+        screen.allowHostRequested(screen.hostingId, host)
+        var kept = []
+        for (var i = 0; i < screen.hostingPending.length; ++i) {
+            if (screen.hostingPending[i].host !== host)
+                kept.push(screen.hostingPending[i])
+        }
+        screen.hostingPending = kept
+        var allowed = screen.hostingAllowed.slice()
+        allowed.push(host)
+        screen.hostingAllowed = allowed
+    }
+
+    function revokeHost(host) {
+        screen.revokeHostRequested(screen.hostingId, host)
+        var kept = []
+        for (var i = 0; i < screen.hostingAllowed.length; ++i) {
+            if (screen.hostingAllowed[i] !== host)
+                kept.push(screen.hostingAllowed[i])
+        }
+        screen.hostingAllowed = kept
+    }
+
+    // The plain word for what a pending host was refused while fetching —
+    // the backend sends "cover" or "page" as data (PLAN §2), and the
+    // sentence around it is this screen's to write.
+    function hostPurposeLabel(purpose) {
+        if (purpose === "page")
+            return "a page"
+        return "a cover"
     }
 
     // The notice strip. One line, on the first screen, with a way to dismiss
@@ -320,6 +397,10 @@ Item {
                                                    ? model.splitStrips : "auto"
                             screen.confirmingProxy = open && model.proxy ? model.proxy : ""
                             screen.confirmingViaProxy = open && !!model.selfHostedViaProxy
+                            screen.confirmingPendingHosts = open && model.pendingHosts
+                                                          ? model.pendingHosts : "[]"
+                            screen.confirmingAllowedHosts = open && model.allowedHosts
+                                                           ? model.allowedHosts : ""
                         }
                     }
 
@@ -464,7 +545,7 @@ Item {
             id: proxyButton
             objectName: "proxyButton"
             anchors {
-                right: renameButton.left; rightMargin: Style.gap
+                right: hostsButton.left; rightMargin: Style.gap
                 verticalCenter: parent.verticalCenter
             }
             width: 160
@@ -486,6 +567,40 @@ Item {
                 anchors.fill: parent
                 onClicked: screen.startProxy(screen.confirmingId, screen.confirmingName,
                                              screen.confirmingProxy, screen.confirmingViaProxy)
+            }
+        }
+
+        // The allowedHosts editor: what a source asked to reach beyond its own
+        // domain, pending review or already granted. Opened the same way
+        // Proxy is, from the row strip, carrying the source's own lists along
+        // since the strip is outside the delegate that knows them.
+        Rectangle {
+            id: hostsButton
+            objectName: "hostsButton"
+            anchors {
+                right: renameButton.left; rightMargin: Style.gap
+                verticalCenter: parent.verticalCenter
+            }
+            width: 160
+            height: Style.buttonHeight - Style.gap
+            color: hostsArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Hosts"
+                font.pointSize: Style.smallSize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: hostsArea
+                anchors.fill: parent
+                onClicked: screen.startHosts(screen.confirmingId, screen.confirmingName,
+                                              screen.confirmingPendingHosts,
+                                              screen.confirmingAllowedHosts)
             }
         }
 
@@ -985,6 +1100,239 @@ Item {
             onBackspace: screen.proxyText = screen.proxyText.substring(0, screen.proxyText.length - 1)
             onClearAll: screen.proxyText = ""
             onSubmit: screen.commitProxy()
+        }
+    }
+
+    // ---- allowedHosts editor ------------------------------------------------
+    //
+    // Record-and-offer, not prompt-on-first-sight: a fetch on this source's
+    // behalf that reached outside its own domain was refused and noted rather
+    // than interrupting anything, and is only ever offered here, where the
+    // owner is present and looking at this source on purpose. There is no
+    // modal for this anywhere else in Quire.
+    //
+    // A panel over the list, like Proxy and Rename, and for the same reason:
+    // it is a short list to read and a couple of buttons, not a screen of its
+    // own. No keyboard — nothing here is typed, only chosen.
+    Rectangle {
+        id: hostsPanel
+        objectName: "hostsPanel"
+        anchors.fill: parent
+        color: Style.paper
+        visible: screen.hostingId.length > 0
+
+        // Swallow taps so the list underneath cannot be operated while this is
+        // open.
+        MouseArea { anchors.fill: parent }
+
+        Column {
+            anchors {
+                top: parent.top; topMargin: Style.margin
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                bottom: hostsDoneButton.top; bottomMargin: Style.gap
+            }
+            spacing: Style.gap
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Hosts for " + screen.hostingName
+                font.pointSize: Style.headingSize
+                color: Style.ink
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "These were refused because they are outside this source's own " +
+                      "address. Allow one only if you recognise it as this source's own " +
+                      "image or page server — allowing it lets this source, and no other, " +
+                      "reach that address."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Text {
+                objectName: "pendingHeading"
+                width: parent.width
+                text: "Pending"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Text {
+                objectName: "noPendingHosts"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: screen.hostingPending.length === 0
+                text: "Nothing pending."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Repeater {
+                model: screen.hostingPending
+
+                Rectangle {
+                    objectName: "pendingHost-" + modelData.host
+                    width: hostsPanel.width - Style.margin * 2
+                    height: Style.rowHeight
+                    color: Style.paper
+                    border.width: 2
+                    border.color: Style.rule
+                    radius: 6
+
+                    Column {
+                        anchors {
+                            left: parent.left; leftMargin: Style.gap
+                            right: allowButton.left; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 4
+
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: modelData.host
+                            font.pointSize: Style.bodySize
+                            color: Style.ink
+                        }
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: "Fetching " + screen.hostPurposeLabel(modelData.purpose)
+                            font.pointSize: Style.smallSize
+                            color: Style.muted
+                        }
+                    }
+
+                    Rectangle {
+                        id: allowButton
+                        objectName: "allowHostButton-" + modelData.host
+                        anchors { right: parent.right; rightMargin: Style.gap
+                                  verticalCenter: parent.verticalCenter }
+                        width: 160
+                        height: Style.buttonHeight - Style.gap
+                        color: allowArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Allow"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: allowArea
+                            objectName: "allowHostArea-" + modelData.host
+                            anchors.fill: parent
+                            onClicked: screen.allowHost(modelData.host)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                objectName: "allowedHeading"
+                width: parent.width
+                text: "Allowed"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            Text {
+                objectName: "noAllowedHosts"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: screen.hostingAllowed.length === 0
+                text: "None allowed yet."
+                font.pointSize: Style.smallSize
+                color: Style.muted
+            }
+
+            Repeater {
+                model: screen.hostingAllowed
+
+                Rectangle {
+                    objectName: "allowedHost-" + modelData
+                    width: hostsPanel.width - Style.margin * 2
+                    height: Style.rowHeight
+                    color: Style.paper
+                    border.width: 2
+                    border.color: Style.rule
+                    radius: 6
+
+                    Text {
+                        anchors {
+                            left: parent.left; leftMargin: Style.gap
+                            right: revokeButton.left; rightMargin: Style.gap
+                            verticalCenter: parent.verticalCenter
+                        }
+                        elide: Text.ElideRight
+                        text: modelData
+                        font.pointSize: Style.bodySize
+                        color: Style.ink
+                    }
+
+                    Rectangle {
+                        id: revokeButton
+                        objectName: "revokeHostButton-" + modelData
+                        anchors { right: parent.right; rightMargin: Style.gap
+                                  verticalCenter: parent.verticalCenter }
+                        width: 160
+                        height: Style.buttonHeight - Style.gap
+                        color: revokeArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Revoke"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: revokeArea
+                            objectName: "revokeHostArea-" + modelData
+                            anchors.fill: parent
+                            onClicked: screen.revokeHost(modelData)
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            id: hostsDoneButton
+            objectName: "hostsDoneButton"
+            anchors { left: parent.left; leftMargin: Style.margin
+                      bottom: parent.bottom; bottomMargin: Style.margin }
+            width: 220
+            height: Style.buttonHeight
+            color: hostsDoneArea.pressed ? Style.pressed : Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Text {
+                anchors.centerIn: parent
+                text: "Done"
+                font.pointSize: Style.bodySize
+                color: Style.ink
+            }
+
+            MouseArea {
+                id: hostsDoneArea
+                objectName: "hostsDoneArea"
+                anchors.fill: parent
+                onClicked: screen.hostingId = ""
+            }
         }
     }
 

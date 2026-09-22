@@ -649,7 +649,14 @@ Rectangle {
                 "status": s.status,
                 "statusDetail": s.statusDetail ? s.statusDetail : "",
                 "proxy": s.proxy ? s.proxy : "",
-                "selfHostedViaProxy": !!s.selfHostedViaProxy
+                "selfHostedViaProxy": !!s.selfHostedViaProxy,
+                // Comma-joined and JSON respectively, for the reason
+                // "authors" below is: a ListModel role cannot reliably hold
+                // an array. Written on every row, empty included, because a
+                // ListModel fixes its roles on the first append.
+                "allowedHosts": (s.allowedHosts && s.allowedHosts.length > 0)
+                    ? s.allowedHosts.join(",") : "",
+                "pendingHosts": JSON.stringify(s.pendingHosts ? s.pendingHosts : [])
             })
         }
     }
@@ -1331,6 +1338,10 @@ Rectangle {
                                               {"sourceId": sourceId, "splitStrips": mode})
             onProxyRequested: root.send(Msg.SetSourceProxy,
                                         {"sourceId": sourceId, "proxy": proxy})
+            onAllowHostRequested: root.send(Msg.AllowSourceHost,
+                                             {"sourceId": sourceId, "host": host})
+            onRevokeHostRequested: root.send(Msg.RevokeSourceHost,
+                                              {"sourceId": sourceId, "host": host})
         }
 
         AddSource {
