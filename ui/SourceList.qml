@@ -823,13 +823,12 @@ Item {
 
             Rectangle {
                 objectName: "downloadedButton"
-                // Downloaded and Watching are both about the *normal* library:
-                // private sources have no counterpart list of their own (see
-                // PrivateMark.qml's comment and the header note above this
-                // file's empty state) — the discretion this feature offers is
-                // scoped to the list and the combined search, not to every
-                // screen a source's series can reach.
-                visible: !screen.showingPrivate
+                // Downloaded and Watching now have private counterparts of
+                // their own (round 2): both buttons stay in this same bottom
+                // row on the private list too, opening the private
+                // Downloaded / Watching screens instead of the ordinary ones
+                // — see screen.downloadedRequested / watchingRequested and
+                // Main.qml's routing on screen.showingPrivate.
                 width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: downloadedArea.pressed ? Style.pressed : Style.paper
@@ -854,7 +853,6 @@ Item {
 
             Rectangle {
                 objectName: "watchingButton"
-                visible: !screen.showingPrivate
                 width: Math.min((parent.parent.width - Style.margin * 2 - Style.gap * 3 - parent.parent.privateSlot) / 4, 300)
                 height: Style.buttonHeight
                 color: watchingArea.pressed ? Style.pressed : Style.paper
