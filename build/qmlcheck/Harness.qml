@@ -1663,7 +1663,8 @@ Window {
         win.want("but Download remains reachable on a book",
                  findByPrefix(bookChapterList, "downloadButton-", []).length > 0, true)
 
-        // ---- the reader itself: page turning at both ends, and closing ----
+        // ---- the reader itself: full screen, three tap zones, the overlay,
+        // the honesty line and closing ---------------------------------
         //
         // Driven directly through the same API Main.qml drives it with
         // (begin/ready/pageArrived/countUpdated), rather than through a
@@ -1674,48 +1675,115 @@ Window {
                  win.findChild(tryReader, "tryLoadingLabel").visible, true)
         win.want("and asks for page 1 straight away", win.tryPageWants.indexOf(0) >= 0, true)
 
+        // The honesty line is seen before a single tap: it opens on its own,
+        // on the first page, with the overlay shut.
+        win.want("the opening notice shows unasked, on page 1",
+                 win.findChild(tryReader, "tryOpeningNotice").visible, true)
+        win.want("and the overlay itself is shut", tryReader.overlayVisible, false)
+
+        var leftZone = win.findChild(tryReader, "tryLeftZone")
+        var middleZone = win.findChild(tryReader, "tryMiddleZone")
+        var rightZone = win.findChild(tryReader, "tryRightZone")
+
+        // The three zones divide the screen left to right in that order,
+        // and the middle is the widest single-tap target of the three by
+        // design (see zoneFraction) — wide enough to reach without aiming.
+        win.want("the left zone starts at the left edge", leftZone.x, 0)
+        win.want("the middle zone picks up where the left zone ends",
+                 middleZone.x, leftZone.width)
+        win.want("the right zone picks up where the middle zone ends",
+                 rightZone.x, middleZone.x + middleZone.width)
+        win.want("the right zone reaches the right edge",
+                 rightZone.x + rightZone.width, tryReader.width)
+        win.want("the middle zone is the widest of the three",
+                 middleZone.width > leftZone.width && middleZone.width > rightZone.width, true)
+
+        // Left is dead on the first page — the same hard stop every paged
+        // screen in ui/ already has, just answered by a tap zone.
+        leftZone.clicked(null)
+        win.want("a tap on the left does nothing on page 1", tryReader.index, 0)
+
         tryReader.ready({"sourceId": "src", "seriesId": "series", "chapterId": "c1",
                           "index": 0, "path": "/tmp/p0.jpg", "pageCount": 3, "complete": true})
         win.want("the first page is shown", win.findChild(tryReader, "tryPageImage").visible, true)
         win.want("not the fetching placeholder any more",
                  win.findChild(tryReader, "tryLoadingLabel").visible, false)
+        win.want("previous is dead on the first page", tryReader.canGoBack, false)
+        win.want("next is alive with more pages known", tryReader.canGoOn, true)
 
-        var pager = win.findChild(tryReader, "tryPager")
-        win.want("previous is dead on the first page", pager.canGoBack, false)
-        win.want("next is alive with more pages known", pager.canGoOn, true)
+        // The middle zone toggles the overlay, both ways — it does not turn
+        // a page.
+        middleZone.clicked(null)
+        win.want("a middle tap opens the overlay", tryReader.overlayVisible, true)
+        win.want("the page did not turn", tryReader.index, 0)
+        win.want("the overlay carries the title",
+                 win.findChild(tryReader, "tryOverlayTitle").text, "Chapter 1")
+        win.want("and the page number",
+                 win.findChild(tryReader, "tryOverlayPageLabel").text.indexOf("Page 1") === 0, true)
+        // Reachable a second time from inside the overlay, for a reader who
+        // skipped or has long since scrolled past the opening band.
+        win.want("and the honesty line, every time it opens",
+                 win.findChild(tryReader, "tryOverlayNotice").visible, true)
+        // The opening band itself steps aside once the overlay is up, so
+        // the two are never drawn over one another.
+        win.want("the opening band yields to the overlay",
+                 win.findChild(tryReader, "tryOpeningNotice").visible, false)
+
+        // Page-turning stands down while the overlay owns the screen —
+        // tapping where the left/right zones would be instead falls through
+        // to the overlay (which is a full-screen dismiss area under its own
+        // bars) and closes it, exactly like tapping the middle again.
+        win.want("the tap zones are disabled under the overlay",
+                 win.findChild(tryReader, "tryTapZones").enabled, false)
+        // A real tap in the middle of the screen while the overlay is up
+        // lands on the overlay's own dismiss area, not the (disabled)
+        // middle zone underneath it — this is that area, not middleZone
+        // again, so the test exercises the actual hit-test path.
+        win.findChild(tryReader, "tryOverlayDismissArea").clicked(null)
+        win.want("tapping the page again closes the overlay", tryReader.overlayVisible, false)
+        win.want("still without having turned a page", tryReader.index, 0)
+
+        // The reader is not stuck once the overlay shuts again.
+        win.want("the tap zones are back", win.findChild(tryReader, "tryTapZones").enabled, true)
 
         // Turning to a page not fetched yet degrades to the loading label —
         // never a blank page standing in for content, and never a freeze:
-        // the pager itself stays fully interactive throughout.
-        pager.nextRequested()
+        // the zones stay fully interactive throughout.
+        rightZone.clicked(null)
         win.want("the reader moved to page 2", tryReader.index, 1)
         win.want("which is not ready yet, so it shows fetching",
                  win.findChild(tryReader, "tryLoadingLabel").visible, true)
         win.want("and asked the host for it, exactly once",
                  win.tryPageWants.filter(function (i) { return i === 1 }).length, 1)
+        win.want("the opening band does not show past page 1",
+                 win.findChild(tryReader, "tryOpeningNotice").visible, false)
 
         tryReader.pageArrived({"sourceId": "src", "seriesId": "series", "chapterId": "c1",
                                "index": 1, "path": "/tmp/p1.jpg"})
         win.want("page 2 shows once it arrives",
                  win.findChild(tryReader, "tryPageImage").visible, true)
 
-        pager.nextRequested()
+        rightZone.clicked(null)
         win.want("page 3 (the last known page)", tryReader.index, 2)
-        win.want("next is dead at the last known page", pager.canGoOn, false)
-        pager.nextRequested()
-        win.want("a dead next does not run past the end", tryReader.index, 2)
+        win.want("next is dead at the last known page", tryReader.canGoOn, false)
+        rightZone.clicked(null)
+        win.want("a dead right zone does not run past the end", tryReader.index, 2)
 
-        pager.previousRequested()
-        pager.previousRequested()
-        win.want("previous turns all the way back to the first page", tryReader.index, 0)
-        pager.previousRequested()
-        win.want("a dead previous does not run past the start", tryReader.index, 0)
+        leftZone.clicked(null)
+        leftZone.clicked(null)
+        win.want("left turns all the way back to the first page", tryReader.index, 0)
+        leftZone.clicked(null)
+        win.want("a dead left zone does not run past the start", tryReader.index, 0)
 
         // Closing always tells the host, which is what ends the session on
         // the backend and is the entire cleanup Try needs — nothing here
-        // decides that on its own, it only ever reports the tap.
+        // decides that on its own, it only ever reports the tap. Reached
+        // through the overlay's own Back, since that is the only Back this
+        // full-screen reader draws.
         win.tryCloses = 0
-        win.findChild(tryReader, "tryCloseArea").clicked(null)
+        middleZone.clicked(null)
+        win.want("the overlay opens for the way out", tryReader.overlayVisible, true)
+        win.findChild(tryReader, "tryBackArea").clicked(null)
         win.want("closing the reader is reported once", win.tryCloses, 1)
 
         // The volume view offers it on the same terms. A row that offers Read

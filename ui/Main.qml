@@ -1321,6 +1321,10 @@ Rectangle {
         id: header
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: Style.rowHeight
+        // The Try reader is full screen (the owner's follow-up: every pixel
+        // of chrome is a pixel of manga you cannot see) and draws its own
+        // sparse overlay instead of this permanent bar — see TryReader.qml.
+        visible: root.screen !== "try"
 
         Text {
             id: backLabel
@@ -1697,25 +1701,6 @@ Rectangle {
                 "chapterIds": chapterIds, "grouping": volumes ? "volume" : "chapter"})
         }
 
-        TryReader {
-            id: tryReaderScreen
-            objectName: "tryReader"
-            anchors.fill: parent
-            visible: root.screen === "try"
-            // Leaving the reader always ends the session (see root.endTry) —
-            // Close is just another way in, alongside the shared Back button.
-            onCloseRequested: {
-                root.endTry()
-                root.showScreen("series")
-            }
-            // The reader asks for exactly one page at a time (see
-            // TryReader.qml's ensureRequested); this is the only place that
-            // becomes a MessageTryPageRequest.
-            onPageWanted: root.send(Msg.TryPageRequest, {
-                "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
-                "chapterId": tryReaderScreen.chapterId, "index": index})
-        }
-
         Settings {
             id: settingsScreen
             objectName: "settings"
@@ -1744,5 +1729,32 @@ Rectangle {
             onClearCacheRequested: root.send(Msg.ClearCache)
             onClearCacheConfirmed: root.send(Msg.ClearCache, {"confirmed": true})
         }
+    }
+
+    // The Try reader is deliberately not inside `body`: it is full screen,
+    // over the header as well, because the point of it is the page and every
+    // pixel of chrome is a pixel of manga you cannot see (the owner's
+    // follow-up). Declared last so it paints over both `header` (hidden but
+    // still there) and `body` while it is open. header.visible already
+    // excludes itself on this screen; this is the belt to that braces, in
+    // case a future header ever draws something that is not gated by it.
+    TryReader {
+        id: tryReaderScreen
+        objectName: "tryReader"
+        anchors.fill: parent
+        visible: root.screen === "try"
+        // Leaving the reader always ends the session (see root.endTry) —
+        // the overlay's Back is just another way in, alongside the shared
+        // header Back button on every other screen.
+        onCloseRequested: {
+            root.endTry()
+            root.showScreen("series")
+        }
+        // The reader asks for exactly one page at a time (see
+        // TryReader.qml's ensureRequested); this is the only place that
+        // becomes a MessageTryPageRequest.
+        onPageWanted: root.send(Msg.TryPageRequest, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "chapterId": tryReaderScreen.chapterId, "index": index})
     }
 }
