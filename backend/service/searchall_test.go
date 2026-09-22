@@ -270,7 +270,7 @@ func TestGroupingMergesOnlyExactNormalisedTitles(t *testing.T) {
 			th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", tc.left)}
 			th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", tc.right)}
 
-			svc.runSearchAll(context.Background(), out, "q", 1, 10)
+			svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 			reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 			want := 2
@@ -299,7 +299,7 @@ func TestAMergedGroupNamesItsSourcesInTheUsersOrder(t *testing.T) {
 	th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", "Filler", "Vagabond")}
 	th.pages["gamma"] = [][]theme.SeriesStub{stubs("gamma", "Vagabond")}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 	var found bool
@@ -331,7 +331,7 @@ func TestAGroupTakesTheBestRankedCoverThatExists(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Vagabond"}}}
 	th.pages["beta"] = [][]theme.SeriesStub{{{ID: "b1", Title: "Vagabond", CoverURL: "https://cdn.invalid/b1.jpg"}}}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 	if len(reply.Groups) != 1 {
@@ -355,7 +355,7 @@ func TestGroupCoverIsAttributedToTheMatchItCameFrom(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Vagabond"}}}
 	th.pages["beta"] = [][]theme.SeriesStub{{{ID: "b1", Title: "Vagabond", CoverURL: "https://cdn.invalid/b1.jpg"}}}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 	if len(reply.Groups) != 1 {
@@ -382,7 +382,7 @@ func TestAGroupTakesTheBestRankedAuthorsThatExist(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Dune"}}}
 	th.pages["beta"] = [][]theme.SeriesStub{{{ID: "b1", Title: "Dune", Authors: []string{"Frank Herbert"}}}}
 
-	svc.runSearchAll(context.Background(), out, "dune", 1, 10)
+	svc.runSearchAll(context.Background(), out, "dune", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 	if len(reply.Groups) != 1 {
@@ -399,7 +399,7 @@ func TestAGroupOmitsAuthorsWhenNoMatchHasAny(t *testing.T) {
 	svc, th, out := newSearchAllService(t, "alpha")
 	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Vagabond"}}}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	raw := out.only(t, appload.MessageSearchAllResults)
 
 	var generic struct {
@@ -427,7 +427,7 @@ func TestEveryStubSeenRecordsItsCoverReferrer(t *testing.T) {
 		{ID: "a1", Title: "Vagabond", CoverURL: "https://cdn.invalid/a1.jpg", CoverReferrer: "https://alpha.invalid/manga/vagabond"},
 	}}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	out.only(t, appload.MessageSearchAllResults)
 
 	if got := svc.coverReferrerFor("alpha", "https://cdn.invalid/a1.jpg"); got != "https://alpha.invalid/manga/vagabond" {
@@ -454,7 +454,7 @@ func TestGroupOrderIsRankThenSourceOrderThenTitle(t *testing.T) {
 
 	want := []string{"Delta", "Bravo", "Alpha", "Shared", "Yankee", "Zulu"}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 10)
+	svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if got := groupTitles(reply); !equalStrings(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
@@ -466,7 +466,7 @@ func TestGroupOrderIsRankThenSourceOrderThenTitle(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		svc2, th2, out2 := newSearchAllService(t, "alpha", "beta", "gamma")
 		th2.pages = th.pages
-		svc2.runSearchAll(context.Background(), out2, "q", 1, 10)
+		svc2.runSearchAll(context.Background(), out2, "q", 1, 10, false)
 		got := groupTitles(decodeReply(t, out2.only(t, appload.MessageSearchAllResults)))
 		if !equalStrings(got, want) {
 			t.Fatalf("run %d ordered %v, want %v", i, got, want)
@@ -494,7 +494,7 @@ func TestTiedRanksFollowTheConfiguredSourceOrder(t *testing.T) {
 			th.pages["aaa"] = [][]theme.SeriesStub{stubs("aaa", tc.firstTitle)}
 			th.pages["zzz"] = [][]theme.SeriesStub{stubs("zzz", tc.lastTitle)}
 
-			svc.runSearchAll(context.Background(), out, "q", 1, 10)
+			svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 			reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 			if got := groupTitles(reply); !equalStrings(got, tc.want) {
 				t.Fatalf("order = %v, want %v", got, tc.want)
@@ -512,7 +512,7 @@ func TestOneSourceFailingIsAPartialAnswer(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "Vagabond")}
 	th.fail["beta"] = errors.New("search beta: HTTP 503")
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 
 	if n := out.count(appload.MessageError); n != 0 {
 		t.Fatalf("one failing source produced %d error messages, want none", n)
@@ -541,19 +541,19 @@ func TestAFailedSourceIsNotRetriedOnEveryPageTurn(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "One", "Two", "Three", "Four")}
 	th.fail["beta"] = errors.New("search beta: HTTP 503")
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 2)
+	svc.runSearchAll(context.Background(), out, "q", 1, 2, false)
 	afterFirst := th.callCount("beta")
 	if afterFirst == 0 {
 		t.Fatal("the failing source was never asked at all")
 	}
 
-	svc.runSearchAll(context.Background(), &capture{}, "q", 2, 2)
+	svc.runSearchAll(context.Background(), &capture{}, "q", 2, 2, false)
 	if got := th.callCount("beta"); got != afterFirst {
 		t.Errorf("the failing source was asked again on a page turn: %d calls, want %d", got, afterFirst)
 	}
 
 	second := &capture{}
-	svc.runSearchAll(context.Background(), second, "q", 2, 2)
+	svc.runSearchAll(context.Background(), second, "q", 2, 2, false)
 	reply := decodeReply(t, second.only(t, appload.MessageSearchAllResults))
 	if len(reply.SourceErrors) != 1 {
 		t.Errorf("page 2 dropped the failure: sourceErrors = %v", reply.SourceErrors)
@@ -567,7 +567,7 @@ func TestEverySourceFailingIsAnError(t *testing.T) {
 	th.fail["alpha"] = errors.New("search alpha: HTTP 500")
 	th.fail["beta"] = errors.New("search beta: HTTP 503")
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 10)
+	svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 
 	if n := out.count(appload.MessageSearchAllResults); n != 0 {
 		t.Fatalf("an empty screen was reported as a result %d times, want an error", n)
@@ -594,7 +594,7 @@ func TestAFailureBesideAnEmptyAnswerIsStillAResult(t *testing.T) {
 	th.pages["alpha"] = nil // answered, had nothing
 	th.fail["beta"] = errors.New("search beta: HTTP 503")
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 10)
+	svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 
 	if n := out.count(appload.MessageError); n != 0 {
 		t.Fatalf("a search where one source answered emptily raised %d errors", n)
@@ -614,7 +614,7 @@ func TestTheOnlySourceFailingIsAnError(t *testing.T) {
 	svc, th, out := newSearchAllService(t, "alpha")
 	th.fail["alpha"] = errors.New("search alpha: HTTP 500")
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 10)
+	svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 
 	if n := out.count(appload.MessageSearchAllResults); n != 0 {
 		t.Fatalf("got %d result messages, want an error", n)
@@ -632,7 +632,7 @@ func TestDisabledSourcesAreNotSearched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 
 	if th.callCount("beta") != 0 {
@@ -640,6 +640,83 @@ func TestDisabledSourcesAreNotSearched(t *testing.T) {
 	}
 	if len(reply.Groups) != 1 || len(reply.Groups[0].Matches) != 1 {
 		t.Fatalf("the disabled source's row reached the screen: %+v", reply.Groups)
+	}
+}
+
+// TestPrivateSourcesAreNotInTheCombinedSearch is the hard requirement's own
+// test: the normal combined search must never touch a private source, and
+// "never touch" is proven at the theme's Search method — callCount — not at
+// the reply, so a bug that fetched but then filtered the row would still fail
+// this test. This is the mutation in the task's own words: "let the combined
+// search include a private source — a test must fail."
+func TestPrivateSourcesAreNotInTheCombinedSearch(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha", "beta")
+	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "Vagabond")}
+	th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", "Vagabond")}
+	if err := svc.store.SetPrivate("beta", true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
+	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
+
+	if th.callCount("beta") != 0 {
+		t.Fatalf("the private source received %d requests from the normal combined search, want 0",
+			th.callCount("beta"))
+	}
+	if len(reply.Groups) != 1 || len(reply.Groups[0].Matches) != 1 {
+		t.Fatalf("the private source's row reached the normal combined search: %+v", reply.Groups)
+	}
+}
+
+// TestPrivateSearchTouchesOnlyPrivateSources is the mirror: the private
+// list's own combined search (MessageSearchAllPrivate / runSearchAll with
+// private=true) must ask only the sources marked private, and must never ask
+// an ordinary one — proven the same way, by call count rather than by what
+// made it into the reply.
+func TestPrivateSearchTouchesOnlyPrivateSources(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha", "beta")
+	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "Vagabond")}
+	th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", "Vagabond")}
+	if err := svc.store.SetPrivate("beta", true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, true)
+	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
+
+	if th.callCount("alpha") != 0 {
+		t.Fatalf("the normal source received %d requests from the private combined search, want 0",
+			th.callCount("alpha"))
+	}
+	if th.callCount("beta") == 0 {
+		t.Fatal("the private source was never asked by its own combined search")
+	}
+	if len(reply.Groups) != 1 || len(reply.Groups[0].Matches) != 1 || reply.Groups[0].Matches[0].SourceID != "beta" {
+		t.Fatalf("the private search's reply = %+v, want beta's row only", reply.Groups)
+	}
+}
+
+// TestSwitchingScopeDoesNotReuseTheOtherScopesPager guards the cache key
+// (searchAllKey): the normal and private combined searches must not share a
+// cached pager for the same query text, or one screen would serve up the
+// other's source list.
+func TestSwitchingScopeDoesNotReuseTheOtherScopesPager(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha", "beta")
+	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "Vagabond")}
+	th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", "Vagabond")}
+	if err := svc.store.SetPrivate("beta", true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10, false)
+	out.only(t, appload.MessageSearchAllResults)
+
+	second := &capture{}
+	svc.runSearchAll(context.Background(), second, "vagabond", 1, 10, true)
+	reply := decodeReply(t, second.only(t, appload.MessageSearchAllResults))
+	if len(reply.Groups) != 1 || reply.Groups[0].Matches[0].SourceID != "beta" {
+		t.Fatalf("the private search after a normal one = %+v, want beta's row only", reply.Groups)
 	}
 }
 
@@ -660,7 +737,7 @@ func TestADisplayPageIsFilledFromAsManyRoundsAsItTakes(t *testing.T) {
 		stubs("beta", "B3", "B4"),
 	}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 4)
+	svc.runSearchAll(context.Background(), out, "q", 1, 4, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if len(reply.Groups) != 4 {
 		t.Fatalf("page 1 served %d groups, want a full page of 4 (%v)", len(reply.Groups), groupTitles(reply))
@@ -676,7 +753,7 @@ func TestADisplayPageIsFilledFromAsManyRoundsAsItTakes(t *testing.T) {
 	// "one past the page" probe, and must not re-ask every site from scratch.
 	before := th.callCount("alpha") + th.callCount("beta")
 	second := &capture{}
-	svc.runSearchAll(context.Background(), second, "q", 2, 4)
+	svc.runSearchAll(context.Background(), second, "q", 2, 4, false)
 	page2 := decodeReply(t, second.only(t, appload.MessageSearchAllResults))
 	if page2.Page != 2 {
 		t.Errorf("page = %d, want 2", page2.Page)
@@ -701,7 +778,7 @@ func TestTotalPagesAppearsOnlyWhenEverySourceIsExhausted(t *testing.T) {
 		stubs("alpha", "A5"),
 	}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 2)
+	svc.runSearchAll(context.Background(), out, "q", 1, 2, false)
 	first := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if first.TotalPages != 0 {
 		t.Errorf("totalPages = %d before the source ran dry; 0 means 'not known yet'", first.TotalPages)
@@ -713,7 +790,7 @@ func TestTotalPagesAppearsOnlyWhenEverySourceIsExhausted(t *testing.T) {
 	// Far past the end: everything is fetched, the total becomes honest, and
 	// the page asked for is clamped onto the last one that exists.
 	last := &capture{}
-	svc.runSearchAll(context.Background(), last, "q", 9, 2)
+	svc.runSearchAll(context.Background(), last, "q", 9, 2, false)
 	reply := decodeReply(t, last.only(t, appload.MessageSearchAllResults))
 	if reply.TotalPages != 3 {
 		t.Errorf("totalPages = %d, want 3 (five results, two per page)", reply.TotalPages)
@@ -736,7 +813,7 @@ func TestPagingCountsGroupsNotMatches(t *testing.T) {
 	th.pages["alpha"] = [][]theme.SeriesStub{stubs("alpha", "One", "Two", "Three", "Four")}
 	th.pages["beta"] = [][]theme.SeriesStub{stubs("beta", "One", "Two", "Three", "Four")}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 4)
+	svc.runSearchAll(context.Background(), out, "q", 1, 4, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if reply.TotalPages != 1 {
 		t.Errorf("totalPages = %d, want 1: eight rows are four series", reply.TotalPages)
@@ -756,7 +833,7 @@ func TestPagingCountsGroupsNotMatches(t *testing.T) {
 func TestNoResultsAnywhereIsAnEmptyPageNotAnError(t *testing.T) {
 	svc, _, out := newSearchAllService(t, "alpha", "beta")
 
-	svc.runSearchAll(context.Background(), out, "nothing matches this", 1, 10)
+	svc.runSearchAll(context.Background(), out, "nothing matches this", 1, 10, false)
 	if n := out.count(appload.MessageError); n != 0 {
 		t.Fatalf("an empty result raised %d errors", n)
 	}
@@ -780,7 +857,7 @@ func TestASourceThatRepeatsItsPageDoesNotLoopForever(t *testing.T) {
 	page := stubs("alpha", "One", "Two")
 	th.pages["alpha"] = [][]theme.SeriesStub{page, page, page, page, page, page, page, page}
 
-	svc.runSearchAll(context.Background(), out, "q", 3, 4)
+	svc.runSearchAll(context.Background(), out, "q", 3, 4, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if reply.TotalPages != 1 {
 		t.Errorf("totalPages = %d, want 1: the source only ever had two results", reply.TotalPages)
@@ -802,7 +879,7 @@ func TestACancelledContextStopsTheWorkAndSaysNothing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	svc.runSearchAll(ctx, out, "q", 1, 10)
+	svc.runSearchAll(ctx, out, "q", 1, 10, false)
 
 	if n := th.callCount("alpha") + th.callCount("beta"); n != 0 {
 		t.Errorf("a cancelled search still asked the sources %d times", n)
@@ -822,15 +899,15 @@ func TestACancelledSearchDoesNotThrowAwayTheCachedQuery(t *testing.T) {
 		stubs("alpha", "A3", "A4"),
 	}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 2)
+	svc.runSearchAll(context.Background(), out, "q", 1, 2, false)
 	before := th.callCount("alpha")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	svc.runSearchAll(ctx, &capture{}, "something else", 1, 2)
+	svc.runSearchAll(ctx, &capture{}, "something else", 1, 2, false)
 
 	second := &capture{}
-	svc.runSearchAll(context.Background(), second, "q", 2, 2)
+	svc.runSearchAll(context.Background(), second, "q", 2, 2, false)
 	second.only(t, appload.MessageSearchAllResults)
 	if got := th.callCount("alpha"); got > before+1 {
 		t.Errorf("the page turn cost %d further requests: the cancelled search dropped the cache", got-before)
@@ -853,7 +930,7 @@ func TestCancellingMidSearchStopsAfterTheRoundInFlight(t *testing.T) {
 	// and its answer is kept, but the next one is never started.
 	th.answered = func(string, int) { cancel() }
 
-	svc.runSearchAll(ctx, out, "q", 1, 4)
+	svc.runSearchAll(ctx, out, "q", 1, 4, false)
 
 	if got := th.callCount("alpha"); got != 1 {
 		t.Errorf("the source was asked %d times; the cancel should have stopped it after the round in flight", got)
@@ -894,7 +971,7 @@ func TestUntitledRowsDoNotAllMergeTogether(t *testing.T) {
 		{ID: "a2", Title: "!!!"},
 	}}
 
-	svc.runSearchAll(context.Background(), out, "q", 1, 10)
+	svc.runSearchAll(context.Background(), out, "q", 1, 10, false)
 	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
 	if len(reply.Groups) != 2 {
 		t.Fatalf("two untitled rows made %d groups, want 2", len(reply.Groups))

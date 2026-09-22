@@ -523,3 +523,137 @@ func TestRenameSourceRefusesAnEmptyNameInWords(t *testing.T) {
 		t.Errorf("the name changed to %q anyway", got.Name)
 	}
 }
+
+// sourceRow is the sourceView fields these tests need, decoded the way the
+// frontend would have to: nothing here shares a struct with the sender.
+type sourceRow struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Private bool   `json:"private"`
+}
+
+func decodeSourceRows(t *testing.T, payload []byte) []sourceRow {
+	t.Helper()
+	var list struct {
+		Sources []sourceRow `json:"sources"`
+	}
+	if err := json.Unmarshal(payload, &list); err != nil {
+		t.Fatal(err)
+	}
+	return list.Sources
+}
+
+// TestMarkingASourcePrivateMovesItOffTheNormalList is the mutation in the
+// task's own words: "let ListSources return a private source in the normal
+// scope — a test must fail." This asserts the positive the mutation would
+// break: the row is gone from MessageSources and present in
+// MessagePrivateSources, in the same round trip.
+func TestMarkingASourcePrivateMovesItOffTheNormalList(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, svc, rec, appload.MessageSetSourcePrivate,
+		`{"sourceId":"example-reader","private":true}`)
+
+	normal := decodeSourceRows(t, rec.wait(t, appload.MessageSources))
+	if len(normal) != 0 {
+		t.Fatalf("the normal source list = %+v, want the private source gone from it", normal)
+	}
+	private := decodeSourceRows(t, rec.wait(t, appload.MessagePrivateSources))
+	if len(private) != 1 || private[0].ID != "example-reader" || !private[0].Private {
+		t.Fatalf("the private source list = %+v, want exactly example-reader marked private", private)
+	}
+}
+
+// TestUnmarkingAPrivateSourceMovesItBackToTheNormalList is the reverse
+// action, reachable from the private list the way the task asks for.
+func TestUnmarkingAPrivateSourceMovesItBackToTheNormalList(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, svc, rec, appload.MessageSetSourcePrivate,
+		`{"sourceId":"example-reader","private":false}`)
+
+	normal := decodeSourceRows(t, rec.wait(t, appload.MessageSources))
+	if len(normal) != 1 || normal[0].ID != "example-reader" || normal[0].Private {
+		t.Fatalf("the normal source list = %+v, want example-reader back and not private", normal)
+	}
+	private := decodeSourceRows(t, rec.wait(t, appload.MessagePrivateSources))
+	if len(private) != 0 {
+		t.Fatalf("the private source list = %+v, want it empty", private)
+	}
+}
+
+// TestPrivateSourceNeverAppearsOnTheNormalList is a second angle on the same
+// mutation as above, this time exercised through MessageListSources exactly
+// as the frontend calls it on the sources screen opening, with the source
+// marked private from the moment it was added rather than toggled mid-test.
+func TestPrivateSourceNeverAppearsOnTheNormalList(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, svc, rec, appload.MessageListSources, `{}`)
+	normal := decodeSourceRows(t, rec.wait(t, appload.MessageSources))
+	if len(normal) != 0 {
+		t.Fatalf("MessageListSources returned %+v, want the private source excluded", normal)
+	}
+
+	handle(t, svc, rec, appload.MessageListPrivateSources, `{}`)
+	private := decodeSourceRows(t, rec.wait(t, appload.MessagePrivateSources))
+	if len(private) != 1 || private[0].ID != "example-reader" {
+		t.Fatalf("MessageListPrivateSources returned %+v, want example-reader", private)
+	}
+}
+
+// TestWatchSeriesOnAPrivateSourceIsRefused is the message-level face of
+// state.ErrSourceIsPrivate: the action a series screen offers must not create
+// a watch that could only ever leak onto the ordinary Watching list.
+func TestWatchSeriesOnAPrivateSourceIsRefused(t *testing.T) {
+	svc, store, rec := newService(t, routes())
+	if _, err := store.Add(&theme.Source{
+		Name: "Example Reader", Lang: "en", Theme: madara.ID,
+		BaseURL: "https://example.invalid", AddedAt: fixedNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, svc, rec, appload.MessageWatchSeries,
+		`{"sourceId":"example-reader","seriesId":"/manga/the-lantern-keeper/","title":"The Lantern Keeper"}`)
+
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageError), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "source_is_private" {
+		t.Errorf("code %q, want source_is_private", e.Code)
+	}
+	if got := store.Watches(); len(got) != 0 {
+		t.Fatalf("a watch was written anyway: %+v", got)
+	}
+}

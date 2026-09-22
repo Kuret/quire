@@ -511,33 +511,53 @@ func (p *searchAllPager) slice(groups []searchAllGroup, page, size int) searchAl
 	return res
 }
 
-// searchAllPagerFor returns the pager for this query, building it — and with it
-// the list of sources to ask — when the query has changed.
+// searchAllKey identifies which combined listing a cached pager answers for:
+// the query text, and which scope it was asked on. The scope is part of the
+// key — not a separate flag beside it — so that switching between the normal
+// combined search and the private one is exactly like typing a different
+// query: a cache miss that rebuilds the source list from scratch, never a
+// stale pager built for the other scope answering under the wrong one.
+type searchAllKey struct {
+	query   string
+	private bool
+}
+
+// searchAllPagerFor returns the pager for this query and scope, building it —
+// and with it the list of sources to ask — when either has changed.
 //
-// One pager is kept, replaced when the query changes, for the same reason
+// One pager is kept, replaced when the key changes, for the same reason
 // pagerFor keeps one: paging back and forth must be free, but every search ever
 // typed is a cache nobody asked for. It shares pagerMu with the single-source
 // pager so that dropPagers retires both, which is what makes a removed or
 // re-probed source invalidate a combined listing too.
-func (s *Service) searchAllPagerFor(query string) *searchAllPager {
+func (s *Service) searchAllPagerFor(query string, private bool) *searchAllPager {
+	key := searchAllKey{query: query, private: private}
 	s.pagerMu.Lock()
 	defer s.pagerMu.Unlock()
-	if s.searchAllPagerCur != nil && s.searchAllQuery == query {
+	if s.searchAllPagerCur != nil && s.searchAllQuery == key {
 		return s.searchAllPagerCur
 	}
-	p := s.newSearchAllPager(query)
-	s.searchAllPagerCur, s.searchAllQuery = p, query
+	p := s.newSearchAllPager(query, private)
+	s.searchAllPagerCur, s.searchAllQuery = p, key
 	return p
 }
 
-// newSearchAllPager snapshots the enabled sources, in the user's order, and
-// binds each to its theme. A source whose theme is gone is recorded as a
-// failure rather than dropped: a silently absent site is indistinguishable from
-// a site with no results for this query.
-func (s *Service) newSearchAllPager(query string) *searchAllPager {
+// newSearchAllPager snapshots the enabled sources whose Private flag matches
+// wantPrivate, in the user's order, and binds each to its theme. A source
+// whose theme is gone is recorded as a failure rather than dropped: a silently
+// absent site is indistinguishable from a site with no results for this query.
+//
+// **This is the combined search's partition point**, and it is the one that
+// matters most: a source excluded here is never bound to a theme and never
+// asked anything, so the mixed-scope leak this feature exists to prevent — a
+// private source's site receiving a request because a combined search touched
+// it — cannot happen no matter what the reply to the frontend does or does
+// not filter. See buildSourceViews (service.go) for the enumeration's other
+// half, driven by the same theme.Source.IsPrivate.
+func (s *Service) newSearchAllPager(query string, wantPrivate bool) *searchAllPager {
 	p := &searchAllPager{}
 	for _, src := range s.store.List() {
-		if !src.IsEnabled() {
+		if !src.IsEnabled() || src.IsPrivate() != wantPrivate {
 			continue
 		}
 		st := &searchAllSourceState{
@@ -561,9 +581,11 @@ func (s *Service) newSearchAllPager(query string) *searchAllPager {
 	return p
 }
 
-// runSearchAll answers MessageSearchAll: one query, every enabled source, one
-// grouped and paged reply.
-func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, page, pageSize int) {
+// runSearchAll answers MessageSearchAll (private=false) and MessageSearchAllPrivate
+// (private=true): one query, every source in that scope, one grouped and
+// paged reply. See newSearchAllPager for where the scope actually excludes a
+// source's site from being asked anything at all.
+func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, page, pageSize int, private bool) {
 	if page < 1 {
 		page = 1
 	}
@@ -577,7 +599,7 @@ func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, pa
 		return
 	}
 
-	pager := s.searchAllPagerFor(query)
+	pager := s.searchAllPagerFor(query, private)
 	// Collected here and written once per source below, rather than a write per
 	// stub: a combined search touches every enabled source and this callback
 	// runs for every row of every one of them.

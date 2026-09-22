@@ -117,7 +117,7 @@ func (s *Service) maybeReprobe(ctx context.Context, out Sender, src *theme.Sourc
 	// an empty screen and beats "no results found".
 	if res.Verdict == theme.VerdictOK {
 		s.log.Info("re-probe found nothing wrong", "source", src.ID)
-		_ = s.sendSources(out)
+		_ = s.sendSourceListFor(out, src.ID)
 		return
 	}
 

@@ -126,7 +126,7 @@ type Service struct {
 	pagerMu           sync.Mutex
 	pagerKey          pagerKey
 	pager             *seriesPager
-	searchAllQuery    string
+	searchAllQuery    searchAllKey
 	searchAllPagerCur *searchAllPager
 
 	// coverMu guards the cover batch in flight. The frontend sends the set of
@@ -218,6 +218,9 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 	case appload.MessageListSources:
 		return true, s.sendSources(out)
 
+	case appload.MessageListPrivateSources:
+		return true, s.sendPrivateSources(out)
+
 	case appload.MessageProbeSource:
 		var req struct {
 			URL string `json:"url"`
@@ -261,6 +264,27 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.sendSources(out)
 
+	case appload.MessageSetSourcePrivate:
+		var req struct {
+			SourceID string `json:"sourceId"`
+			Private  bool   `json:"private"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		if err := s.store.SetPrivate(req.SourceID, req.Private); err != nil {
+			return true, s.sendError(out, "not_found", err.Error())
+		}
+		// The source just moved between the two lists (or a screen open on
+		// either one needs to drop or gain the row), and the combined search
+		// caches a snapshot of who is enumerable in each — see
+		// newSearchAllPager — so both go stale the moment this changes.
+		s.dropPagers()
+		if err := s.sendSources(out); err != nil {
+			return true, err
+		}
+		return true, s.sendPrivateSources(out)
+
 	case appload.MessageRemoveSource:
 		var req struct {
 			SourceID string `json:"sourceId"`
@@ -289,7 +313,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := s.sendWatchList(out); err != nil {
 			return true, err
 		}
-		return true, s.sendSources(out)
+		// The removed source may have been on either list; both are refreshed
+		// rather than deciding which one it was, since a screen open on the
+		// other list is unaffected by an extra, unchanged push.
+		if err := s.sendSources(out); err != nil {
+			return true, err
+		}
+		return true, s.sendPrivateSources(out)
 
 	case appload.MessageSearch:
 		var req struct {
@@ -316,7 +346,21 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		s.goBackground(ctx, func(ctx context.Context) {
-			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize)
+			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, false)
+		})
+		return true, nil
+
+	case appload.MessageSearchAllPrivate:
+		var req struct {
+			Query    string `json:"query"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"pageSize"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		s.goBackground(ctx, func(ctx context.Context) {
+			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, true)
 		})
 		return true, nil
 
@@ -429,7 +473,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		case err != nil:
 			return true, s.sendError(out, "not_found", plain(err))
 		}
-		return true, s.sendSources(out)
+		return true, s.sendSourceListFor(out, req.SourceID)
 
 	case appload.MessageSetSourceSplitStrips:
 		var req struct {
@@ -446,7 +490,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		case err != nil:
 			return true, s.sendError(out, "not_found", plain(err))
 		}
-		return true, s.sendSources(out)
+		return true, s.sendSourceListFor(out, req.SourceID)
 
 	case appload.MessageSetSourceProxy:
 		var req struct {
@@ -580,6 +624,14 @@ type sourceView struct {
 	Lang    string `json:"lang"`
 	Enabled bool   `json:"enabled"`
 
+	// Private says which list this row belongs on. It rides along even though
+	// every row in one reply already agrees — sendSources sends only false,
+	// sendPrivateSources only true — because the row menu's "Make private" /
+	// "Make public" action needs to know which one to offer, and a boolean it
+	// already has beats a duplicate assumption the UI would otherwise have to
+	// make about which screen it is drawing.
+	Private bool `json:"private"`
+
 	// SplitStrips is the strip-splitting override (PLAN §12.3), always one of
 	// "auto", "never" or "always" — never empty, even though the stored value
 	// can be. Resolving "unset" to "auto" here rather than in the UI means the
@@ -616,10 +668,42 @@ type sourceView struct {
 	PendingHosts []pendingHost `json:"pendingHosts,omitempty"`
 }
 
+// sendSources answers MessageListSources with every source that is *not*
+// private — the normal, everyday list. See sendPrivateSources for its
+// counterpart, and buildSourceViews for why one function builds both.
 func (s *Service) sendSources(out Sender) error {
+	return send(out, appload.MessageSources, map[string]any{
+		"sources": s.buildSourceViews(false),
+	})
+}
+
+// sendPrivateSources answers MessageListPrivateSources with only the sources
+// marked private — the list the eye-icon button on the source screen reaches.
+func (s *Service) sendPrivateSources(out Sender) error {
+	return send(out, appload.MessagePrivateSources, map[string]any{
+		"sources": s.buildSourceViews(true),
+	})
+}
+
+// buildSourceViews renders the store's sources as sourceView rows, keeping
+// only those whose Private flag matches wantPrivate.
+//
+// This is the partition point for the normal source list: it is the one place
+// s.store.List() is turned into what a screen can draw, so sendSources and
+// sendPrivateSources cannot drift into showing the same source, or into one of
+// them forgetting to filter at all. newSearchAllPager (searchall.go) is the
+// combined search's own partition point, filtering the same store list on the
+// same predicate — the two are driven by theme.Source.IsPrivate and nothing
+// else, on purpose: one predicate, checked in two places, is how "never leaks
+// into the combined search" and "never appears in the normal list" are kept
+// from disagreeing with each other.
+func (s *Service) buildSourceViews(wantPrivate bool) []sourceView {
 	list := s.store.List()
 	views := make([]sourceView, 0, len(list))
 	for _, src := range list {
+		if src.IsPrivate() != wantPrivate {
+			continue
+		}
 		split := src.SplitStrips
 		if split == "" {
 			split = imageproc.SplitAuto.String()
@@ -627,6 +711,7 @@ func (s *Service) sendSources(out Sender) error {
 		v := sourceView{
 			ID: src.ID, Name: src.Name, BaseURL: src.BaseURL,
 			Theme: src.Theme, Lang: src.Lang, Enabled: src.IsEnabled(),
+			Private:     src.IsPrivate(),
 			SplitStrips: split,
 			Status:      "Not checked yet",
 			Proxy:       src.Proxy,
@@ -647,7 +732,18 @@ func (s *Service) sendSources(out Sender) error {
 		}
 		views = append(views, v)
 	}
-	return send(out, appload.MessageSources, map[string]any{"sources": views})
+	return views
+}
+
+// sendSourceListFor refreshes whichever of the two source lists src.ID
+// belongs to. It is what a per-source edit (proxy, hosts, rename, split mode)
+// replies with instead of sendSources outright: an edit made from the private
+// screen has to redraw that screen, not the normal one the source is not on.
+func (s *Service) sendSourceListFor(out Sender, sourceID string) error {
+	if src, ok := s.store.Get(sourceID); ok && src.IsPrivate() {
+		return s.sendPrivateSources(out)
+	}
+	return s.sendSources(out)
 }
 
 // setSourceProxy handles MessageSetSourceProxy: an empty proxy removes it,
@@ -665,7 +761,7 @@ func (s *Service) setSourceProxy(out Sender, sourceID, proxy string) error {
 		if err := s.store.ClearProxyAndRevoke(sourceID); err != nil {
 			return s.sendError(out, "not_found", plain(err))
 		}
-		return s.sendSources(out)
+		return s.sendSourceListFor(out, sourceID)
 	}
 	switch err := s.store.SetProxy(sourceID, proxy); {
 	case errors.Is(err, state.ErrBadProxy):
@@ -674,7 +770,7 @@ func (s *Service) setSourceProxy(out Sender, sourceID, proxy string) error {
 	case err != nil:
 		return s.sendError(out, "not_found", plain(err))
 	}
-	return s.sendSources(out)
+	return s.sendSourceListFor(out, sourceID)
 }
 
 // allowSourceHost handles MessageAllowSourceHost: the owner reviewing a
@@ -700,7 +796,7 @@ func (s *Service) allowSourceHost(out Sender, sourceID, host string) error {
 		return s.sendError(out, "not_found", plain(err))
 	}
 	s.pending.clearHost(sourceID, host)
-	return s.sendSources(out)
+	return s.sendSourceListFor(out, sourceID)
 }
 
 // revokeSourceHost handles MessageRevokeSourceHost: taking back a host that
@@ -710,7 +806,7 @@ func (s *Service) revokeSourceHost(out Sender, sourceID, host string) error {
 	if err := s.store.RevokeHost(sourceID, host); err != nil {
 		return s.sendError(out, "not_found", plain(err))
 	}
-	return s.sendSources(out)
+	return s.sendSourceListFor(out, sourceID)
 }
 
 // VerdictHeadline is the one-line form of a verdict, in plain language. PLAN §6

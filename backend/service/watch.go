@@ -83,10 +83,19 @@ const (
 )
 
 // watchListView turns the store's watches into rows, in stored order.
+//
+// A watch whose source is private is left out. state.Store.Watch already
+// refuses to create one, but a source can be marked private *after* a series
+// on it was watched, and this is the point that has to notice: it is the one
+// place every render of the ordinary Watching list goes through, exactly like
+// sendSources and newSearchAllPager are the one place each of their lists do.
 func (s *Service) watchListView() []watchView {
 	watches := s.store.Watches()
 	views := make([]watchView, 0, len(watches))
 	for _, w := range watches {
+		if src, ok := s.store.Get(w.SourceID); ok && src.IsPrivate() {
+			continue
+		}
 		views = append(views, s.viewOf(w, ""))
 	}
 	return views
@@ -276,8 +285,12 @@ func (s *Service) watchSeries(out Sender, sourceID, seriesID, title string) erro
 	seed := s.lastServedChapters(sourceID, seriesID)
 	w, err := s.store.Watch(sourceID, seriesID, title, seed, s.now())
 	if err != nil {
-		if errors.Is(err, state.ErrNotFound) {
+		switch {
+		case errors.Is(err, state.ErrNotFound):
 			return s.sendError(out, "not_found", "Quire has no source by that name any more.")
+		case errors.Is(err, state.ErrSourceIsPrivate):
+			return s.sendError(out, "source_is_private",
+				"A private source's series can't be watched — that would put it on the ordinary Watching list.")
 		}
 		return s.sendError(out, "not_watched", plain(err))
 	}
@@ -522,6 +535,17 @@ func (s *Service) checkWatched(ctx context.Context, out Sender, force bool, only
 			// A disabled source is one the user has switched off. Polling it
 			// anyway would be the app overruling them.
 			s.log.Debug("skipped a watched series on a disabled source",
+				"source", w.SourceID, "series", w.SeriesID)
+			continue
+		}
+		if src.IsPrivate() {
+			// The watch cannot appear anywhere (watchListView drops it), so
+			// checking it would only spend a request, and a failure would
+			// still reach maybeReprobe and its sendError — a banner naming
+			// the source on whatever screen happens to be open. See
+			// state.ErrSourceIsPrivate for why a watch like this can only
+			// exist if the source was marked private after being watched.
+			s.log.Debug("skipped a watched series on a private source",
 				"source", w.SourceID, "series", w.SeriesID)
 			continue
 		}

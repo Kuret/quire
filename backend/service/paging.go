@@ -192,5 +192,5 @@ func (s *Service) dropPagers() {
 	s.pagerMu.Lock()
 	defer s.pagerMu.Unlock()
 	s.pager, s.pagerKey = nil, pagerKey{}
-	s.searchAllPagerCur, s.searchAllQuery = nil, ""
+	s.searchAllPagerCur, s.searchAllQuery = nil, searchAllKey{}
 }

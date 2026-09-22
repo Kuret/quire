@@ -659,6 +659,46 @@ func TestRemovingASourceRemovesItsWatchedSeries(t *testing.T) {
 	}
 }
 
+// TestMarkingASourcePrivateDropsItsWatchFromTheOrdinaryList covers the case
+// state.Store.Watch's own guard cannot: a series watched *before* its source
+// was marked private. The watch survives in the store — unwatching it is
+// still the user's call, not something a privacy toggle should silently do —
+// but it must vanish from the ordinary Watching list the moment the source
+// does, or the badge and title on it are exactly the leak this feature exists
+// to prevent.
+func TestMarkingASourcePrivateDropsItsWatchFromTheOrdinaryList(t *testing.T) {
+	h := newWatchHarness(t, chaptersSeen())
+	h.openSeries()
+	h.watch()
+	if got := h.list(); len(got) != 1 {
+		t.Fatalf("watch list before marking private = %+v", got)
+	}
+
+	if err := h.store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+	h.forget()
+	handle(t, h.svc, h.rec, appload.MessageCheckWatched, `{}`)
+	// checkWatched skips a private source's watches outright, so no
+	// MessageWatchList push is guaranteed by this call; ask directly instead.
+	handle(t, h.svc, h.rec, appload.MessageListSources, `{}`)
+	h.rec.wait(t, appload.MessageSources)
+
+	if err := h.svc.FrontendAttached(h.rec); err != nil {
+		t.Fatal(err)
+	}
+	var env watchListMsg
+	if err := json.Unmarshal(h.rec.wait(t, appload.MessageWatchList), &env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Watched) != 0 {
+		t.Fatalf("watch list after marking the source private = %+v, want it dropped", env.Watched)
+	}
+	if got := h.store.Watches(); len(got) != 1 {
+		t.Fatalf("the watch itself was deleted rather than merely hidden: %+v", got)
+	}
+}
+
 // Watching from a screen the user is looking at must not announce the back
 // catalogue as new.
 func TestWatchingFromTheSeriesScreenStartsFromWhatIsOnIt(t *testing.T) {
