@@ -65,6 +65,16 @@ type searchAllGroup struct {
 	CoverURL string           `json:"coverUrl,omitempty"`
 	Matches  []searchAllMatch `json:"matches"`
 
+	// CoverSourceID and CoverSeriesID name the match the cover above actually
+	// came from — which is not necessarily Matches[0]. The cover is the
+	// best-ranked match that *has* one (see group()), so a request for it must
+	// be attributed to that match's own source and series, never the group's
+	// primary: a cover fetched under the wrong source is a cross-domain
+	// request the SSRF guard correctly refuses, because the URL genuinely does
+	// not belong to that source.
+	CoverSourceID string `json:"coverSourceId,omitempty"`
+	CoverSeriesID string `json:"coverSeriesId,omitempty"`
+
 	// Kind is "book" or "manga" when every source in this group agrees, and
 	// absent when they do not.
 	//
@@ -354,10 +364,12 @@ func (p *searchAllPager) group() []searchAllGroup {
 		// The cover is the best-ranked match that *has* one, not the best
 		// match's cover: a source that lists results without thumbnails would
 		// otherwise leave the group blank while four others had a picture.
-		cover := ""
+		cover, coverSourceID, coverSeriesID := "", "", ""
 		for _, m := range byRelevance(matches) {
 			if m.CoverURL != "" {
 				cover = m.CoverURL
+				coverSourceID = m.SourceID
+				coverSeriesID = m.SeriesID
 				break
 			}
 		}
@@ -371,11 +383,13 @@ func (p *searchAllPager) group() []searchAllGroup {
 		}
 
 		g := searchAllGroup{
-			Key:      key,
-			Title:    matches[best].title,
-			CoverURL: cover,
-			Authors:  authors,
-			Kind:     agreedKind(matches),
+			Key:           key,
+			Title:         matches[best].title,
+			CoverURL:      cover,
+			CoverSourceID: coverSourceID,
+			CoverSeriesID: coverSeriesID,
+			Authors:       authors,
+			Kind:          agreedKind(matches),
 			// Within a group the order is the user's source order: the list of
 			// sources under a title should read the same way every time, and
 			// the same way as the source list itself.

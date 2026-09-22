@@ -158,6 +158,22 @@ Window {
             {"sourceId": "src-b", "sourceName": "Other Reader",
              "seriesId": "/series/orphan", "coverUrl": "https://example.invalid/o.jpg"}]})
 
+    // A group whose cover came from a *different* source than the one it
+    // opens on — matches[0] (src-a) has no cover, so the group's cover is
+    // src-b's. The backend names that ownership alongside the URL
+    // (searchall.go group()); a fixture that omitted it would be silently
+    // testing the fallback path instead of the fix.
+    property var mixedOwnerGroup: ({
+        "key": "mixed owner", "title": "Mixed Owner",
+        "coverUrl": "https://beta.invalid/cover.jpg",
+        "coverSourceId": "src-b", "coverSeriesId": "/series/beta-owns-this/",
+        "matches": [
+            {"sourceId": "src-a", "sourceName": "Example Reader",
+             "seriesId": "/manga/mixed/"},
+            {"sourceId": "src-b", "sourceName": "Other Reader",
+             "seriesId": "/series/beta-owns-this/",
+             "coverUrl": "https://beta.invalid/cover.jpg"}]})
+
     // A book, from a Shelfmark source. Its rows are releases — the files it is
     // available as — and the only thing on the wire that says so is `kind`
     // (ui/Kinds.js): the title, the cover and the sources all arrive through
@@ -686,6 +702,33 @@ Window {
                  searchAll.failedSources, "No answer from Third Reader")
         win.want("and is not an error", win.app.lastError, "")
         win.want("nor does it empty the page", searchAll.model.count, 2)
+
+        // ---- a cover owned by a source other than the one a group opens on --
+        //
+        // This is the regression: a group's cover can come from a source that
+        // is not the one the group opens on (mixedOwnerGroup). The request for
+        // it must go out under the cover's own source, and the reply for that
+        // source's fetch must land on this row even though the row's own
+        // seriesId names a different series.
+        win.deliver(Msg.SearchAllResults, {
+            "query": "mixed", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [win.mixedOwnerGroup], "sourceErrors": []})
+        win.want("the row opens on its first match",
+                 searchAll.model.get(0).sourceId, "src-a")
+        backend.forget()
+        searchAll.requestVisibleCovers()
+        win.want("the cover is asked for once", backend.countOf(Msg.RequestCover), 1)
+        win.want("under the cover's own source, not the row's",
+                 backend.bodyOf(Msg.RequestCover).covers[0].sourceId, "src-b")
+        win.want("and that source's own series id",
+                 backend.bodyOf(Msg.RequestCover).covers[0].seriesId,
+                 "/series/beta-owns-this/")
+
+        win.deliver(Msg.CoverReady, {"sourceId": "src-b",
+                                     "seriesId": "/series/beta-owns-this/",
+                                     "path": "/tmp/mixed.png"})
+        win.want("the reply lands on the row despite the row's own seriesId differing",
+                 searchAll.model.get(0).coverPath, "file:///tmp/mixed.png")
 
         // **An empty query sends nothing.** The screen has the first guard and
         // this is the second, here because this is where the message is

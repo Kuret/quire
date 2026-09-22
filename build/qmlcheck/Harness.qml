@@ -3120,6 +3120,32 @@ Window {
         win.want("a group with no cover of its own borrows its first match's",
                  Grouping.groupRow(orphanGroup).coverUrl, "https://example.invalid/o.jpg")
 
+        // The bug this exists to catch: a cover attributed to the group's
+        // opening match rather than to the match it actually came from is a
+        // cross-domain fetch under a source that never served that URL, and
+        // the backend's SSRF guard correctly refuses it. The backend names the
+        // cover's own source and series alongside the URL (searchall.go
+        // group()); this is that pairing surviving groupRow unmixed with
+        // sourceId/seriesId, which still name the *opening* match.
+        var mixedOwnerGroup = {
+            "key": "mixed owner", "title": "Mixed Owner",
+            "coverUrl": "https://beta.invalid/cover.jpg",
+            "coverSourceId": "src-b", "coverSeriesId": "/series/beta-owns-this/",
+            "matches": [
+                {"sourceId": "src-a", "sourceName": "Example Reader",
+                 "seriesId": "/manga/mixed/"},
+                {"sourceId": "src-b", "sourceName": "Other Reader",
+                 "seriesId": "/series/beta-owns-this/",
+                 "coverUrl": "https://beta.invalid/cover.jpg"}]}
+        var mixedRow = Grouping.groupRow(mixedOwnerGroup)
+        win.want("a group still opens on its first match's source",
+                 mixedRow.sourceId, "src-a")
+        win.want("and that match's series", mixedRow.seriesId, "/manga/mixed/")
+        win.want("but its cover is attributed to the cover's own source",
+                 mixedRow.coverSourceId, "src-b")
+        win.want("with that source's own series id",
+                 mixedRow.coverSeriesId, "/series/beta-owns-this/")
+
         // A source that did not answer. Not an error: it contributed no rows
         // while the others filled the screen.
         win.want("every source answering says nothing", Grouping.failedLine([]), "")
@@ -3243,6 +3269,30 @@ Window {
         win.want("each named with the source the group opens on",
                  win.searchAllCovers[0].sourceId + "," + win.searchAllCovers[1].sourceId,
                  "src-a,src-b")
+
+        // The bug this exists to catch, end to end: a group whose cover came
+        // from a source *other than* the one it opens on must have its cover
+        // requested under that cover's own source and series — not the row's
+        // sourceId/seriesId, which name the opening match and would ask the
+        // wrong source's SSRF guard to fetch a URL it never served.
+        Grouping.fill(searchAllModel, {"groups": [mixedOwnerGroup], "sourceErrors": []}, Kinds.ALL)
+        saRows.forceLayout()
+        win.searchAllCoverAsks = 0
+        win.searchAllCovers = []
+        searchAll.requestVisibleCovers()
+        win.want("a mixed-owner group still asks for one cover",
+                 win.searchAllCovers.length, 1)
+        win.want("named with the cover's own source, not the opening match's",
+                 win.searchAllCovers[0].sourceId, "src-b")
+        win.want("and the cover's own series id",
+                 win.searchAllCovers[0].seriesId, "/series/beta-owns-this/")
+        win.want("the url is still the group's cover",
+                 win.searchAllCovers[0].url, "https://beta.invalid/cover.jpg")
+
+        // Restored, because everything after this in the list-view section
+        // assumes the two-group page from before.
+        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []}, Kinds.ALL)
+        saRows.forceLayout()
 
         // The thumbnail, and the placeholder for a group whose cover has not
         // landed -- which is every group here, since nothing has fetched one.

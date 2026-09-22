@@ -791,10 +791,21 @@ Rectangle {
 
     // writeCover puts the path on every row of one model that is the series,
     // and reports how many it wrote.
+    //
+    // A combined-search row's `seriesId` is the match it opens on, which is
+    // not always the match its cover came from (SearchAll.qml's
+    // requestVisibleCovers, Grouping.js groupRow) — so the reply this is
+    // matching against is keyed by `coverSeriesId` when the row has one.
+    // Every other model's rows carry no such role, and reading an undefined
+    // one is simply not equal to msg.seriesId, so this costs those rows
+    // nothing.
     function writeCover(rows, msg) {
         var n = 0
         for (var i = 0; i < rows.count; ++i) {
-            if (rows.get(i).seriesId !== msg.seriesId)
+            var row = rows.get(i)
+            var owner = row.coverSeriesId !== undefined && row.coverSeriesId !== ""
+                      ? row.coverSeriesId : row.seriesId
+            if (owner !== msg.seriesId)
                 continue
             rows.setProperty(i, "coverPath", "file://" + msg.path)
             n++

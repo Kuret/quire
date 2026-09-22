@@ -133,6 +133,15 @@ function badgeFor(group) {
 // first, and so the one a tap opens. The rest of the matches are not in the
 // row: they are what the series screen's switcher is built from, and a nested
 // list inside a ListModel role is a second model to keep in step for no gain.
+//
+// `coverSourceId` and `coverSeriesId` are a *different* match: the backend
+// names, alongside the cover URL, which match the picture actually came from
+// (searchAllGroup.CoverSourceID/CoverSeriesID) — the best-ranked match that
+// *has* a cover, which is not always matches[0]. A cover request must be
+// attributed to its own source, never the group's primary one, or it is a
+// cross-domain request the backend's SSRF guard correctly refuses. Falling
+// back to `first` only when the backend sent none (an older reply, or no
+// cover at all) keeps this row openable exactly as before.
 function groupRow(group) {
     var matches = matchesOf(group)
     var first = matches.length > 0 ? matches[0] : {}
@@ -149,6 +158,14 @@ function groupRow(group) {
         "coverPath": "",
         "sourceId": first.sourceId ? first.sourceId : "",
         "seriesId": first.seriesId ? first.seriesId : "",
+        // The cover's own owner — see the function comment above. Falls back
+        // to `first` only so a row still resolves to *some* source when the
+        // backend named none, the same tolerance the coverUrl fallback above
+        // has always had.
+        "coverSourceId": group && group.coverSourceId ? group.coverSourceId
+                                            : (first.sourceId ? first.sourceId : ""),
+        "coverSeriesId": group && group.coverSeriesId ? group.coverSeriesId
+                                            : (first.seriesId ? first.seriesId : ""),
         "sources": subtitleLine(group),
         "sourceCount": matches.length,
         // Authors alone, for the tile view's subtitle (ui/CoverGrid.qml),

@@ -148,11 +148,13 @@ type searchAllReply struct {
 	TotalPages int    `json:"totalPages"`
 	HasMore    bool   `json:"hasMore"`
 	Groups     []struct {
-		Key      string   `json:"key"`
-		Title    string   `json:"title"`
-		CoverURL string   `json:"coverUrl"`
-		Authors  []string `json:"authors"`
-		Matches  []struct {
+		Key           string   `json:"key"`
+		Title         string   `json:"title"`
+		CoverURL      string   `json:"coverUrl"`
+		CoverSourceID string   `json:"coverSourceId"`
+		CoverSeriesID string   `json:"coverSeriesId"`
+		Authors       []string `json:"authors"`
+		Matches       []struct {
 			SourceID   string `json:"sourceId"`
 			SourceName string `json:"sourceName"`
 			SeriesID   string `json:"seriesId"`
@@ -337,6 +339,37 @@ func TestAGroupTakesTheBestRankedCoverThatExists(t *testing.T) {
 	}
 	if reply.Groups[0].CoverURL != "https://cdn.invalid/b1.jpg" {
 		t.Errorf("cover = %q, want the only match that has one", reply.Groups[0].CoverURL)
+	}
+}
+
+// The group's cover is attributed to the match it actually came from, not to
+// the group's best (opening) match. This is the regression the SSRF guard's
+// refusals traced back to: a cover fetched under the wrong source is a
+// cross-domain request for a URL that source never served, which the guard
+// correctly refuses. "alpha" is the best-ranked (rank 1, first in source
+// order) and has no cover; "beta" ranks worse but is the one whose cover the
+// group carries, so a fetch for that cover must be attributed to beta, with
+// beta's own series id — never alpha's.
+func TestGroupCoverIsAttributedToTheMatchItCameFrom(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "alpha", "beta")
+	th.pages["alpha"] = [][]theme.SeriesStub{{{ID: "a1", Title: "Vagabond"}}}
+	th.pages["beta"] = [][]theme.SeriesStub{{{ID: "b1", Title: "Vagabond", CoverURL: "https://cdn.invalid/b1.jpg"}}}
+
+	svc.runSearchAll(context.Background(), out, "vagabond", 1, 10)
+	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
+
+	if len(reply.Groups) != 1 {
+		t.Fatalf("got %d groups, want one merged", len(reply.Groups))
+	}
+	g := reply.Groups[0]
+	if g.Matches[0].SourceID != "alpha" {
+		t.Fatalf("test setup: matches[0] = %q, want alpha to be the best (opening) match", g.Matches[0].SourceID)
+	}
+	if g.CoverSourceID != "beta" {
+		t.Errorf("coverSourceId = %q, want %q (the cover's own source, not the opening match's)", g.CoverSourceID, "beta")
+	}
+	if g.CoverSeriesID != "b1" {
+		t.Errorf("coverSeriesId = %q, want %q (beta's own series id for that cover)", g.CoverSeriesID, "b1")
 	}
 }
 

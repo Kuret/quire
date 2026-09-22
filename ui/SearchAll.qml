@@ -220,12 +220,19 @@ Item {
     // The batch is sent even when it comes out empty, so there is one path and
     // it always reports what the page wants — and an empty batch supersedes the
     // last one, which is what drops fetches for a page turned away from.
+    //
+    // **The cover is requested under its own source, not the row's.**
+    // row.sourceId/seriesId name the match a tap opens (the group's primary),
+    // which is not always where row.coverUrl came from — a group's cover is
+    // the best-ranked match that *has* one (Grouping.js groupRow). Sending the
+    // row's own source for a URL that belongs to a different one is exactly
+    // the cross-domain request the backend's SSRF guard exists to refuse.
     function requestVisibleCovers() {
         var wanted = []
         for (var i = 0; i < screen.rowCount; ++i) {
             var row = screen.model.get(i)
             if (row.coverUrl && row.coverUrl.length > 0 && row.coverPath.length === 0)
-                wanted.push({"sourceId": row.sourceId, "seriesId": row.seriesId,
+                wanted.push({"sourceId": row.coverSourceId, "seriesId": row.coverSeriesId,
                              "url": row.coverUrl})
         }
         screen.coversRequested(wanted)
