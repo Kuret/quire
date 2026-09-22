@@ -192,6 +192,73 @@ type Policy struct {
 
 	// RateLimit narrows the global caps. It can never widen them.
 	RateLimit *RateLimit
+
+	// Headers are static request headers this source's theme attaches to
+	// every request made under this Policy — a client identifier an API
+	// mandates, in practice, and the only such case today (PLAN-adjacent,
+	// decided when the globalcomix theme could not be registered without
+	// it). Most sources have none, and nil is the ordinary value.
+	//
+	// The scope these headers reach is exactly the scope this Policy already
+	// grants a request: fetch.Client.do runs Guard.CheckURL — BaseURL's
+	// registrable domain plus AllowedHosts, then the address rules — before
+	// a request is ever built, so a header set here can only ever land on a
+	// host this same Policy already let the request reach. A cover URL or a
+	// redirect target that failed that check never gets built into a
+	// request at all, headers or not.
+	//
+	// **It cannot be used to override a header the fetch layer owns.**
+	// User-Agent, Referer and Cookie are dropped from Headers wherever it is
+	// applied (see reservedRequestHeaders) — an honest User-Agent, a
+	// truthful Referer (fetch.Referrer, never a theme's invention) and the
+	// Cookies field below are the fetch layer's to set, and PLAN §7.6 is the
+	// reason a theme does not get a second way to write any of them.
+	//
+	// It is not a way to imitate a browser or pass a challenge: it exists to
+	// let a theme state one static, public fact its API's own client sends
+	// on every request, not to negotiate or fabricate anything per request.
+	Headers http.Header
+
+	// Cookies, when non-nil, is this source's own cookie jar: cookies its
+	// server issued are attached to requests made under this Policy and
+	// updated from the responses. See CookieJar for the scope (one jar per
+	// source, never shared, and per-host within the jar) and the lifetime
+	// (in memory only, for as long as the owning Source value lives).
+	//
+	// Nil, the ordinary value, means no jar: requests carry no Cookie header
+	// and nothing here reads or stores one from a response, which is every
+	// theme's behaviour before this field existed.
+	Cookies *CookieJar
+}
+
+// reservedRequestHeaders are header names Policy.Headers can never set, on
+// every request they are applied to, regardless of what a theme supplies.
+// Every one of them is a fact the fetch layer itself is responsible for —
+// an honest User-Agent (PLAN §7.6), a Referer that only ever names a page
+// actually fetched (fetch.Referrer), and a session cookie that only ever
+// arrives through Policy.Cookies rather than as a header a theme wrote by
+// hand. Letting any of the three through here would be exactly the kind of
+// second, ungoverned path §7.6 exists to close off.
+var reservedRequestHeaders = map[string]bool{
+	"User-Agent": true,
+	"Referer":    true,
+	"Cookie":     true,
+}
+
+// applySourceHeaders adds hdr's headers to req, silently dropping anything in
+// reservedRequestHeaders. It is called before the fetch layer sets its own
+// headers on req, but that ordering is not the guarantee — the filtering is:
+// a reserved name is refused however this function is later called from, not
+// merely overwritten by whichever call happens to come after it.
+func applySourceHeaders(req *http.Request, hdr http.Header) {
+	for k, vs := range hdr {
+		if reservedRequestHeaders[http.CanonicalHeaderKey(k)] {
+			continue
+		}
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
 }
 
 // Response is a fully read HTTP response. Bodies are small (HTML pages, JSON
@@ -658,6 +725,33 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 	return last, nil
 }
 
+// httpClientFor returns the *http.Client this request should use: the
+// ordinary or slow shared client, unless p carries a per-source CookieJar, in
+// which case it hands back a shallow copy with that jar attached instead.
+//
+// The copy shares the shared client's Transport, Timeout and CheckRedirect —
+// nothing about connection pooling, the redirect guard or the timeout budget
+// changes — and differs only in Jar. That is deliberate: net/http's own
+// client already knows how to consult a Jar for the initial request *and*
+// for every redirect hop it follows internally, which is exactly the
+// behaviour a multi-hop reading-grant flow needs and which reimplementing by
+// hand around a single fetch.Response would not get right. Because Jar is
+// set only on this request-local copy, no other request — of this source or
+// any other — ever sees it: two sources sharing a theme still get two
+// separate *http.Client values here, one per Policy.Cookies.
+func (c *Client) httpClientFor(p *Policy, slow bool) *http.Client {
+	base := c.hc
+	if slow {
+		base = c.slowHC
+	}
+	if p == nil || p.Cookies == nil {
+		return base
+	}
+	withJar := *base
+	withJar.Jar = p.Cookies
+	return &withJar
+}
+
 func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.URL, body []byte, hdr http.Header, ro requestOptions) (*Response, error) {
 	ctx = context.WithValue(ctx, policyKey{}, p)
 	var rdr io.Reader
@@ -667,6 +761,20 @@ func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.U
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), rdr)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: build request: %w", err)
+	}
+	if p != nil {
+		// Applied first, before the per-call header (in practice, only ever
+		// Referer or a POST's Content-Type) and before User-Agent below.
+		// Ordering is not what makes any of the three unforgeable, though:
+		// User-Agent is set unconditionally a few lines down regardless of
+		// what applySourceHeaders let through, so it is doubly defended.
+		// Referer and Cookie have no such unconditional re-set — hdr carries
+		// Referer only when a caller actually has one (fetch.Referrer), and
+		// there is no Cookie-setting line here at all (Policy.Cookies is a
+		// jar consulted by httpClientFor, never a header). For those two,
+		// reservedRequestHeaders dropping them inside applySourceHeaders is
+		// the entire guarantee, not a backstop to something else.
+		applySourceHeaders(req, p.Headers)
 	}
 	for k, vs := range hdr {
 		for _, v := range vs {
@@ -679,10 +787,7 @@ func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.U
 		req.ContentLength = int64(len(body))
 	}
 
-	hc := c.hc
-	if ro.slow {
-		hc = c.slowHC
-	}
+	hc := c.httpClientFor(p, ro.slow)
 	maxBody := c.maxBody
 	if ro.maxBody > 0 {
 		maxBody = ro.maxBody

@@ -11,10 +11,12 @@ package theme
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rickl/quire/backend/fetch"
@@ -223,6 +225,85 @@ func CoverRefererFrom(raw string) (fetch.Referrer, error) {
 		return fetch.Referrer{}, err
 	}
 	return ref, nil
+}
+
+// SourceHeaders is implemented by a theme whose API requires a static
+// request header the ordinary Fetcher calls have no way to express — a
+// public client identifier the API's own shipped client sends on every
+// request, discovered the same way PageReferrer's cases were: by reading
+// what the site's own code does, not by guessing at evasion.
+//
+// It is a side interface for the same reason PageReferrer is: most themes
+// need nothing here, and returning nil is a fine, ordinary answer.
+//
+// # The contract
+//
+// The returned headers are attached to every request PolicyFor's Policy is
+// used for, and reach only the hosts that Policy already permits: BaseURL's
+// registrable domain and the source's declared AllowedHosts, because
+// fetch.Guard.CheckURL enforces exactly that boundary on every request
+// before it is built, headers or not (see fetch.Policy.Headers). A theme
+// cannot use this to send a header to a content-supplied host — a cover URL
+// on a different domain, an untrusted redirect target — because such a
+// request never reaches this Policy's fetch layer in the first place.
+//
+// It also cannot be used to forge User-Agent, Referer or Cookie: those are
+// dropped wherever these headers are applied (fetch.reservedRequestHeaders),
+// so an implementation that tries gets silently overridden rather than
+// honoured. That is deliberate — PLAN §7.6 forbids a spoofed identity, and a
+// second path to write the same three headers the fetch layer already owns
+// would be exactly that.
+//
+// This exists to let a theme state one static, public fact its site's own
+// client always sends — not to negotiate anything per request, imitate a
+// browser or defeat a challenge. A theme reaching for this to get past a
+// block is using it for the one thing it is not for.
+type SourceHeaders interface {
+	// SourceHeaders returns the static headers to attach to this source's
+	// own requests, or nil for none.
+	SourceHeaders(s *Source) http.Header
+}
+
+// CookieUser is implemented by a theme whose source needs to carry a session
+// cookie the source's own server issued, back to that same server — in
+// practice, a reading grant that answers with a `Set-Cookie` the page-image
+// requests that follow must present.
+//
+// It is a side interface for the same reason SourceHeaders is: most themes
+// have no session of this kind, and false is a fine, ordinary answer.
+// UsesCookies takes s rather than being a bare marker so a theme could, in
+// principle, want a jar for some sources and not others — no theme in this
+// package needs that today, but the parallel with SourceHeaders(s) is worth
+// keeping rather than inventing a second shape.
+//
+// See fetch.CookieJar for the jar's scope (one per source, never shared, and
+// per-host within the jar) and lifetime (in memory only, for as long as the
+// owning Source value lives). PolicyFor is the only thing that creates one.
+type CookieUser interface {
+	UsesCookies(s *Source) bool
+}
+
+// PolicyFor builds s's Policy and layers on the two opt-in capabilities th
+// declares: SourceHeaders and CookieUser. It is what a theme should call
+// instead of s.Policy() directly whenever it implements either — every
+// theme that implements neither gets exactly s.Policy()'s Policy back,
+// unchanged, so this is invisible to every theme in this package today.
+//
+// It is the single place both side interfaces are consulted, for the same
+// reason PageRefererFor is: one answer, asked the same way regardless of
+// call site.
+func PolicyFor(th Theme, s *Source) (*fetch.Policy, error) {
+	p, err := s.Policy()
+	if err != nil {
+		return nil, err
+	}
+	if hs, ok := th.(SourceHeaders); ok {
+		p.Headers = hs.SourceHeaders(s)
+	}
+	if cu, ok := th.(CookieUser); ok && cu.UsesCookies(s) {
+		p.Cookies = s.cookieJar()
+	}
+	return p, nil
 }
 
 // Fetcher is the slice of fetch.Client a theme uses. Themes depend on this
@@ -490,6 +571,42 @@ type Source struct {
 	// (PLAN §6 M7) so a site that switched themes is reported as such rather
 	// than as "no results found".
 	LastProbe *ProbeResult `json:"lastProbe,omitempty"`
+
+	// cookies is this source's cookie jar, for a theme that implements
+	// CookieUser. It has no JSON tag on purpose: fetch.CookieJar's whole
+	// point is that it never outlives the in-memory Source that owns it, so
+	// serialising it would be a bug, not a feature.
+	//
+	// It is a plain pointer rather than something that carries its own lock
+	// (a sync.Mutex field, a sync.Once, an atomic.Pointer) because
+	// state.copySource copies a *Source by value (out := *src) to hand
+	// callers a safely mutable copy, and go vet's copylocks check would
+	// refuse a Source that embedded one. cookieJarMu below guards the one
+	// moment that matters — the lazy creation — instead, and the copy this
+	// produces is exactly the one wanted: both the original and the copy
+	// describe the same source, so sharing the same jar pointer between them
+	// is correct, not a leak. Two different sources never share a field
+	// value, because each has its own Source and therefore its own pointer.
+	cookies *fetch.CookieJar
+}
+
+// cookieJarMu guards the lazy creation of every Source's cookies field. One
+// mutex for every source rather than one per source, because the section it
+// guards is a handful of instructions that runs at most once per source's
+// lifetime — contention here is not a real cost, and it is what lets
+// Source stay copyable by value elsewhere (see the field's comment).
+var cookieJarMu sync.Mutex
+
+// cookieJar returns s's cookie jar, creating it on first use. Only PolicyFor
+// calls this; nothing else in this package or any theme needs to reach a
+// Source's jar directly.
+func (s *Source) cookieJar() *fetch.CookieJar {
+	cookieJarMu.Lock()
+	defer cookieJarMu.Unlock()
+	if s.cookies == nil {
+		s.cookies = fetch.NewCookieJar()
+	}
+	return s.cookies
 }
 
 // SelfHosted is a user's confirmation that a source runs on their own network.
