@@ -1148,6 +1148,13 @@ type volumeRow struct {
 	// chapters are on the tablet as separate per-chapter files is *not* that
 	// document, and the row goes on offering the volume.
 	DocumentUUID string `json:"documentUuid,omitempty"`
+
+	// Saved is true when every chapter of the volume is saved in Quire. There
+	// is no PDF grouping them the way DocumentUUID's library record does, so
+	// "the volume is saved" can only ever mean "each of its chapters is" —
+	// checked one at a time rather than looked up as one thing, because one
+	// thing is not what a Quire-saved volume is.
+	Saved bool `json:"saved"`
 }
 
 // volumeRows is the chapter screen's second view, or nil when there is none.
@@ -1155,7 +1162,7 @@ type volumeRow struct {
 // nil rather than an empty slice, and decided here rather than in QML, because
 // the rule is about the data: see volumesAvailable.
 func volumeRows(seriesTitle string, chapters []theme.Chapter,
-	stored map[string]library.Record) []volumeRow {
+	stored map[string]library.Record, saved map[string]bool) []volumeRow {
 
 	if !volumesAvailable(chapters) {
 		return nil
@@ -1191,6 +1198,7 @@ func volumeRows(seriesTitle string, chapters []theme.Chapter,
 			r.Detail = fmt.Sprintf("%d chapters, %s to %s", n, first, last)
 		}
 		r.DocumentUUID = volumeDocument(p, stored)
+		r.Saved = allChaptersSaved(p, saved)
 		rows = append(rows, r)
 	}
 	return rows
@@ -1227,6 +1235,21 @@ func volumeDocument(p volumePlan, stored map[string]library.Record) string {
 		}
 	}
 	return uuid
+}
+
+// allChaptersSaved reports whether every chapter of a volume plan is saved in
+// Quire. An empty volume is never "saved" — there is nothing there to have
+// saved.
+func allChaptersSaved(p volumePlan, saved map[string]bool) bool {
+	if len(p.Chapters) == 0 {
+		return false
+	}
+	for _, c := range p.Chapters {
+		if !saved[c.ID] {
+			return false
+		}
+	}
+	return true
 }
 
 // legacyGrouping redoes the grouping **the way it was done before 2026-09-16**,

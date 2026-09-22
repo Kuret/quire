@@ -1265,12 +1265,21 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		// indistinguishable from one never fetched.
 		DocumentUUID string `json:"documentUuid,omitempty"`
 		VolumeLabel  string `json:"volumeLabel,omitempty"`
+
+		// Saved is true when this chapter is saved in Quire — independently
+		// of DocumentUUID, since a chapter can be both saved and in the
+		// library at once, each an independent copy (see download.go's
+		// runDownload). It is what turns the row into [Delete] [Read] rather
+		// than [Try] [Download] on the chapter list.
+		Saved bool `json:"saved"`
 	}
 	stored := s.storedVolumes(sourceID, seriesID, series.Title, chapters)
+	saved := s.storedSaved(sourceID, seriesID)
 
 	rows := make([]chapterRow, 0, len(chapters))
 	for _, c := range chapters {
-		r := chapterRow{ID: c.ID, Title: c.Title, Number: c.Number, Scanlator: c.Scanlator}
+		r := chapterRow{ID: c.ID, Title: c.Title, Number: c.Number, Scanlator: c.Scanlator,
+			Saved: saved[c.ID]}
 		if !c.Published.IsZero() {
 			r.Published = c.Published.UTC().Format("2006-01-02")
 		}
@@ -1297,7 +1306,12 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		"kind":     kindOf(th),
 		"series":   series,
 		"chapters": rows,
-		"volumes":  volumeRows(series.Title, chapters, stored),
+		"volumes":  volumeRows(series.Title, chapters, stored, saved),
+		// Private says whether this source's chapters may ever go to the
+		// reMarkable library, so the reader overlay and the chapter row can
+		// hide "Send to library" without a round trip to find out — see
+		// PrivateSourceLibraryRefusal.
+		"private": src.IsPrivate(),
 	})
 
 	// PLAN §12.2. Serving the chapter list is the one moment Quire can honestly

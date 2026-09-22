@@ -149,3 +149,20 @@ func (s *Service) storedVolumes(sourceID, seriesID, seriesTitle string,
 	}
 	return out
 }
+
+// storedSaved is which of a series' chapters are saved in Quire, keyed by
+// chapter id.
+//
+// Unlike storedVolumes there is no legacy grouping to fall back to: a
+// shelf.Record is keyed by chapter from the day the feature existed, so there
+// is no record written any other way to reconcile.
+func (s *Service) storedSaved(sourceID, seriesID string) map[string]bool {
+	out := map[string]bool{}
+	if s.shelfStore == nil {
+		return out
+	}
+	for _, rec := range s.shelfStore.ForSeries(sourceID, seriesID) {
+		out[rec.Chapter] = true
+	}
+	return out
+}
