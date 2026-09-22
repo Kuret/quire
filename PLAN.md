@@ -660,6 +660,16 @@ message naming what was tried.
 
 ### M4 — Download and PDF assembly
 
+> **Superseded as the default, 2026-09-22 — see §12.6 "Saved in Quire".**
+> Everything below this box is still exactly how a comic or manga chapter is
+> fetched and, when asked for, turned into a PDF — but *turning it into a PDF
+> and uploading it is no longer what an ordinary download does*. By default a
+> download's page images land in Quire's own storage and are read in Quire's
+> own reader; assembling a PDF and uploading it to the reMarkable library
+> happens only for an explicit **"Send to library"**, which is this
+> milestone's pipeline, unchanged. Everything from "Assemble with `pdfcpu`"
+> onward is the library path's description, not the default one's.
+
 - Queue with bounded concurrency; start around 6 concurrent page fetches and
   measure.
 - Resize each page to the panel's native resolution (verify: assumed
@@ -792,6 +802,13 @@ for the page count.
 ---
 
 ### M5 — Library integration
+
+> **Now the opt-in path, 2026-09-22 — see §12.6.** This milestone describes
+> what happens when a download's destination is `"library"` — reached by an
+> explicit **"Send to library"** action — or when the download is a book
+> (`theme.FileTheme`, always the library: Quire's own reader is image-only).
+> The default destination for a comic or manga chapter is Quire's own storage,
+> which never touches any of this.
 
 **M0.5 settled this: use the upload endpoint.** Two facts from §11 Q1/Q1b make
 it the clear choice, and both must be implemented:
@@ -1108,6 +1125,15 @@ persisted.
 ---
 
 ### M6 — Native reader handoff
+
+> **Only half the story since 2026-09-22 — see §12.6.** This milestone is the
+> reader handoff for a document already **in the reMarkable library** —
+> reached today only by an explicit "Send to library", or by a book. A
+> chapter saved in Quire's own storage (the default for a comic or manga
+> download) is never handed off to xochitl at all: it opens in Quire's own
+> reader (`ui/TryReader.qml`'s `saved` mode) via `OpenSaved`/`SavedOpened`,
+> and Quire remembers the reading position itself — the one kind of read this
+> milestone's own reader never has to, because xochitl remembers it instead.
 
 > ## ✅ PROVEN ON HARDWARE 2026-09-15 — **M6 needs no `.qmd` at all.**
 >
@@ -3116,3 +3142,138 @@ than reinvented.
   runs without anyone asking, against folders nobody mentioned, on a surface
   where the wrong argument is accepted and ignored. **If you are reading this
   and about to add one because the gap looks like an oversight: it is not.**
+
+### 12.6 Saved in Quire — comics default to Quire's own storage, 2026-09-22
+
+**Why.** Every download used to become a PDF uploaded into xochitl's library:
+folder creation via `Library.createCollection` (which does not exist — see §6
+M5's "no way to create a folder"; the sort pass asks the frontend to make one
+instead), placement in Books/Comics, tidy-up of empty folders, and a delete
+that can only go by way of the Trash. All of that exists because the *reader*
+used to be xochitl's own. It no longer has to be: Quire has had its own reader
+since Try (`ui/TryReader.qml`, previously used only for a streaming preview —
+see `backend/service/tryreader.go`'s package comment), and once a reader
+exists that does not need any of that machinery, defaulting every download
+into it is less code and less to go wrong, not more of either.
+
+**The decision:**
+
+- **Comics and manga downloads are saved in Quire's own storage by default**
+  and read in Quire's own reader. No PDF, no upload, no folder, no library
+  record.
+- **"Send to library" stays available** as an explicit action — the old
+  behaviour, PDF and upload and sort — for when the user wants xochitl's
+  reading position, pen annotations and cloud sync, or wants the file off the
+  device and onto reMarkable's own sync. Never offered, and never reachable,
+  for a **private** source (`theme.Source.IsPrivate`): the refusal is in the
+  backend (`PrivateSourceLibraryRefusal`), not only in what the UI offers, so a
+  replayed message or an older frontend cannot reach it either.
+- **Books are unchanged.** A `theme.FileTheme` source (Shelfmark epubs, and
+  anything like it) always goes to the library, whatever the request's
+  `destination` says: Quire's reader is image-only, and a book is not images —
+  see `backend/service/filedownload.go`'s own package comment, which predates
+  this and needed no change.
+- **A chapter can be both saved and in the library.** Sending a saved chapter
+  to the library does not remove the saved copy; the two are independent from
+  that point on, each deletable on its own.
+
+**The wire contract:** `EnqueueDownload`'s request gains `destination`,
+`"quire"` or `"library"`, empty meaning `"quire"` — so an older frontend that
+has never heard of the field keeps landing where the new default says to, and
+a value neither side named is never read as "upload it" (the one destination a
+private source must never reach silently). `DownloadProgress` echoes the
+*resolved* destination and carries `saved: true` on a quire download's `done`.
+Five new message types, 91–95 (`backend/appload/messages.go`,
+`TestMessageTypeValues`): `OpenSaved`/`SavedOpened` (open a saved chapter —
+every page path handed over at once, since unlike Try everything is already on
+disk, so there is no `TryPageRequest` traffic for it), `SavePosition` (no
+reply — the reader already knows what page it sent), and
+`DeleteSaved`/`SavedDeleted` (the same ask-then-act shape as
+`DeleteDownload`/`DeleteConfirm`, except deleting is `os.RemoveAll` outright:
+there is no xochitl document here, so there is no Trash to put it in).
+
+**Storage layout.** `<dataDir>/saved`, a sibling of `<dataDir>/downloads` and
+`<dataDir>/try`, laid out exactly the way the download cache is —
+`safeSegment(sourceID)/safeSegment(seriesID)/download.ChapterDir(...)` — using
+the *same* `download.Queue` to fetch into it. That identity is deliberate and
+is what makes "Send to library" cheap: since a saved chapter's page files are,
+byte for byte, exactly what an ordinary download of that chapter would
+produce, sending it to the library only has to hard-link (falling back to a
+copy) those files into the download cache's matching chapter directory before
+running an ordinary download — the queue's own skip-existing resume then
+fetches nothing over the network. A new package, `backend/shelf`, indexes what
+is saved — `saved.json` in the state directory, modelled on
+`backend/library.Store` field for field (atomic write via temp-and-rename, one
+mutex), keyed by (source, series, chapter) rather than (source, series,
+volume) because there is no PDF here to group chapters into. Its `Record`
+carries the chapter's title and number, its page paths *relative to the saved
+root*, its byte size, when it was saved, and the 0-based page last shown
+(`Position`) — the one thing Try never remembers, because Try has no record to
+remember it in.
+
+**What a volume grouping means for `"quire"`.** A download request can still
+ask for the volume grouping (`assemble.GroupingVolume`), and the pages are
+still fetched a whole volume at a time — but there the similarity to a library
+download ends. There is no assembly, no upload-budget split, no `askToSort`,
+no `Placement`: each chapter of the volume is written to its own
+`shelf.Record`, because a saved chapter is exactly what `OpenSaved` names — a
+source, a series and a chapter — resolved independently of whatever run
+happened to fetch it alongside. The confirm question for a `"quire"` volume
+says so ("Quire saves these as N separate chapters") rather than the library's
+"It becomes one file, so your place in the reader carries across chapters",
+which would be a promise about a PDF this path never builds.
+
+**The cache boundary holds exactly as it always has.** `backend/service/cache.go`'s
+sweep and `backend/service/reclaim.go`'s per-document reclaim are handed
+`s.downloadDir` and nothing else; the saved root is a different field on
+`Service` that neither of them has ever seen, so a saved chapter surviving a
+full "Clear cache" is not a rule that had to be added — it is what not
+widening either function's reach already guarantees. Proven end to end in
+`TestClearCacheLeavesASavedChapterIntact`, mutation-checked by pointing the
+sweep at the saved root and watching the test catch it.
+
+**Deleting.** `DeleteSaved`'s confirmed half is `os.RemoveAll` of the chapter
+directory, built only from the saved root, `safeSegment`'d ids and
+`download.ChapterDir` — never from a path stored on the record — which is the
+same "nothing outside the root" rule `reclaim.go` applies to the download
+cache, and for the same reason: a chapter id is a source's to choose, and the
+one property a delete can trust is that the path it built could not have
+resolved anywhere else. Deleting a series (`MessageDeleteSeries`) and removing
+a source (`MessageRemoveSource`) both cascade to the saved chapters they
+cover — a series delete now offers its confirm step even for a series with
+*no* library record at all, because a row on the Downloaded overview can exist
+for saved chapters alone (see below).
+
+**Reading position.** Stored only for a saved chapter — `SavePosition`,
+clamped to the page range the same way `OpenSaved`'s own answer is — and never
+for Try, which still remembers nothing (there is no Try record to remember it
+in). A chapter whose files have gone missing from disk answers `OpenSaved`
+with `MessageError` (code `saved_missing`) and drops the record, exactly as
+if it had never been saved, so a stray manual deletion under the saved root
+does not leave a permanently broken row.
+
+**The series screen and the Downloaded overview.** `SeriesDetailResult`'s
+chapter rows gain `saved: bool`, independent of `documentUuid` — a chapter row
+can be saved, in the library, both, or neither. Volume rows gain `saved: bool`
+too, true only when *every* chapter of the volume is saved, since there is no
+single saved thing a volume row could point at otherwise. A new top-level
+`private: bool` lets the reader overlay and the chapter row hide "Send to
+library" without a round trip. The Downloaded overview's rows now come from
+two stores merged by (source, series): a series with only saved chapters gets
+a row (`savedCount`, `latestSavedChapterId`) exactly as one with only library
+downloads always has, the two counts share one sentence when both are nonzero
+("3 chapters saved in Quire · 2 in your library"), and rows for **private**
+sources are excluded from this overview entirely — private content is reached
+only through the private source list, never here, whether what is being asked
+about is a library document or a chapter saved in Quire.
+
+**UI (out of scope for this section — see the QML side of this feature):**
+`ui/TryReader.qml` gains a `saved` mode entered from `SavedOpened`, with no
+`TryPageRequest` traffic and no "nothing is saved" honesty line, sending
+`SavePosition` on a page turn (debounced) and on close; the reader overlay
+offers "Send to library" whenever the source is not private and the chapter
+is not already in the library, and "Save in Quire" in Try mode; the chapter
+list's non-book rows become `[Delete] [Read]` for anything saved (in
+preference to `[Try] [Download]`), `Read` sending `OpenSaved` and `Delete`
+sending `DeleteSaved`; and a selection ("Download selected", "Download all")
+always asks for `destination: "quire"`. Books are unchanged throughout.

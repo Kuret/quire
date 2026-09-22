@@ -26,13 +26,14 @@ Before you run it, here is what it does:
 - It modifies no system files of its own, and `install.sh --help` lists all of
   the above without installing anything.
 
-A comic/manga downloader for the **reMarkable Paper Pro** that files downloads
-into the stock library and hands reading off to the stock xochitl reader — so
-reading position, pen annotations and cloud sync all stay where they already
-live.
-
-Quire does not ship its own reader. It downloads, assembles a PDF, puts it in
-your library, and gets out of the way.
+A comic/manga downloader for the **reMarkable Paper Pro**. By default a
+download is saved in Quire's own storage and read in Quire's own reader — no
+PDF, no upload, no folder in your library. **Send to library** stays available
+as an explicit action for when you want the stock xochitl reader instead, with
+its reading position, pen annotations and cloud sync — the same PDF-and-upload
+behaviour Quire always had. Books (from sources like Shelfmark) are unchanged:
+they always go to the library, because Quire's own reader is image-only and a
+book is not images.
 
 > **Status: mid-port, and honest about it.** Quire was developed against one
 > Paper Pro, originally hosted by a third-party launcher called AppLoad. It now
@@ -190,13 +191,16 @@ Then open the Annex sidebar on the tablet and tap Quire.
 
 ## First run — two things Quire cannot do for you
 
-`install.sh` checks both of these and tells you if either is outstanding. Quire
-also detects them at runtime and explains them in plain language rather than
-failing with an error code. But they are easier done now:
+Neither of these is needed for an ordinary download any more — comics and
+manga now save straight into Quire's own storage, and only **Send to
+library** touches the reMarkable's library at all. Both still matter the
+moment you use it, or download a book: `install.sh` checks both and tells you
+if either is outstanding, and Quire also detects them at runtime and explains
+them in plain language rather than failing with an error code.
 
 **1. Turn on the USB web interface.** It is **off** on a factory device, and
-Quire saves downloaded comics through it — nothing can reach your library until
-it is on.
+it is what "Send to library" and book downloads reach your library through —
+nothing can reach it until this is on.
 
 > On the tablet: **Settings → Storage → "USB web interface" → on**, then restart
 > the tablet.
@@ -206,23 +210,29 @@ xochitl restarts, and a restart throws away whatever you were reading — the ve
 thing Quire exists to protect.
 
 **2. Create a folder called `Comics`, by hand, in My Files.** Spelled exactly
-that way.
+that way. Needed only for **Send to library** and for books — an ordinary
+comic download never touches this folder.
 
 This one genuinely cannot be automated: xochitl exposes **no way to create a
 folder** remotely. The entire interface is list, download and upload. Without
-the folder, Quire files downloads at the top of My Files and tells you it has
-done so — usable, but not what you want.
+the folder, "Send to library" files a document at the top of My Files and
+tells you it has done so — usable, but not what you want.
 
 ## Using it
 
 - **Add a source** by pasting a URL. Quire probes it, works out which site
   family it belongs to, and tells you plainly if it cannot — including when the
   site is behind a challenge it will not try to pass.
-- **Download a volume**; it lands in `My Files → Comics` with a real thumbnail,
-  no xochitl restart.
-- **Tap Read**; the stock reader opens it. Your page position, highlights and
-  pen annotations belong to xochitl from then on. Quire stores no reading
-  position, anywhere.
+- **Download a chapter**; it is saved in Quire's own storage — no PDF, no
+  upload, no folder — and read in Quire's own reader from then on, opening
+  back where you left off. Quire remembers that position; nothing about a
+  saved chapter touches xochitl.
+- **Send to library**, from the reader or the chapter list, when you want the
+  stock xochitl reader instead: it becomes an ordinary PDF in
+  `My Files → Comics`, with a real thumbnail, no xochitl restart. Your page
+  position, highlights and pen annotations belong to xochitl from then on —
+  the saved copy in Quire, if there is one, is untouched and stays independent
+  of it.
 - **Something looked wrong?** Settings has a log viewer — the same log the
   backend writes, readable on the tablet, no SSH.
 
