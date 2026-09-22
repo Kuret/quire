@@ -1,0 +1,67 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE - not a recording of any site.",
+    "",
+    "Reproduces the shape of GET /v1/comics/{id}/releases?all=true: meta.code plus",
+    "a payload.results that is a bare *array* of releases, not a nested object -",
+    "the one endpoint here whose results field is not an object with its own",
+    "sub-keys.",
+    "",
+    "Why synthetic: see search.json. Every value here is invented; the shape is a",
+    "fact observed live against the real API on 2026-09-21/22.",
+    "",
+    "Deliberate variations exercised by TestChaptersAreAscending:",
+    "  - listed newest-first, the opposite of every real release list seen live,",
+    "    so a green test proves theme.SortAndMark actually runs rather than",
+    "    watching an already-ascending fixture agree with itself",
+    "  - the middle release has an empty title, so its chapter number must come",
+    "    from the bare 'chapter' field rather than a decorated title",
+    "  - the last release has an empty 'key', which is not a usable reading",
+    "    handle, and must be skipped rather than turned into a broken chapter ID"
+  ],
+  "meta": { "code": 200 },
+  "payload": {
+    "results": [
+      {
+        "id": 500103,
+        "key": "cccccccc-3333-4c33-8c33-cccccccccc03",
+        "chapter": "3",
+        "chapter_type": "e",
+        "title": "The Long Tide",
+        "order": 3,
+        "published_time": "2026-09-10 14:47:12",
+        "artist": { "name": "riverside-studio", "roman_name": "Riverside Studio" }
+      },
+      {
+        "id": 500102,
+        "key": "bbbbbbbb-2222-4b22-8b22-bbbbbbbbbb02",
+        "chapter": "2",
+        "chapter_type": "e",
+        "title": "",
+        "order": 2,
+        "published_time": "2026-09-01 19:59:59",
+        "artist": { "name": "riverside-studio", "roman_name": "Riverside Studio" }
+      },
+      {
+        "id": 500101,
+        "key": "aaaaaaaa-1111-4a11-8a11-aaaaaaaaaa01",
+        "chapter": "1",
+        "chapter_type": "e",
+        "title": "Low Water",
+        "order": 1,
+        "published_time": "2026-08-07 10:43:32",
+        "artist": { "name": "riverside-studio", "roman_name": "Riverside Studio" }
+      },
+      {
+        "id": 500100,
+        "key": "",
+        "chapter": "0",
+        "chapter_type": "e",
+        "title": "Draft, never published",
+        "order": 0,
+        "published_time": "",
+        "artist": null
+      }
+    ]
+  }
+}

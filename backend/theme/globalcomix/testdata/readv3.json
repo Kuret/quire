@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE - not a recording of any site.",
+    "",
+    "Reproduces the shape of GET /v1/readV3/{releaseKey}: meta.code plus a",
+    "payload.results carrying page_objects (one entry per page - only its count",
+    "matters to this theme, so entries are near-empty) and a reader_cdn_access",
+    "grant naming the base URL, the release key and a {placeholder} URL template.",
+    "",
+    "Why synthetic: see search.json. Every value here is invented; the shape,",
+    "including the exact placeholder names in url_template, is a fact observed",
+    "live against the real API on 2026-09-22. The base_url points at",
+    "example.invalid (RFC 2606), which can never resolve.",
+    "",
+    "What this fixture does NOT prove - see api.go's readerCDNAccess comment and",
+    "docs/THEME-NOTES.md: the real reader-CDN additionally requires a session",
+    "cookie the live response sets via Set-Cookie, which theme.Fetcher has no way",
+    "to carry forward. This fixture only pins that Pages() builds the right URLs",
+    "from the grant; it says nothing about whether Quire can fetch them."
+  ],
+  "meta": { "code": 200 },
+  "payload": {
+    "results": {
+      "key": "aaaaaaaa-1111-4a11-8a11-aaaaaaaaaa01",
+      "page_count": 3,
+      "page_objects": [
+        { "id": 1, "order": 1 },
+        { "id": 2, "order": 2 },
+        { "id": 3, "order": 3 }
+      ],
+      "reader_cdn_access": {
+        "base_url": "https://reader-cdn.example.invalid",
+        "release_key": "aaaaaaaa-1111-4a11-8a11-aaaaaaaaaa01",
+        "url_template": "{base_url}/r/{release_key}/p/{order}/{quality}.webp",
+        "page_count": 3
+      }
+    }
+  }
+}

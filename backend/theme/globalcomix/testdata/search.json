@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE - not a recording of any site.",
+    "",
+    "Reproduces the shape of GET /v1/search/query?q=...&context=series&p=...&perpage=...:",
+    "meta.code, payload.results.series.{total,items[]}, each item carrying a numeric",
+    "id, a display name, a cover URL and a single artist_name string.",
+    "",
+    "Why synthetic: PLAN section 1.3 forbids this repository from containing anything",
+    "that functions as a catalogue of sources, and section 1.4 forbids copying others'",
+    "expression - including their data. The response *shape* is a fact observed live",
+    "against the real API on 2026-09-21/22; the titles, ids and slugs here are",
+    "invented, and every URL points at example.invalid (RFC 2606), which can never",
+    "resolve.",
+    "",
+    "Deliberate variations exercised by the test:",
+    "  - the second item has an empty artist_name, so Authors must come back nil",
+    "    rather than a slice holding one empty string",
+    "  - the third item has id 0, which parseSeriesID/seriesID could never have",
+    "    produced, and must be skipped rather than turned into a broken ID"
+  ],
+  "meta": { "code": 200 },
+  "payload": {
+    "results": {
+      "series": {
+        "total": 3,
+        "items": [
+          {
+            "id": 90001,
+            "name": "The Lighthouse Keeper's Almanac",
+            "slug": "the-lighthouse-keepers-almanac",
+            "url": "/c/the-lighthouse-keepers-almanac",
+            "cover_image_url": "https://covers.example.invalid/90001/small.webp",
+            "artist_name": "Riverside Studio"
+          },
+          {
+            "id": 90002,
+            "name": "Salt and Cedar",
+            "slug": "salt-and-cedar",
+            "url": "/c/salt-and-cedar",
+            "cover_image_url": "https://covers.example.invalid/90002/small.webp",
+            "artist_name": ""
+          },
+          {
+            "id": 0,
+            "name": "Ghost Entry",
+            "slug": "ghost-entry",
+            "url": "/c/ghost-entry",
+            "cover_image_url": "",
+            "artist_name": "Nobody"
+          }
+        ]
+      }
+    }
+  }
+}

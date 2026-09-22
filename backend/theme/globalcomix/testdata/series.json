@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE - not a recording of any site.",
+    "",
+    "Reproduces the shape of GET /v1/comics/{id}: meta.code plus a payload.results",
+    "object carrying the series' own fields and a nested 'artist' object whose",
+    "roman_name is the display form of the slug-ish 'name'.",
+    "",
+    "Why synthetic: see search.json. Every value here is invented; the shape is a",
+    "fact observed live against the real API on 2026-09-21/22.",
+    "",
+    "Deliberate variation: status_name is 'Hiatus', mixed case, exercising the",
+    "case-insensitive status() mapping rather than the more common 'Ongoing'."
+  ],
+  "meta": { "code": 200 },
+  "payload": {
+    "results": {
+      "id": 90001,
+      "name": "The Lighthouse Keeper's Almanac",
+      "slug": "the-lighthouse-keepers-almanac",
+      "description": "A keeper of a remote lighthouse records what the tide brings in.",
+      "status": 1,
+      "status_name": "Hiatus",
+      "category_name": "Drama",
+      "image_url": "https://covers.example.invalid/90001/large.webp",
+      "artist": {
+        "name": "riverside-studio",
+        "roman_name": "Riverside Studio"
+      }
+    }
+  }
+}
