@@ -766,6 +766,12 @@ type sourceView struct {
 	// fetching when it was refused, because a bare hostname beside an Allow
 	// button is exactly the reflexive "yes" record-and-offer exists to avoid.
 	PendingHosts []pendingHost `json:"pendingHosts,omitempty"`
+
+	// RemoveQuestion is the confirm strip's own sentence for removing this
+	// source (PLAN §2: every user-facing sentence is composed in the
+	// backend, never in QML) — see removeSourceQuestion for why it depends
+	// on whether the source has any chapters saved in Quire.
+	RemoveQuestion string `json:"removeQuestion"`
 }
 
 // sendSources answers MessageListSources with every source that is *not*
@@ -830,9 +836,45 @@ func (s *Service) buildSourceViews(wantPrivate bool) []sourceView {
 			v.StatusDetail = src.LastProbe.Detail
 			v.StatusAt = src.LastProbe.At.UTC().Format(time.RFC3339)
 		}
+		v.RemoveQuestion = removeSourceQuestion(src.Name, s.savedChapterCount(src.ID))
 		views = append(views, v)
 	}
 	return views
+}
+
+// savedChapterCount is how many chapters saved in Quire belong to one
+// source, across every one of its series — what removeSourceQuestion needs
+// to say whether removing the source takes any saved chapters with it.
+func (s *Service) savedChapterCount(sourceID string) int {
+	if s.shelfStore == nil {
+		return 0
+	}
+	n := 0
+	for _, rec := range s.shelfStore.List() {
+		if rec.Source == sourceID {
+			n++
+		}
+	}
+	return n
+}
+
+// removeSourceQuestion is the confirm strip's sentence for removing a source
+// (PLAN §2). Removing a source now cascades to delete its chapters saved in
+// Quire (see MessageRemoveSource's deleteSavedChaptersForSource) — a fact
+// worth naming plainly when there is anything to lose, and otherwise not
+// worth mentioning at all: "Downloaded volumes stay in your library" is what
+// a source with nothing saved needs to hear, since that has been true all
+// along.
+func removeSourceQuestion(name string, savedCount int) string {
+	if savedCount == 0 {
+		return fmt.Sprintf("Remove %s? Downloaded volumes stay in your library.", name)
+	}
+	chapters := fmt.Sprintf("%d chapters", savedCount)
+	if savedCount == 1 {
+		chapters = "1 chapter"
+	}
+	return fmt.Sprintf("Remove %s? Its %s saved in Quire will be deleted; anything in your library stays.",
+		name, chapters)
 }
 
 // sendSourceListFor refreshes whichever of the two source lists src.ID

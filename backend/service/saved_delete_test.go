@@ -168,3 +168,82 @@ func TestRemovingASourceDeletesItsSavedChapters(t *testing.T) {
 		return !ok
 	})
 }
+
+// removeQuestion (backend/service/service.go's buildSourceViews) is composed
+// in the backend rather than in ui/SourceList.qml's confirm strip (PLAN §2)
+// because removing a source cascades to delete its saved chapters too, and
+// only the backend knows whether there are any.
+func sourceRemoveQuestion(t *testing.T, rec *recorder) string {
+	t.Helper()
+	var sources struct {
+		Sources []struct {
+			RemoveQuestion string `json:"removeQuestion"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSources), &sources); err != nil {
+		t.Fatal(err)
+	}
+	if len(sources.Sources) != 1 {
+		t.Fatalf("%d sources, want 1", len(sources.Sources))
+	}
+	return sources.Sources[0].RemoveQuestion
+}
+
+// A source with nothing saved in Quire gets the plain old sentence: removing
+// it has always left downloaded volumes in the library, untouched.
+func TestRemoveSourceQuestionWithNothingSaved(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+
+	handle(t, h.svc, rec, appload.MessageListSources, `{}`)
+
+	got := sourceRemoveQuestion(t, rec)
+	want := "Remove Example Reader? Downloaded volumes stay in your library."
+	if got != want {
+		t.Errorf("removeQuestion = %q, want %q", got, want)
+	}
+}
+
+// A source with chapters saved in Quire names how many, singular for one.
+func TestRemoveSourceQuestionWithSavedChapters(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	saveOne(t, h, rec)
+
+	handle(t, h.svc, rec, appload.MessageListSources, `{}`)
+
+	got := sourceRemoveQuestion(t, rec)
+	want := "Remove Example Reader? Its 1 chapter saved in Quire will be deleted; " +
+		"anything in your library stays."
+	if got != want {
+		t.Errorf("removeQuestion = %q, want %q", got, want)
+	}
+}
+
+// More than one saved chapter is plural, and counted across every series of
+// the source — not just the one saveOne downloaded from.
+func TestRemoveSourceQuestionWithSeveralSavedChapters(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	saveOne(t, h, rec)
+
+	// A second, synthetic record in another series: removeQuestion counts
+	// chapters saved *anywhere* under the source, not one series' worth.
+	if err := h.shelfStore.Put(shelf.Record{
+		Key: shelf.Key{Source: "example-reader", Series: "/manga/other/", Chapter: "/manga/other/c1/"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, h.svc, rec, appload.MessageListSources, `{}`)
+
+	got := sourceRemoveQuestion(t, rec)
+	want := "Remove Example Reader? Its 2 chapters saved in Quire will be deleted; " +
+		"anything in your library stays."
+	if got != want {
+		t.Errorf("removeQuestion = %q, want %q", got, want)
+	}
+}
