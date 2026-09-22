@@ -81,6 +81,71 @@ func filepathIsAbs(p string) bool {
 	return len(p) > 0 && p[0] == '/'
 }
 
+// SavedOpened's private carries the source's own privacy, not whatever a
+// ChapterList screen happened to have in memory — this is what lets a
+// chapter opened from the Downloaded overview (which never held a
+// ChapterList of its own) still hide "Send to library" correctly for a
+// private source.
+func TestOpenSavedReportsPrivateSource(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	if err := h.store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	seriesID, chapterID := saveOne(t, h, rec)
+
+	handle(t, h.svc, rec, appload.MessageOpenSaved,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","chapterId":"`+chapterID+`"}`)
+
+	var opened struct {
+		Private   bool `json:"private"`
+		InLibrary bool `json:"inLibrary"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSavedOpened), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if !opened.Private {
+		t.Error("private is false for a private source")
+	}
+	if opened.InLibrary {
+		t.Error("inLibrary is true for a chapter never sent to the library")
+	}
+}
+
+// SavedOpened's inLibrary is what lets "Send to library" disappear on a
+// chapter that is both saved and already in the library — again regardless
+// of where the reader was opened from.
+func TestOpenSavedReportsInLibrary(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := saveOne(t, h, rec)
+
+	rec2 := &recorder{}
+	handle(t, h.svc, rec2, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","confirmed":true,"destination":"library"}`)
+	waitForPhase(t, rec2, "done")
+
+	handle(t, h.svc, rec, appload.MessageOpenSaved,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","chapterId":"`+chapterID+`"}`)
+
+	var opened struct {
+		Private   bool `json:"private"`
+		InLibrary bool `json:"inLibrary"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageSavedOpened), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.Private {
+		t.Error("private is true for a source added without privacy")
+	}
+	if !opened.InLibrary {
+		t.Error("inLibrary is false for a chapter that was sent to the library")
+	}
+}
+
 // A chapter never saved, or whose record was dropped, answers saved_missing
 // rather than a reader payload with nothing in it.
 func TestOpenSavedOnAnUnsavedChapterIsRefused(t *testing.T) {

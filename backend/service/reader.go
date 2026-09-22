@@ -166,3 +166,29 @@ func (s *Service) storedSaved(sourceID, seriesID string) map[string]bool {
 	}
 	return out
 }
+
+// chapterInLibrary reports whether one chapter already has a library record,
+// for openSaved's MessageSavedOpened reply (see saved.go): unlike
+// storedVolumes, which serves the whole series detail screen and can afford
+// to reconcile pre-chapters legacy volumes against a freshly fetched chapter
+// list, openSaved answers a single chapter from disk alone — no network
+// round trip (see saved.go's file comment) — so only the modern,
+// chapters-tracked form of a record is checked here. A chapter covered only
+// by a legacy, single-document-per-volume record (see storedVolumes) is not
+// detected by this check.
+func (s *Service) chapterInLibrary(sourceID, seriesID, chapterID string) bool {
+	if s.libStore == nil {
+		return false
+	}
+	for _, rec := range s.libStore.List() {
+		if rec.Source != sourceID || rec.Series != seriesID {
+			continue
+		}
+		for _, id := range rec.Chapters {
+			if id == chapterID {
+				return true
+			}
+		}
+	}
+	return false
+}

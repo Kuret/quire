@@ -95,6 +95,15 @@ func (s *Service) openSaved(out Sender, req savedRequest) error {
 
 	position := clampPosition(rec.Position, len(paths))
 
+	// private and inLibrary are what let the reader overlay decide "Send to
+	// library" correctly wherever it was opened from — including from the
+	// Downloaded screen, which carries no ChapterList of its own to ask
+	// (PLAN's rule: never guess a fact the backend already has).
+	private := false
+	if src, ok := s.store.Get(req.SourceID); ok {
+		private = src.IsPrivate()
+	}
+
 	return send(out, appload.MessageSavedOpened, map[string]any{
 		"sourceId":     req.SourceID,
 		"seriesId":     req.SeriesID,
@@ -103,6 +112,8 @@ func (s *Service) openSaved(out Sender, req savedRequest) error {
 		"chapterTitle": rec.ChapterTitle,
 		"pages":        paths,
 		"position":     position,
+		"private":      private,
+		"inLibrary":    s.chapterInLibrary(req.SourceID, req.SeriesID, req.ChapterID),
 	})
 }
 
