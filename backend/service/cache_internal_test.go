@@ -82,6 +82,57 @@ func TestTheClearedFigureMatchesWhatWentAway(t *testing.T) {
 	}
 }
 
+// TestStorageSentenceDropsAZeroPart covers PLAN §12.6's examples directly:
+// both parts, one dropped, neither, and the free clause appended only when
+// it is known.
+func TestStorageSentenceDropsAZeroPart(t *testing.T) {
+	var gbf float64 = 1024 * 1024 * 1024
+	const mb int64 = 1024 * 1024
+
+	cases := []struct {
+		name         string
+		saved, cache int64
+		free         int64
+		freeKnown    bool
+		want         string
+	}{
+		{
+			name:  "both parts, free known",
+			saved: int64(1.1 * gbf), cache: 300 * mb,
+			free: int64(18.2 * gbf), freeKnown: true,
+			want: "Quire is using 1.4 GB — 1.1 GB of saved chapters and 300.0 MB of download cache. " +
+				"18.2 GB free on this reMarkable.",
+		},
+		{
+			name:  "cache is zero, dropped",
+			saved: int64(1.1 * gbf), cache: 0,
+			free: int64(18.2 * gbf), freeKnown: true,
+			want: "Quire is using 1.1 GB of saved chapters. 18.2 GB free on this reMarkable.",
+		},
+		{
+			name:  "saved is zero, dropped",
+			saved: 0, cache: 300 * mb,
+			freeKnown: false,
+			want:      "Quire is using 300.0 MB of download cache.",
+		},
+		{
+			name:  "neither",
+			saved: 0, cache: 0,
+			freeKnown: false,
+			want:      "Quire isn’t using any storage yet.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := storageSentence(tc.saved, tc.cache, tc.free, tc.freeKnown)
+			if got != tc.want {
+				t.Errorf("storageSentence(%d, %d, %d, %v) = %q, want %q",
+					tc.saved, tc.cache, tc.free, tc.freeKnown, got, tc.want)
+			}
+		})
+	}
+}
+
 // A claim held over a whole series still leaves the tree standing, because the
 // directories it is in are not empty. Pruning must not remove a directory a
 // kept chapter lives in.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/download"
 )
 
 // clearCacheRequest is the MessageClearCache payload.
@@ -25,15 +26,87 @@ type cacheSweep struct {
 }
 
 // sendCacheStatus answers with the size of the cache and a sentence for it.
+//
+// bytes and message stay exactly what they always were — the download
+// cache's own size and a sentence about it alone — so a frontend built before
+// the storage summary existed still reads a cache status the way it always
+// has. savedBytes, freeBytes and storage ride alongside for the one that
+// wants the fuller picture (PLAN §12.6).
 func (s *Service) sendCacheStatus(out Sender, message string) error {
 	size := s.cacheSize()
 	if message == "" {
 		message = cacheSizeSentence(size)
 	}
+	st := s.storageStatus()
 	return send(out, appload.MessageCacheStatus, map[string]any{
-		"bytes":   size,
-		"message": message,
+		"bytes":      size,
+		"message":    message,
+		"savedBytes": st.SavedBytes,
+		"freeBytes":  st.FreeBytes,
+		"storage":    st.Message,
 	})
+}
+
+// storageStatus is what Quire's own storage is holding, across everything —
+// saved chapters and the download cache, for every source including private
+// ones. PLAN §12.6: there is no private/ordinary split here, because this is
+// a single number about disk, not a list of series.
+type storageStatus struct {
+	SavedBytes int64
+	CacheBytes int64
+	FreeBytes  int64
+	// FreeKnown is false on a platform with no statfs, or when there is no
+	// saved or download directory to ask about. The composed sentence omits
+	// the free-space clause entirely rather than claim a number invented for
+	// the occasion.
+	FreeKnown bool
+	// Message is the one backend-composed sentence (PLAN §2): what is using
+	// the space, and — when it is known — how much is free.
+	Message string
+}
+
+// storageStatus computes the current storageStatus. It is cheap enough to
+// call on every request that wants it — a saved-chapter tree and a cache
+// directory are the same walk sweepCache and treeSize already do, not a
+// second index kept in memory to go stale.
+func (s *Service) storageStatus() storageStatus {
+	saved := s.savedSize()
+	cache := s.cacheSize()
+
+	free, freeErr := download.FreeSpace(s.freeSpaceRoot())
+	st := storageStatus{
+		SavedBytes: saved,
+		CacheBytes: cache,
+		FreeKnown:  freeErr == nil,
+	}
+	if st.FreeKnown {
+		st.FreeBytes = free
+	}
+	st.Message = storageSentence(saved, cache, free, st.FreeKnown)
+	return st
+}
+
+// savedSize is what Quire's own saved-chapter storage is holding right now,
+// across every source — private ones included, since this is a disk figure
+// and not a list a private source needs keeping off (PLAN §12.6).
+func (s *Service) savedSize() int64 {
+	if s.savedDir == "" {
+		return 0
+	}
+	return treeSize(s.savedDir)
+}
+
+// freeSpaceRoot is the directory whose filesystem the free-space figure is
+// measured on: the saved root when this build has one — /home on the device
+// — falling back to the download cache's directory for a build with no
+// "Saved in Quire" of its own. Empty when neither exists, which
+// download.FreeSpace turns into "unknown" the same way a statfs failure
+// would.
+func (s *Service) freeSpaceRoot() string {
+	if s.savedDir != "" {
+		return s.savedDir
+	}
+	return s.downloadDir
 }
 
 // clearCache empties the download cache, after asking.
@@ -191,6 +264,37 @@ func cacheSizeSentence(size int64) string {
 func clearCacheQuestion(size int64) string {
 	return fmt.Sprintf("Clear %s of cached page images? Nothing in your reMarkable’s library changes — "+
 		"these are only the pages Quire kept so a repeated download could skip them.", humanBytes(size))
+}
+
+// storageSentence is the one sentence PLAN §12.6 asks for: what Quire's own
+// storage is holding, and — when it is known — how much room is left.
+//
+//   - Both saved and cache non-zero: "Quire is using 1.4 GB — 1.1 GB of saved
+//     chapters and 300 MB of download cache."
+//   - A zero part is dropped rather than said as "0 bytes": "Quire is using
+//     1.1 GB of saved chapters."
+//   - Neither: "Quire isn’t using any storage yet."
+//
+// The free clause is appended only when it is known (see storageStatus), and
+// omitted rather than guessed at when it is not — a platform with no statfs,
+// or a build with neither a saved nor a download directory to ask about.
+func storageSentence(saved, cache, free int64, freeKnown bool) string {
+	var sentence string
+	switch {
+	case saved == 0 && cache == 0:
+		sentence = "Quire isn’t using any storage yet."
+	case saved > 0 && cache > 0:
+		sentence = fmt.Sprintf("Quire is using %s — %s of saved chapters and %s of download cache.",
+			humanBytes(saved+cache), humanBytes(saved), humanBytes(cache))
+	case saved > 0:
+		sentence = fmt.Sprintf("Quire is using %s of saved chapters.", humanBytes(saved))
+	default:
+		sentence = fmt.Sprintf("Quire is using %s of download cache.", humanBytes(cache))
+	}
+	if freeKnown {
+		sentence += fmt.Sprintf(" %s free on this reMarkable.", humanBytes(free))
+	}
+	return sentence
 }
 
 func clearCacheOutcome(swept cacheSweep) string {

@@ -48,6 +48,37 @@ func TestCacheSizeIsReportedInWords(t *testing.T) {
 	}
 }
 
+// TestCacheStatusCarriesTheStorageSummary covers PLAN §12.6's addition to
+// MessageCacheStatus: savedBytes, freeBytes and a composed storage sentence
+// ride alongside the cache's own bytes/message, which stay exactly what they
+// were.
+func TestCacheStatusCarriesTheStorageSummary(t *testing.T) {
+	svc, _, _ := cacheWith(t, "/manga/the-lantern-keeper/chapter-1/")
+
+	rec := &recorder{}
+	handle(t, svc, rec, appload.MessageGetCacheSize, `{}`)
+
+	var st struct {
+		Bytes      int64  `json:"bytes"`
+		Message    string `json:"message"`
+		SavedBytes int64  `json:"savedBytes"`
+		FreeBytes  int64  `json:"freeBytes"`
+		Storage    string `json:"storage"`
+	}
+	if err := json.Unmarshal(rec.wait(t, appload.MessageCacheStatus), &st); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(st.Message, "holding") {
+		t.Errorf("message %q changed shape; it must stay the cache-only sentence", st.Message)
+	}
+	if st.Storage == "" {
+		t.Error("no storage sentence")
+	}
+	if !strings.Contains(st.Storage, "download cache") {
+		t.Errorf("storage %q does not mention the download cache", st.Storage)
+	}
+}
+
 // Clearing asks first. It is hundreds of megabytes and the only way back is to
 // fetch it all again.
 func TestClearingTheCacheAsksFirst(t *testing.T) {
