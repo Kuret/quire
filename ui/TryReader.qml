@@ -73,6 +73,13 @@ Item {
     // leaveReader).
     property string mode: "try"
 
+    // Whether the reader offers "Send to library" (never when the source is
+    // private, never when the chapter is already there) and, in Try mode
+    // only, "Save in Quire" — see the overlay below. Set by whoever opened
+    // the reader (Main.qml), which is where both facts are already known.
+    property bool chapterInLibrary: false
+    property bool sourcePrivate: false
+
     property int index: 0
     // 0 means "not known to be the whole chapter yet" — the same convention
     // ui/PagerBar.qml uses for "the source has not said how much there is",
@@ -111,6 +118,12 @@ Item {
     // away, when the reader is left (flushSavePosition) — see Main.qml's
     // leaveReader/closeSaved.
     signal savePositionWanted(int index)
+
+    // The overlay's two library actions (see the overlay below): both are
+    // EnqueueDownload, so both just report the tap and leave composing the
+    // message to Main.qml, the same division every other control here keeps.
+    signal sendToLibraryRequested()
+    signal saveInQuireRequested()
 
     readonly property string currentPath: screen.pagePaths[screen.index] !== undefined
                                           ? screen.pagePaths[screen.index] : ""
@@ -167,6 +180,8 @@ Item {
         screen.overlayVisible = false
         screen.pagePaths = ({})
         screen.requested = ({})
+        screen.chapterInLibrary = false
+        screen.sourcePrivate = false
         // Called explicitly rather than left to onIndexChanged: index is
         // already 0 for the reader's very first chapter, so assigning it 0
         // above emits no change signal at all, and page 1 would never be
@@ -190,6 +205,8 @@ Item {
         screen.note = ""
         screen.overlayVisible = false
         screen.requested = ({})
+        screen.chapterInLibrary = false
+        screen.sourcePrivate = false
 
         var pages = payload.pages ? payload.pages : []
         var paths = {}
@@ -555,6 +572,81 @@ Item {
                     text: screen.note
                     font.pointSize: Style.smallSize
                     color: Style.muted
+                }
+
+                // The reader's two library actions. Neither is a question —
+                // tapping one sends EnqueueDownload and the outcome comes
+                // back as whatever DownloadProgress sentence the row it came
+                // from would otherwise show (Main.qml, ChapterList.qml).
+                // No visible binding of its own: a Row's own effective
+                // visibility and its children's both come from the same
+                // underlying QQuickItem state, so deriving one from the
+                // other here would be a binding loop that Qt Quick breaks by
+                // reading as false. An empty Row costs nothing to draw when
+                // both buttons below are hidden.
+                Row {
+                    id: overlayActions
+                    width: parent.width
+                    spacing: Style.gap
+
+                    Rectangle {
+                        id: sendToLibraryButton
+                        objectName: "trySendToLibraryButton"
+                        // Never for a private source (PLAN's own rule: never
+                        // put private content in the reMarkable library) and
+                        // never once the chapter is already there — a second
+                        // copy is not what the button offers.
+                        visible: !screen.sourcePrivate && !screen.chapterInLibrary
+                        width: 220
+                        height: Style.buttonHeight
+                        color: sendToLibraryArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Send to library"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: sendToLibraryArea
+                            objectName: "trySendToLibraryArea"
+                            anchors.fill: parent
+                            enabled: sendToLibraryButton.visible
+                            onClicked: screen.sendToLibraryRequested()
+                        }
+                    }
+
+                    Rectangle {
+                        id: saveInQuireButton
+                        objectName: "trySaveInQuireButton"
+                        // Try mode only — a saved chapter is already saved.
+                        visible: screen.mode === "try"
+                        width: 220
+                        height: Style.buttonHeight
+                        color: saveInQuireArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Save in Quire"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: saveInQuireArea
+                            objectName: "trySaveInQuireArea"
+                            anchors.fill: parent
+                            enabled: saveInQuireButton.visible
+                            onClicked: screen.saveInQuireRequested()
+                        }
+                    }
                 }
             }
         }

@@ -1811,6 +1811,10 @@ Window {
         win.want("opening Try switches to the reader", win.app.screen, "try")
         win.want("which asks the backend to start the session",
                  backend.countOf(Msg.TryChapter), 1)
+        win.want("Try is never already in the library (see ChapterList's tryButton)",
+                 win.findChild(win.app, "tryReader").chapterInLibrary, false)
+        win.want("privacy still follows the series screen's own flag",
+                 win.findChild(win.app, "tryReader").sourcePrivate, chapterList.isPrivate)
 
         backend.forget()
         win.want("the reader consumes the gesture", win.app.escapeRequested(), true)
@@ -1844,6 +1848,22 @@ Window {
         win.want("the answer is what switches to the reader", win.app.screen, "saved")
         win.want("opened in saved mode", reader.mode, "saved")
         win.want("at the stored position", reader.index, 1)
+        win.want("not known to be private (the current series isn't)",
+                 reader.sourcePrivate, false)
+        win.want("not known to be in the library either", reader.chapterInLibrary, false)
+
+        // The overlay's two library actions, both an ordinary EnqueueDownload
+        // naming the chapter and a destination.
+        backend.forget()
+        reader.sendToLibraryRequested()
+        win.want("Send to library asks for the library",
+                 backend.bodyOf(Msg.EnqueueDownload).destination, "library")
+        win.want("naming the chapter",
+                 backend.bodyOf(Msg.EnqueueDownload).volumeId, "c9")
+        backend.forget()
+        reader.saveInQuireRequested()
+        win.want("Save in Quire asks for Quire's own storage",
+                 backend.bodyOf(Msg.EnqueueDownload).destination, "quire")
 
         // Reopen it, turn a page and leave through the escape gesture: the
         // position at that page is what should reach the backend, flushed

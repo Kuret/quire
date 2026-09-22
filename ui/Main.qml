@@ -258,6 +258,11 @@ Rectangle {
     // all — see TryReader.qml's begin().
     function openTry(chapterId, title) {
         tryReaderScreen.begin(root.currentSourceId, root.currentSeriesId, chapterId, title)
+        // Try is only ever offered on a row not already in the library (see
+        // ChapterList.qml's tryButton), so the reader's "already there" flag
+        // is always false here; "Send to library" still checks privacy.
+        tryReaderScreen.sourcePrivate = chapterListScreen.isPrivate
+        tryReaderScreen.chapterInLibrary = false
         root.showScreen("try")
         root.send(Msg.TryChapter, {
             "sourceId": root.currentSourceId, "seriesId": root.currentSeriesId, "chapterId": chapterId})
@@ -679,6 +684,18 @@ Rectangle {
         case Msg.SavedOpened:
             if (msg) {
                 tryReaderScreen.openSaved(msg)
+                // "Send to library" checks the same two facts Try's does.
+                // The source is known private only when the row that opened
+                // this reader came from the current series screen — a row
+                // reached through the Downloaded overview's "Read latest"
+                // never carries a private series at all (they are excluded
+                // from that list entirely — backend/service/downloaded.go),
+                // so false is always correct there.
+                var known = msg.sourceId === root.currentSourceId
+                          && msg.seriesId === root.currentSeriesId
+                tryReaderScreen.sourcePrivate = known ? chapterListScreen.isPrivate : false
+                tryReaderScreen.chapterInLibrary = known
+                    ? root.chapterHasDocument(msg.chapterId) : false
                 root.showScreen("saved")
             }
             return
@@ -1093,6 +1110,18 @@ Rectangle {
                 rows.setProperty(i, "saved", true)
             return
         }
+    }
+
+    // chapterHasDocument says whether a chapter already on screen is in the
+    // library — the reader's own "already there" check, read off the row
+    // rather than asked for again.
+    function chapterHasDocument(chapterId) {
+        for (var i = 0; i < chaptersModel.count; ++i) {
+            var row = chaptersModel.get(i)
+            if (row.chapterId === chapterId)
+                return !!row.documentUuid
+        }
+        return false
     }
 
     // clearSavedFlag is SavedDeleted's phase "done": the row goes back to
@@ -1898,5 +1927,15 @@ Rectangle {
         onSavePositionWanted: root.send(Msg.SavePosition, {
             "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
             "chapterId": tryReaderScreen.chapterId, "position": index})
+        // The reader's two library actions (PLAN's saved-in-Quire design):
+        // both are an ordinary EnqueueDownload, so the outcome sentence
+        // arrives the same way any other download's does, on the row it
+        // came from.
+        onSendToLibraryRequested: root.send(Msg.EnqueueDownload, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "volumeId": tryReaderScreen.chapterId, "destination": "library"})
+        onSaveInQuireRequested: root.send(Msg.EnqueueDownload, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "volumeId": tryReaderScreen.chapterId, "destination": "quire"})
     }
 }

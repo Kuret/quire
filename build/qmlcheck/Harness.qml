@@ -217,6 +217,9 @@ Window {
     // Saved mode's reading position (SavePosition), sent debounced or by
     // flushSavePosition — see the reader's own comment.
     property var savePositionWants: []
+    // The reader's two library actions.
+    property int sendToLibraryAsks: 0
+    property int saveInQuireAsks: 0
 
     // Saved in Quire: what a saved row's Read/Delete asked for.
     property int readSavedAsks: 0
@@ -579,6 +582,8 @@ Window {
         onSavePositionWanted: {
             win.savePositionWants.push(index)
         }
+        onSendToLibraryRequested: win.sendToLibraryAsks++
+        onSaveInQuireRequested: win.saveInQuireAsks++
     }
     Settings {
         id: settings
@@ -1833,6 +1838,36 @@ Window {
         win.want("the opening band yields to the overlay",
                  win.findChild(tryReader, "tryOpeningNotice").visible, false)
 
+        // ---- the reader's two library actions ------------------------------
+        //
+        // Both default to offered in Try mode on a chapter that is neither
+        // private nor already in the library — the ordinary case.
+        win.want("Send to library is offered by default in Try mode",
+                 win.findChild(tryReader, "trySendToLibraryButton").visible, true)
+        win.want("so is Save in Quire", win.findChild(tryReader, "trySaveInQuireButton").visible, true)
+
+        win.sendToLibraryAsks = 0
+        win.findChild(tryReader, "trySendToLibraryArea").clicked(null)
+        win.want("tapping it reports the tap once", win.sendToLibraryAsks, 1)
+
+        win.saveInQuireAsks = 0
+        win.findChild(tryReader, "trySaveInQuireArea").clicked(null)
+        win.want("and so does Save in Quire", win.saveInQuireAsks, 1)
+
+        // Never for a private source.
+        tryReader.sourcePrivate = true
+        win.want("a private source drops Send to library",
+                 win.findChild(tryReader, "trySendToLibraryButton").visible, false)
+        win.want("but Save in Quire is untouched by privacy",
+                 win.findChild(tryReader, "trySaveInQuireButton").visible, true)
+        tryReader.sourcePrivate = false
+
+        // Never once the chapter is already in the library.
+        tryReader.chapterInLibrary = true
+        win.want("an already-library chapter drops Send to library",
+                 win.findChild(tryReader, "trySendToLibraryButton").visible, false)
+        tryReader.chapterInLibrary = false
+
         // Page-turning stands down while the overlay owns the screen —
         // tapping where the left/right zones would be instead falls through
         // to the overlay (which is a full-screen dismiss area under its own
@@ -1909,6 +1944,12 @@ Window {
         win.findChild(tryReader, "tryMiddleZone").clicked(null)
         win.want("nor in the overlay",
                  win.findChild(tryReader, "tryOverlayNotice").visible, false)
+        // Save in Quire is Try-only — a saved chapter is already saved —
+        // but Send to library still applies, on the same terms as Try's.
+        win.want("saved mode drops Save in Quire",
+                 win.findChild(tryReader, "trySaveInQuireButton").visible, false)
+        win.want("but still offers Send to library by default",
+                 win.findChild(tryReader, "trySendToLibraryButton").visible, true)
         win.findChild(tryReader, "tryMiddleZone").clicked(null)
 
         // ---- remembering the page: debounced on a turn, flushed on close ---
