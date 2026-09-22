@@ -19,15 +19,29 @@ type savedDownloadedRow struct {
 
 func fetchDownloaded(t *testing.T, h *downloadHarness) []savedDownloadedRow {
 	t.Helper()
+	return fetchDownloadedMsg(t, h, false).Series
+}
+
+type downloadedListMsg struct {
+	Series  []savedDownloadedRow `json:"series"`
+	Private bool                 `json:"private"`
+	Storage string               `json:"storage"`
+	Empty   string               `json:"empty"`
+}
+
+func fetchDownloadedMsg(t *testing.T, h *downloadHarness, private bool) downloadedListMsg {
+	t.Helper()
 	rec := &recorder{}
-	handle(t, h.svc, rec, appload.MessageListDownloaded, `{}`)
-	var got struct {
-		Series []savedDownloadedRow `json:"series"`
+	payload := `{}`
+	if private {
+		payload = `{"private":true}`
 	}
+	handle(t, h.svc, rec, appload.MessageListDownloaded, payload)
+	var got downloadedListMsg
 	if err := json.Unmarshal(rec.wait(t, appload.MessageDownloadedList), &got); err != nil {
 		t.Fatal(err)
 	}
-	return got.Series
+	return got
 }
 
 // A series with only chapters saved in Quire — nothing in the library at all
@@ -117,5 +131,60 @@ func TestDownloadedOverviewExcludesPrivateSources(t *testing.T) {
 	rows := fetchDownloaded(t, h)
 	if len(rows) != 0 {
 		t.Fatalf("%d rows, want none for a private source: %+v", len(rows), rows)
+	}
+}
+
+// TestPrivateDownloadedOverviewListsOnlyPrivateSources is the mirror of
+// TestDownloadedOverviewExcludesPrivateSources: asking with private:true
+// gets exactly the private source's series, and the reply echoes private.
+func TestPrivateDownloadedOverviewListsOnlyPrivateSources(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := firstChapter(t, h.svc, rec)
+
+	if err := h.store.SetPrivate("example-reader", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, h.svc, rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+	waitForPhase(t, rec, "done")
+
+	msg := fetchDownloadedMsg(t, h, true)
+	if !msg.Private {
+		t.Error("reply does not echo private:true")
+	}
+	if len(msg.Series) != 1 || msg.Series[0].SeriesID != seriesID {
+		t.Fatalf("private series = %+v, want the one private-source series", msg.Series)
+	}
+
+	// And the ordinary list, asked the same way as before, still excludes it.
+	ordinary := fetchDownloadedMsg(t, h, false)
+	if len(ordinary.Series) != 0 {
+		t.Fatalf("ordinary series = %+v, want the private source excluded", ordinary.Series)
+	}
+}
+
+// TestDownloadedListCarriesAStorageSentence covers PLAN §12.6's storage
+// summary riding on MessageDownloadedList: a build with something downloaded
+// gets a non-empty, backend-composed sentence, on both the ordinary and the
+// private overview — the figure covers everything, so it does not depend on
+// which list was asked for.
+func TestDownloadedListCarriesAStorageSentence(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	saveOne(t, h, rec)
+
+	ordinary := fetchDownloadedMsg(t, h, false)
+	if ordinary.Storage == "" {
+		t.Error("no storage sentence on the ordinary overview")
+	}
+
+	private := fetchDownloadedMsg(t, h, true)
+	if private.Storage != ordinary.Storage {
+		t.Errorf("storage sentence differs by mode: ordinary %q, private %q",
+			ordinary.Storage, private.Storage)
 	}
 }

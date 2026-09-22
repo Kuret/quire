@@ -199,7 +199,11 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 	// them, or be unaffected — and the backend is the side that works that out
 	// from the records (PLAN §2). Sent before any note, so the screen shows the
 	// finished state with a note about it rather than a note over a stale list.
-	if err := s.sendDownloaded(out); err != nil {
+	private := false
+	if src, ok := s.store.Get(req.SourceID); ok {
+		private = src.IsPrivate()
+	}
+	if err := s.sendDownloaded(out, private); err != nil {
 		return err
 	}
 

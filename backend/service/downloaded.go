@@ -77,6 +77,19 @@ const RemovedSourceNote = "The source this came from has been removed, so there 
 const NoDownloadsYet = "Nothing downloaded yet. A chapter you download will show up here, " +
 	"whether or not you are watching the series."
 
+// NoPrivateDownloadsYet is the empty state for the private Downloaded screen.
+const NoPrivateDownloadsYet = "Nothing downloaded yet from a private source. A chapter you " +
+	"download from one will show up here."
+
+// listDownloadedRequest is the MessageListDownloaded payload.
+type listDownloadedRequest struct {
+	// Private selects which overview this is asking for: false is exactly
+	// today's list (private sources excluded), true is only series from
+	// private sources. The two are disjoint by construction — see
+	// downloadedRows — so a series never appears on both.
+	Private bool `json:"private,omitempty"`
+}
+
 // sendDownloaded answers with every series that has at least one download.
 //
 // # Why the row is (source, series) and always names its source
@@ -94,17 +107,26 @@ const NoDownloadsYet = "Nothing downloaded yet. A chapter you download will show
 // Newest first, because the store already sorts records by StoredAt descending
 // and what the user did last is what they are most likely looking for. A series
 // sorts by its newest record.
-func (s *Service) sendDownloaded(out Sender) error {
-	rows := s.downloadedRows()
-	msg := map[string]any{"series": rows}
+func (s *Service) sendDownloaded(out Sender, private bool) error {
+	rows := s.downloadedRows(private)
+	msg := map[string]any{"series": rows, "private": private, "storage": s.storageStatus().Message}
 	if len(rows) == 0 {
-		msg["empty"] = NoDownloadsYet
+		if private {
+			msg["empty"] = NoPrivateDownloadsYet
+		} else {
+			msg["empty"] = NoDownloadsYet
+		}
 	}
 	return send(out, appload.MessageDownloadedList, msg)
 }
 
 // downloadedRows groups the library records into one row per (source, series).
-func (s *Service) downloadedRows() []downloadedRow {
+//
+// private selects which of the two disjoint overviews this builds: false is
+// today's ordinary list (a private source's series excluded), true is only
+// private sources' series. A series can appear on at most one of the two,
+// because whether its source is private does not change between calls.
+func (s *Service) downloadedRows(private bool) []downloadedRow {
 	if s.libStore == nil && s.shelfStore == nil {
 		return nil
 	}
@@ -119,12 +141,13 @@ func (s *Service) downloadedRows() []downloadedRow {
 		}
 	}
 
-	// Private content is reached only via the private source list — never
-	// this overview, whether it is a library document or a chapter saved in
-	// Quire.
-	isPrivate := func(sourceID string) bool {
+	// wantSource reports whether a source belongs on the overview being
+	// built: the ordinary one wants public sources, the private one wants
+	// only private ones. Either way, a series is on exactly one of the two.
+	wantSource := func(sourceID string) bool {
 		src, ok := s.store.Get(sourceID)
-		return ok && src.IsPrivate()
+		isPrivate := ok && src.IsPrivate()
+		return isPrivate == private
 	}
 
 	libGroup := map[key][]library.Record{}
@@ -132,7 +155,7 @@ func (s *Service) downloadedRows() []downloadedRow {
 		// Store order is newest first, so the order groups are first seen in
 		// is the order they should come out in.
 		for _, rec := range s.libStore.List() {
-			if rec.DocumentUUID == "" || isPrivate(rec.Source) {
+			if rec.DocumentUUID == "" || !wantSource(rec.Source) {
 				continue
 			}
 			k := key{rec.Source, rec.Series}
@@ -148,7 +171,7 @@ func (s *Service) downloadedRows() []downloadedRow {
 		// even if nothing is in the library — the whole point of a row that
 		// only saved chapters put here.
 		for _, rec := range s.shelfStore.List() {
-			if isPrivate(rec.Source) {
+			if !wantSource(rec.Source) {
 				continue
 			}
 			k := key{rec.Source, rec.Series}
