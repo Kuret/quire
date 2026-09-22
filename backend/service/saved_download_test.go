@@ -72,6 +72,28 @@ func TestDefaultDownloadSavesInQuire(t *testing.T) {
 	}
 }
 
+// The confirm question for a "quire" volume download says what actually
+// happens — separate chapters, not one file — rather than the library
+// wording, which would be a false promise about a PDF that is never built.
+func TestQuireVolumeConfirmQuestionSaysSeparateChapters(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addVolumeSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := firstChapter(t, h.svc, rec)
+
+	handle(t, h.svc, rec, appload.MessageEnqueueDownload,
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+	ask := waitForPhase(t, rec, "confirm")
+
+	message, _ := ask["message"].(string)
+	if strings.Contains(message, "It becomes one file") {
+		t.Errorf("question %q makes the library's one-file promise for a Quire save", message)
+	}
+	if !strings.Contains(message, "separate chapters") {
+		t.Errorf("question %q does not say these save as separate chapters", message)
+	}
+}
+
 // A volume-grouped "quire" download saves each chapter as its own record —
 // there is no PDF here to give the volume a single identity.
 func TestQuireVolumeDownloadSavesEachChapterSeparately(t *testing.T) {

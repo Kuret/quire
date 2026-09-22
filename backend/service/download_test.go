@@ -518,7 +518,8 @@ func TestFirstTapAsksBeforeDownloadingAVolume(t *testing.T) {
 
 	seriesID, chapterID := firstChapter(t, svc, rec)
 	handle(t, svc, rec, appload.MessageEnqueueDownload,
-		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+`"}`)
+		`{"grouping":"volume","sourceId":"example-reader","seriesId":"`+seriesID+`","volumeId":"`+chapterID+
+			`","destination":"library"}`)
 
 	ask := waitForPhase(t, rec, "confirm")
 

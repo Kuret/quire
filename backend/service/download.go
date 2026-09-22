@@ -525,8 +525,18 @@ func (s *Service) askToConfirm(ctx context.Context, out Sender, req downloadRequ
 	p.ChapterCount = n
 	p.FirstChapter, p.LastChapter = first, last
 	p.VolumeLabel = vol.Label
-	p.Message = fmt.Sprintf("%s It becomes one file, so your place in the reader carries "+
-		"across chapters. Download all %d?", what, n)
+
+	// The rest of the sentence depends on where this is going: a library
+	// download assembles the volume into one PDF, which is the whole reason
+	// the reading position carries across chapters; a Quire download saves
+	// each chapter as its own record (see finishSavedDownload), so there is
+	// no single file to say that about.
+	if req.destination() == destinationLibrary {
+		p.Message = fmt.Sprintf("%s It becomes one file, so your place in the reader carries "+
+			"across chapters. Download all %d?", what, n)
+	} else {
+		p.Message = fmt.Sprintf("%s Quire saves these as %d separate chapters. Save all %d?", what, n, n)
+	}
 	_ = send(out, appload.MessageDownloadProgress, p)
 }
 
