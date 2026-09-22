@@ -717,6 +717,11 @@ func (c *Client) attempt(ctx context.Context, p *Policy, method string, u *url.U
 		return nil, fmt.Errorf("fetch: %s: %w (> %d)", u.Redacted(), ErrTooLarge, maxBody)
 	}
 
+	// The size cap above is enforced on the bytes actually read off the wire,
+	// before decoding — decodeToUTF8 only ever runs on a body already inside
+	// that cap, and only reshapes bytes that are HTML in the first place.
+	buf = decodeToUTF8(hres.Header, buf)
+
 	final := hres.Request.URL
 	if final == nil {
 		final = u
