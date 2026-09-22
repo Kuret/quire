@@ -440,6 +440,22 @@ const (
 	// MessageRenameSource.
 	MessageSetSourceProxy MessageType = 76
 
+	// The allowedHosts editor: record-and-offer, not prompt-on-first-sight.
+	// When a fetch on a source's behalf is refused for being off that
+	// source's registrable domain (fetch.GuardError.OffDomain), the refusal
+	// is noted rather than interrupting anything, and offered here — in the
+	// source list, where the owner is present — instead of in a modal that
+	// would either appear unattended or be granted on reflex.
+	//
+	// MessageAllowSourceHost is UI→BE, JSON {sourceId, host}: appends host to
+	// the source's allowedHosts and persists it. MessageRevokeSourceHost is
+	// UI→BE, JSON {sourceId, host}: removes it. Neither has a reply of its
+	// own; both are followed by a fresh MessageSources, like
+	// MessageSetSourceProxy — the row's pending and allowed lists both
+	// change, and a whole redraw is simpler than two more message shapes.
+	MessageAllowSourceHost  MessageType = 77
+	MessageRevokeSourceHost MessageType = 78
+
 	MessageError MessageType = 90
 )
 
@@ -505,6 +521,8 @@ var messageNames = map[MessageType]string{
 	MessageClearCache:            "ClearCache",
 	MessageCacheConfirm:          "CacheConfirm",
 	MessageSetSourceProxy:        "SetSourceProxy",
+	MessageAllowSourceHost:       "AllowSourceHost",
+	MessageRevokeSourceHost:      "RevokeSourceHost",
 	MessageError:                 "Error",
 }
 

@@ -117,4 +117,12 @@ var CacheConfirm = 74
 // like RenameSource.
 var SetSourceProxy = 76
 
+// The allowedHosts editor (record-and-offer, not prompt-on-first-sight): a
+// pending host is offered from the source list, never from a modal that
+// would appear unattended or be granted on reflex. Allow appends to the
+// source's allowedHosts; Revoke removes one. Neither replies on its own — a
+// fresh Sources follows, like SetSourceProxy.
+var AllowSourceHost = 77
+var RevokeSourceHost = 78
+
 var Error = 90
