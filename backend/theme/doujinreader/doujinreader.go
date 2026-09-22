@@ -436,39 +436,9 @@ func (t *Theme) Chapters(ctx context.Context, s *theme.Source, id string) ([]the
 // comes from the first reader page visited, which carries it in the same
 // `pages` hidden field as every other reader page of the gallery.
 func (t *Theme) Pages(ctx context.Context, s *theme.Source, chapterID string) ([]string, error) {
-	o, err := spec.Resolve(s.Overrides)
+	readerPath, first, total, err := t.firstReaderPage(ctx, s, chapterID)
 	if err != nil {
 		return nil, err
-	}
-	gallery, err := t.doc(ctx, s, chapterID+"/")
-	if err != nil {
-		return nil, err
-	}
-	numID := lastSegment(chapterID)
-	segment := o.PathSegment(KeyReaderPath)
-	gallery.Find("a[href]").EachWithBreak(func(_ int, a *goquery.Selection) bool {
-		href, ok := a.Attr("href")
-		if !ok {
-			return true
-		}
-		if seg, ok := t.readerSegment(s, numID, href); ok {
-			segment = seg
-			return false
-		}
-		return true
-	})
-
-	readerPath := func(n int) string {
-		return "/" + segment + "/" + numID + "/" + strconv.Itoa(n) + "/"
-	}
-
-	first, err := t.doc(ctx, s, readerPath(1))
-	if err != nil {
-		return nil, err
-	}
-	total := readTotalPages(first)
-	if total < 1 {
-		total = 1
 	}
 
 	out := make([]string, 0, total)
@@ -485,6 +455,67 @@ func (t *Theme) Pages(ctx context.Context, s *theme.Source, chapterID string) ([
 		}
 	}
 	return out, nil
+}
+
+// FirstPage implements theme.FirstPageProber.
+//
+// See the package comment and theme.FirstPageProber for why this exists:
+// Pages() above visits every one of a gallery's pages in turn because there
+// is no bulk listing, and the probe's capability check only ever needs one
+// image. This does exactly the first two requests Pages() would have made —
+// the gallery detail page, to find the reader's own path segment, and the
+// reader's own first page, to read the image off it — and stops there.
+func (t *Theme) FirstPage(ctx context.Context, s *theme.Source, chapterID string) ([]string, error) {
+	_, first, _, err := t.firstReaderPage(ctx, s, chapterID)
+	if err != nil {
+		return nil, err
+	}
+	if u := readerImage(first); u != "" {
+		return []string{t.absolutise(s, u)}, nil
+	}
+	return nil, nil
+}
+
+// firstReaderPage is the work Pages() and FirstPage share: find the
+// gallery's reader path, fetch its first page, and read the total page
+// count off it. readerPath is returned so Pages() can keep walking; total is
+// always at least 1.
+func (t *Theme) firstReaderPage(ctx context.Context, s *theme.Source, chapterID string) (readerPath func(n int) string, first *goquery.Document, total int, err error) {
+	o, err := spec.Resolve(s.Overrides)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	gallery, err := t.doc(ctx, s, chapterID+"/")
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	numID := lastSegment(chapterID)
+	segment := o.PathSegment(KeyReaderPath)
+	gallery.Find("a[href]").EachWithBreak(func(_ int, a *goquery.Selection) bool {
+		href, ok := a.Attr("href")
+		if !ok {
+			return true
+		}
+		if seg, ok := t.readerSegment(s, numID, href); ok {
+			segment = seg
+			return false
+		}
+		return true
+	})
+
+	readerPath = func(n int) string {
+		return "/" + segment + "/" + numID + "/" + strconv.Itoa(n) + "/"
+	}
+
+	first, err = t.doc(ctx, s, readerPath(1))
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	total = readTotalPages(first)
+	if total < 1 {
+		total = 1
+	}
+	return readerPath, first, total, nil
 }
 
 // readerImage reads the full-resolution page image off a reader document.

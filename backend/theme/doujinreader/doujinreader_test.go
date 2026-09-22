@@ -210,6 +210,31 @@ func TestPagesVisitsEveryReaderPage(t *testing.T) {
 	}
 }
 
+// FirstPage implements theme.FirstPageProber: the probe's capability check
+// needs one image, not the whole gallery, and this family's Pages() would
+// otherwise cost one request per page (see the package comment and
+// theme.FirstPageProber). Deliberately no routes are registered for reader
+// pages 2 and 3 here — themetest.Fetcher fails the test outright on a
+// request to an unregistered route, so if FirstPage regressed into walking
+// every page like Pages does, this test would fail on the unrouted request
+// rather than merely on a wrong answer.
+func TestFirstPageStopsAfterOnePage(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /g/42/":   {File: "series.html"},
+		"GET /g/42/1/": {File: "reader1.html"},
+	})
+	th := doujinreader.NewWithClock(f, clock)
+
+	got, err := th.FirstPage(context.Background(), site(), "/g/42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"https://images.example.invalid/005/42/1.webp"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("pages =\n %v\nwant\n %v", got, want)
+	}
+}
+
 // A gallery whose page count field cannot be read at all must still yield the
 // one page that was actually fetched, rather than nothing.
 func TestPagesTolerateAMissingPageCount(t *testing.T) {

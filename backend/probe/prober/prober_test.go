@@ -339,11 +339,26 @@ func TestLoginWallWarnsRatherThanBlocks(t *testing.T) {
 
 // PLAN §7.5 stage 5: page extraction failing means the source is useless, so it
 // is refused even though everything else worked.
+//
+// search.html carries three usable results, and page extraction now retries
+// across candidates the same way the file-based branch does (2026-09-22, the
+// MangaHere fix) — so all three need routes here, or the theme asking for one
+// stage 5 now legitimately visits would be an unrouted request rather than
+// the failure this test is actually about. All three point at the same
+// chapters-ajax.html fixture, which always names "the-lantern-keeper"'s own
+// chapters regardless of which series asked (see
+// TestARedirectOffTheHostDropsWhatWasConfirmed for the same wiring), so every
+// candidate's newest chapter is the one broken route below and the source
+// stays refused once all three are exhausted.
 func TestVerdictPartialRefusedWhenPagesFail(t *testing.T) {
 	routes := madaraRoutes()
 	routes["GET /manga/the-lantern-keeper/chapter-4/"] = themetest.Route{
 		Body: "<html><body><div class=\"reading-content\"></div></body></html>",
 	}
+	routes["GET /manga/salt-and-cedar/"] = themetest.Route{File: "series.html"}
+	routes["POST /manga/salt-and-cedar/ajax/chapters/"] = themetest.Route{File: "chapters-ajax.html"}
+	routes["GET /manga/paper-lanterns-of-the-ninth-ward/"] = themetest.Route{File: "series.html"}
+	routes["POST /manga/paper-lanterns-of-the-ninth-ward/ajax/chapters/"] = themetest.Route{File: "chapters-ajax.html"}
 	res := run(t, routes, &recordUI{})
 
 	if res.Verdict != theme.VerdictPartial {

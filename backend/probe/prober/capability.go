@@ -377,7 +377,7 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 			// candidate, check the wall-clock budget: if it has elapsed, stop
 			// trying further candidates and fall through to the existing
 			// "none of the candidates had anything" handling.
-			if i > 0 && r.p.now().Sub(loopStart) >= capabilityFileBudget {
+			if i > 0 && r.p.now().Sub(loopStart) >= capabilityCandidateBudget {
 				break
 			}
 
@@ -416,78 +416,114 @@ func (r *run) stageCapability(ctx context.Context, th theme.Theme, src *theme.So
 	}
 
 	// Page-based themes keep the single-candidate behaviour stage 5 has always
-	// had: the first search hit is representative of the site, unlike a book
-	// service's.
-	stub := candidates[0]
-	series, err := th.Series(ctx, src, stub.ID)
-	switch {
-	case err != nil:
-		cap.Series.Note = plainError(err)
-	case series == nil || strings.TrimSpace(series.Title) == "":
-		cap.Series.Note = "the series page had no title."
-	default:
-		cap.Series.OK = true
-	}
-
-	chapters, err := th.Chapters(ctx, src, stub.ID)
-	switch {
-	case err != nil:
-		cap.Chapters.Note = plainError(err)
-	case len(chapters) == 0:
-		cap.Chapters.Note = "the series listed no chapters."
-	default:
-		cap.Chapters.OK = true
-		cap.Chapters.Count = len(chapters)
-	}
-	if !cap.Chapters.OK {
-		return cap, nil
-	}
-
-	// The *newest* chapter, which is the last one now that PLAN §7.2 has
-	// Chapters return ascending reading order (2026-09-15).
+	// had for search and chapters: a manga site's first search hit is
+	// representative of the whole catalogue, unlike a book service's, so a
+	// site that lists no chapters for it is a fact about the site and stays a
+	// plain refusal without trying a second result (see
+	// TestStageFivePageBasedThemeDoesNotRetryASecondSearchResult).
 	//
-	// Deliberate, not incidental. A site that has changed its reader markup
-	// keeps the old chapters exactly as they were, so probing the earliest
-	// chapter can report a capability the user will not actually have on
-	// anything they read. The most recent chapter is the one that reflects
-	// what the site does today, which is what stage 5 is asking about.
-	newest := chapters[len(chapters)-1]
-	pages, err := th.Pages(ctx, src, newest.ID)
-	switch {
-	case err != nil:
-		cap.Pages.Note = plainError(err)
-	case len(pages) == 0:
-		cap.Pages.Note = "the chapter contained no images."
-	default:
-		good := 0
-		for _, p := range pages {
-			if plausibleImageURL(p) {
-				good++
-			}
-		}
-		if good == 0 {
-			cap.Pages.Note = "the chapter's image addresses were not usable."
-		} else {
-			cap.Pages.OK = true
-			cap.Pages.Count = good
-		}
-	}
-	if !cap.Pages.OK {
-		return cap, nil
-	}
-
-	// One image, not a chapter. Proportionate — stage 5 already costs several
-	// requests and the device is on a battery — and enough to answer the only
-	// question extraction leaves open: will the bytes actually arrive?
-	first := ""
-	for _, p := range pages {
-		if plausibleImageURL(p) {
-			first = p
+	// Page extraction on the chapter found is a different question, and
+	// MangaHere is the evidence one try is not enough there either
+	// (2026-09-22): its most *popular* series — exactly what stage 5's
+	// empty-query listing samples — is licensed and legitimately serves no
+	// pages, while the site itself works fine (see fanfox's licensedRE). That
+	// refusal only shows up once chapters are already listed, on the one
+	// chapter whose pages this check reads, so a candidate whose chapters
+	// succeed but whose pages do not gets the same up-to-three,
+	// budget-gated retry the file-based branch above uses — trying the next
+	// search result, which is a different title, rather than condemning the
+	// whole source for one title's own refusal.
+	loopStart := r.p.now()
+	for i, stub := range candidates {
+		if i > 0 && r.p.now().Sub(loopStart) >= capabilityCandidateBudget {
 			break
 		}
+
+		series, err := th.Series(ctx, src, stub.ID)
+		switch {
+		case err != nil:
+			cap.Series = stepResult{Note: plainError(err)}
+		case series == nil || strings.TrimSpace(series.Title) == "":
+			cap.Series = stepResult{Note: "the series page had no title."}
+		default:
+			cap.Series = stepResult{OK: true}
+		}
+
+		chapters, err := th.Chapters(ctx, src, stub.ID)
+		switch {
+		case err != nil:
+			cap.Chapters = stepResult{Note: plainError(err)}
+		case len(chapters) == 0:
+			cap.Chapters = stepResult{Note: "the series listed no chapters."}
+		default:
+			cap.Chapters = stepResult{OK: true, Count: len(chapters)}
+		}
+		if !cap.Chapters.OK {
+			if i == 0 {
+				return cap, nil
+			}
+			continue
+		}
+
+		// The *newest* chapter, which is the last one now that PLAN §7.2 has
+		// Chapters return ascending reading order (2026-09-15).
+		//
+		// Deliberate, not incidental. A site that has changed its reader markup
+		// keeps the old chapters exactly as they were, so probing the earliest
+		// chapter can report a capability the user will not actually have on
+		// anything they read. The most recent chapter is the one that reflects
+		// what the site does today, which is what stage 5 is asking about.
+		newest := chapters[len(chapters)-1]
+		pages, err := r.capabilityPages(ctx, th, src, newest.ID)
+		switch {
+		case err != nil:
+			cap.Pages = stepResult{Note: plainError(err)}
+		case len(pages) == 0:
+			cap.Pages = stepResult{Note: "the chapter contained no images."}
+		default:
+			good := 0
+			for _, p := range pages {
+				if plausibleImageURL(p) {
+					good++
+				}
+			}
+			if good == 0 {
+				cap.Pages = stepResult{Note: "the chapter's image addresses were not usable."}
+			} else {
+				cap.Pages = stepResult{OK: true, Count: good}
+			}
+		}
+		if !cap.Pages.OK {
+			continue
+		}
+
+		// One image, not a chapter. Proportionate — stage 5 already costs
+		// several requests and the device is on a battery — and enough to
+		// answer the only question extraction leaves open: will the bytes
+		// actually arrive?
+		first := ""
+		for _, p := range pages {
+			if plausibleImageURL(p) {
+				first = p
+				break
+			}
+		}
+		cap.Image, cap.Challenge, cap.ImageHost, err = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
+		return cap, err
 	}
-	cap.Image, cap.Challenge, cap.ImageHost, err = r.fetchOnePageImage(ctx, th, src, newest.ID, first)
-	return cap, err
+	return cap, nil
+}
+
+// capabilityPages is stage 5's "get me pages to prove one can be fetched"
+// call. Most themes' Pages() is already this cheap; a theme that implements
+// theme.FirstPageProber gets asked for one page instead, which for a family
+// with no bulk page listing (doujinreader) is the difference between one
+// request and one per page in the chapter. See theme.FirstPageProber for why.
+func (r *run) capabilityPages(ctx context.Context, th theme.Theme, src *theme.Source, chapterID string) ([]string, error) {
+	if fp, ok := th.(theme.FirstPageProber); ok {
+		return fp.FirstPage(ctx, src, chapterID)
+	}
+	return th.Pages(ctx, src, chapterID)
 }
 
 // confirmTheme runs theme.Confirmer's strong check, or passes when the theme
@@ -622,7 +658,7 @@ func (r *run) fetchOnePageImage(ctx context.Context, th theme.Theme, src *theme.
 	// host is on src.AllowedHosts, but a defensive stop is one line and cheap.
 	asked := false
 	for {
-		pol, err := src.Policy()
+		pol, err := theme.PolicyFor(th, src)
 		if err != nil {
 			step.Note = plainError(err)
 			return step, nil, host, nil

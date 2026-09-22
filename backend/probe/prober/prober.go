@@ -96,13 +96,16 @@ const capabilityListing = ""
 // match it, and it asks for nothing unusual.
 const capabilityQuery = "one"
 
-// capabilityFileBudget is the wall-clock time limit for attempting multiple
-// book candidates in a file-based source probe. /api/releases measured at ~36s
-// on a live Shelfmark instance on 2026-09-20, so 90s admits the second and
-// third candidate in the normal case while stopping a pathological one from
-// stacking up three 6-minute fetch.SlowRequestTimeout waits. The first
+// capabilityCandidateBudget is the wall-clock time limit for attempting
+// multiple candidates in a source probe — originally named for the file-based
+// (book) branch alone, then widened (2026-09-22) to also gate the page-based
+// candidate retry MangaHere's own false `partial` (a licensed, most-popular
+// series sampled by stage 5) showed was needed. /api/releases measured at
+// ~36s on a live Shelfmark instance on 2026-09-20, so 90s admits the second
+// and third candidate in the normal case while stopping a pathological one
+// from stacking up three 6-minute fetch.SlowRequestTimeout waits. The first
 // candidate is always tried in full, never skipped for time.
-const capabilityFileBudget = 90 * time.Second
+const capabilityCandidateBudget = 90 * time.Second
 
 // Progress is one streamed stage update (message type 13). It is deliberately
 // tiny: PLAN §7.1's real payload ceiling is a few hundred KB and this is sent

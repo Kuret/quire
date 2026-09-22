@@ -38,6 +38,21 @@ type stubTheme struct {
 	// chaptersCalls, when non-nil, records every ID Chapters was asked about,
 	// so a test can pin how many candidates the capability check tried.
 	chaptersCalls *[]string
+	// pagesByID overrides the single default page-image slice, keyed by
+	// chapter ID, for tests exercising the page-based candidate retry
+	// (MangaHere/fanfox: a licensed title's chapter serves no pages while
+	// another of the same site's does). Nil falls back to the working
+	// default of one page for every chapter ID.
+	pagesByID map[string][]string
+	// pagesErrByID makes Pages fail outright for a given chapter ID, the way
+	// fanfox's own Pages does for a licensed series — a fact about that
+	// title, not the site, which is exactly what the retry exists to survive
+	// without losing the theme's own precise reason when it does not.
+	pagesErrByID map[string]error
+	// pagesCalls, when non-nil, records every chapter ID Pages was asked
+	// about, so a test can pin how many candidates' page extraction was
+	// actually tried.
+	pagesCalls *[]string
 }
 
 func (s stubTheme) ID() string                  { return s.id }
@@ -78,7 +93,18 @@ func (s stubTheme) Chapters(_ context.Context, _ *theme.Source, id string) ([]th
 	return []theme.Chapter{{ID: "/series/one/1/", Title: "Chapter 1", Number: 1}}, nil
 }
 
-func (s stubTheme) Pages(context.Context, *theme.Source, string) ([]string, error) {
+func (s stubTheme) Pages(_ context.Context, _ *theme.Source, id string) ([]string, error) {
+	if s.pagesCalls != nil {
+		*s.pagesCalls = append(*s.pagesCalls, id)
+	}
+	if s.pagesErrByID != nil {
+		if err, ok := s.pagesErrByID[id]; ok {
+			return nil, err
+		}
+	}
+	if s.pagesByID != nil {
+		return s.pagesByID[id], nil
+	}
 	if s.pageURL != "" {
 		return []string{s.pageURL}, nil
 	}

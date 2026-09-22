@@ -453,6 +453,39 @@ type ProbeQuerier interface {
 	ProbeQuery() string
 }
 
+// FirstPageProber is implemented by a theme that can name one page image
+// cheaply, without materialising every page of the chapter.
+//
+// Stage 5's capability check (backend/probe/prober's stageCapability) only
+// ever needs *one* image: proof that a page address extracted from the site
+// actually resolves to bytes, not a catalogue of them (see the 2026-09-16
+// correction in capability.go). It gets there by calling Pages() and taking
+// the first plausible URL, which for most themes costs exactly the one
+// request Pages() itself makes. It is not exactly one request for every
+// theme.
+//
+// doujinreader is the case that made this worth having: its family has no
+// bulk page listing, so Pages() visits every reader page in turn to build
+// the full list (see its own package comment). For a 144-page gallery that
+// is 144 requests, and PLAN §7.4's 2-second-per-host floor turns that into
+// minutes — long enough to time out a check that only wanted one image. A
+// theme shaped like that answers this interface instead, stopping after the
+// one page the check actually needs.
+//
+// It is a side interface for the same reason Confirmer, FileTheme and
+// ProbeQuerier are: most themes' Pages() is already cheap and have nothing
+// to add here, and a theme with no opinion is not making a false claim by
+// omission — stageCapability falls back to Pages() for it.
+type FirstPageProber interface {
+	// FirstPage returns the first page image URL of chapterID (or as many as
+	// were free to discover while finding it), without visiting every page
+	// the chapter has. An empty slice with a nil error means the chapter had
+	// no pages, exactly as Pages returning nothing does; the two must agree
+	// on that chapter, since a caller falling back to Pages() must see the
+	// same answer.
+	FirstPage(ctx context.Context, s *Source, chapterID string) ([]string, error)
+}
+
 // DiscoveryFetcher wraps f so that retrieval requests are made as discovery
 // instead. It is what a theme's DiscoveryOnly is expected to be built from.
 //
