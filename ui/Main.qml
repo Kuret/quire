@@ -80,6 +80,12 @@ Rectangle {
     // user came from rather than always to the grid they may never have seen.
     property string seriesCameFrom: "browse"
 
+    // Where the saved-chapter reader goes back to. "series" for the ordinary
+    // route (a Read tap on a saved row in ChapterList, which is already on
+    // screen); "downloaded" for the Downloaded overview's "Read latest",
+    // which can open a saved chapter without ever visiting its series page.
+    property string savedReaderCameFrom: "series"
+
     // The layout each of the three screens is stored in (PLAN §7.1 type 75).
     //
     // Plain strings rather than the status object, for the reason the robots
@@ -284,7 +290,8 @@ Rectangle {
     // below): a chapter that turns out not to be saved, or whose files are
     // gone, answers MessageError instead, and switching first would leave
     // the reader open on nothing.
-    function openSaved(sourceId, seriesId, chapterId) {
+    function openSaved(sourceId, seriesId, chapterId, cameFrom) {
+        root.savedReaderCameFrom = cameFrom ? cameFrom : "series"
         root.send(Msg.OpenSaved, {"sourceId": sourceId, "seriesId": seriesId, "chapterId": chapterId})
     }
 
@@ -297,10 +304,11 @@ Rectangle {
     function leaveReader() {
         if (tryReaderScreen.mode === "saved") {
             root.closeSaved()
+            root.showScreen(root.savedReaderCameFrom)
         } else {
             root.endTry()
+            root.showScreen("series")
         }
-        root.showScreen("series")
     }
 
     function closeSaved() {
@@ -441,6 +449,13 @@ Rectangle {
                 // needs and because a row is filled in one place. The
                 // long-press menu's "Read latest" is that action.
                 "latestUuid": r.latestUuid ? r.latestUuid : "",
+                // Saved in Quire: how many chapters of this series are saved
+                // (a series can have a row here from saved chapters alone,
+                // with nothing in the library — backend/service/downloaded.go)
+                // and which one to open for "Read latest", which prefers this
+                // over latestUuid (ui/DownloadedList.qml's readable/chose).
+                "savedCount": r.savedCount ? r.savedCount : 0,
+                "latestSavedChapterId": r.latestSavedChapterId ? r.latestSavedChapterId : "",
                 // The menu's Watch / Stop watching line, from the store. A
                 // row here is a (source, series) pair, so it answers for
                 // itself rather than for the source being browsed.
@@ -1706,6 +1721,11 @@ Rectangle {
             // missing document is reported the same way here as anywhere
             // else (PLAN §6 M6).
             onReadRequested: root.openInReader(documentUuid)
+            // "Read latest" on a row whose newest thing is a chapter saved
+            // in Quire (DownloadedList.qml's readable/chose prefer this).
+            // Back from the reader returns here rather than to a series
+            // screen this route never opened.
+            onReadSavedRequested: root.openSaved(sourceId, seriesId, chapterId, "downloaded")
 
             // Watching a series from the screen that lists what is already on
             // the tablet. A row here is a (source, series) pair, so it names
@@ -1847,7 +1867,8 @@ Rectangle {
             // Saved in Quire: reading and deleting a chapter kept in Quire's
             // own storage. Read comes back on SavedOpened rather than
             // switching straight away — see the dispatch above.
-            onReadSavedRequested: root.openSaved(root.currentSourceId, root.currentSeriesId, chapterId)
+            onReadSavedRequested: root.openSaved(root.currentSourceId, root.currentSeriesId,
+                                                 chapterId, "series")
             onDeleteSavedRequested: root.send(Msg.DeleteSaved,
                 {"sourceId": root.currentSourceId, "seriesId": root.currentSeriesId,
                  "chapterId": chapterId, "confirmed": false})

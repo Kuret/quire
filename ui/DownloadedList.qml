@@ -147,6 +147,10 @@ Item {
     // Reading the newest download without opening the series first, and the
     // watch that was otherwise only reachable from inside it.
     signal readRequested(string documentUuid)
+    // "Read latest" on a row whose newest thing is a chapter saved in Quire
+    // rather than a library document — see readable()/chose() below, which
+    // prefer this over readRequested whenever both exist.
+    signal readSavedRequested(string sourceId, string seriesId, string chapterId)
     signal watchRequested(string sourceId, string seriesId, string title)
     signal unwatchRequested(string sourceId, string seriesId)
 
@@ -162,6 +166,7 @@ Item {
     property string menuSeriesId: ""
     property string menuTitle: ""
     property string menuLatestUuid: ""
+    property string menuLatestSavedChapterId: ""
 
     // subtitleOf is the row's second line: what it is, which source it came
     // from, and what is already on the tablet.
@@ -188,11 +193,21 @@ Item {
         return row.openable ? line : line + " — " + row.note
     }
 
-    // readable says whether the row names a document to open. A row carries the
-    // newest download of its series; a library that predates the record, or a
-    // series whose last download has gone, names none.
+    // readable says whether the row names something to open — a library
+    // document or a chapter saved in Quire. A row carries the newest of each;
+    // a library that predates either record, or a series whose last download
+    // has gone, names none.
     function readable(row) {
-        return row.latestUuid !== undefined && String(row.latestUuid).length > 0
+        return screen.hasLatestSaved(row)
+               || (row.latestUuid !== undefined && String(row.latestUuid).length > 0)
+    }
+
+    // hasLatestSaved is true when the row's newest saved chapter is what
+    // "Read latest" should open — see chose(), which prefers it over the
+    // library document whenever both exist.
+    function hasLatestSaved(row) {
+        return row.latestSavedChapterId !== undefined
+               && String(row.latestSavedChapterId).length > 0
     }
 
     function itemsFor(row) {
@@ -260,6 +275,7 @@ Item {
         screen.menuSeriesId = row.seriesId
         screen.menuTitle = row.title
         screen.menuLatestUuid = row.latestUuid ? String(row.latestUuid) : ""
+        screen.menuLatestSavedChapterId = row.latestSavedChapterId ? String(row.latestSavedChapterId) : ""
         menu.show(screen.itemsFor(row), x, y)
     }
 
@@ -270,7 +286,13 @@ Item {
                                  screen.menuSeriesId, screen.menuTitle)
             return
         case "read":
-            screen.readRequested(screen.menuLatestUuid)
+            // The newest saved chapter wins over the newest library document
+            // — see hasLatestSaved/readable.
+            if (screen.menuLatestSavedChapterId.length > 0)
+                screen.readSavedRequested(screen.menuSourceId, screen.menuSeriesId,
+                                          screen.menuLatestSavedChapterId)
+            else
+                screen.readRequested(screen.menuLatestUuid)
             return
         case "watch":
             screen.watchRequested(screen.menuSourceId, screen.menuSeriesId, screen.menuTitle)

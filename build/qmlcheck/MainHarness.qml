@@ -1885,6 +1885,20 @@ Window {
         win.want("and the chapter it belongs to",
                  backend.bodyOf(Msg.SavePosition).chapterId, "c9")
 
+        // "Read latest" from the Downloaded overview can open a saved
+        // chapter without ever visiting its series screen — leaving has to
+        // go back there instead of to a "series" screen this route never
+        // opened (ui/Main.qml's savedReaderCameFrom).
+        win.app.screen = "downloaded"
+        win.app.openSaved("src-z", "/manga/never-visited/", "c1", "downloaded")
+        win.deliver(Msg.SavedOpened, {
+            "sourceId": "src-z", "seriesId": "/manga/never-visited/", "chapterId": "c1",
+            "chapterTitle": "Chapter 1", "pages": ["/tmp/z0.jpg"], "position": 0})
+        win.want("opened from Downloaded", win.app.screen, "saved")
+        win.app.goBack()
+        win.want("Back returns to Downloaded, not a series screen never opened",
+                 win.app.screen, "downloaded")
+
         // ---- leaving --------------------------------------------------------------------
         //
         // **It detaches; it does not terminate.** The backend is a service that

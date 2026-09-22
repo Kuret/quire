@@ -167,6 +167,11 @@ Window {
 
     property int downloadedReads: 0
     property string downloadedReadUuid: ""
+    // "Read latest" on a row whose newest thing is a chapter saved in Quire.
+    property int downloadedSavedReads: 0
+    property string downloadedSavedReadSource: ""
+    property string downloadedSavedReadSeries: ""
+    property string downloadedSavedReadChapter: ""
     property int downloadedWatches: 0
     property string downloadedWatchedSeries: ""
     property int downloadedUnwatches: 0
@@ -668,6 +673,12 @@ Window {
         onReadRequested: {
             win.downloadedReads++
             win.downloadedReadUuid = documentUuid
+        }
+        onReadSavedRequested: {
+            win.downloadedSavedReads++
+            win.downloadedSavedReadSource = sourceId
+            win.downloadedSavedReadSeries = seriesId
+            win.downloadedSavedReadChapter = chapterId
         }
         onWatchRequested: {
             win.downloadedWatches++
@@ -2535,6 +2546,9 @@ Window {
                     "coverUrl": r.coverUrl ? r.coverUrl : "",
                     "coverPath": r.coverPath ? r.coverPath : "",
                     "latestUuid": r.latestUuid ? r.latestUuid : "",
+                    // A chapter saved in Quire, newest first — see
+                    // "prefers a saved chapter over a library one" below.
+                    "latestSavedChapterId": r.latestSavedChapterId ? r.latestSavedChapterId : "",
                     // Both of the kind's roles, on every row, for the reason
                     // above: a fixture that left them off the first row would
                     // take them off every row after it, and the mark would then
@@ -4867,6 +4881,50 @@ Window {
                  win.downloadedDeleteAsks, 1)
         win.want("about the same series", win.downloadedAskedSeries, "/manga/lost/")
         win.want("without deleting either", win.downloadedDeletes, 0)
+
+        // ---- saved in Quire: "Read latest" prefers a saved chapter --------
+        //
+        // A series can be here from saved chapters alone (backend/service/
+        // downloaded.go), and a row that has both a library document and a
+        // newer saved chapter still opens the saved one — it is the newest
+        // of the two, and reading it goes through OpenSaved, not the
+        // library handoff. A fresh downloadedRows() call, since every test
+        // above this point is done with the rows it set up.
+        downloadedRows([
+            {"sourceId": "src-c", "sourceName": "Example Reader",
+             "seriesId": "/manga/saved-only/", "title": "Saved Only",
+             "detail": "3 chapters saved in Quire", "openable": true, "note": "",
+             "coverUrl": "", "latestUuid": "", "latestSavedChapterId": "c9", "watched": false},
+            {"sourceId": "src-d", "sourceName": "Example Reader",
+             "seriesId": "/manga/both/", "title": "Both Kinds",
+             "detail": "1 chapter saved in Quire · 2 in your library", "openable": true,
+             "note": "", "coverUrl": "", "latestUuid": "doc-both",
+             "latestSavedChapterId": "c12", "watched": false}])
+        downloadedList.view = "list"
+        var savedRowAreas = win.findChildren(downloadedList, "downloadedRowArea", [])
+
+        win.holdOn(savedRowAreas[0])
+        win.want("a saved-only row offers Read latest too",
+                 win.menuActions(downloadedList).join(","), "open,read,watch,delete")
+
+        win.downloadedSavedReads = 0
+        win.downloadedReads = 0
+        win.tapMenu(downloadedList, "read")
+        win.want("it asks for OpenSaved, not the library handoff",
+                 win.downloadedSavedReads, 1)
+        win.want("naming the source", win.downloadedSavedReadSource, "src-c")
+        win.want("the series", win.downloadedSavedReadSeries, "/manga/saved-only/")
+        win.want("and the chapter", win.downloadedSavedReadChapter, "c9")
+        win.want("never the library Read for this row", win.downloadedReads, 0)
+
+        win.holdOn(savedRowAreas[1])
+        win.downloadedSavedReads = 0
+        win.downloadedReads = 0
+        win.tapMenu(downloadedList, "read")
+        win.want("a row with both kinds still prefers the saved chapter",
+                 win.downloadedSavedReads, 1)
+        win.want("naming it", win.downloadedSavedReadChapter, "c12")
+        win.want("not the library document this time either", win.downloadedReads, 0)
 
         // ---- Watching ------------------------------------------------------
 
