@@ -44,6 +44,12 @@ Item {
     // own, so "636 MB" is spelled one way in the whole application.
     property string cacheSummary: ""
 
+    // PLAN §12.6's one storage sentence — savedBytes and cacheBytes together,
+    // and free space when it is known — composed in
+    // backend/service/cache.go's storageStatus and carried on the same
+    // MessageCacheStatus the cache line already reads.
+    property string storageSummary: ""
+
     // The question, while it is being asked. Non-empty *is* the asking: there
     // is one question on this screen at a time and nowhere else to put it.
     property string cacheQuestion: ""
@@ -284,6 +290,19 @@ Item {
             text: screen.cacheSummary.length > 0 ? screen.cacheSummary : "Asking how much is cached…"
             font.pointSize: Style.bodySize
             color: Style.muted
+        }
+
+        // PLAN §12.6: the fuller picture, right under the cache-only line —
+        // what Quire's own storage adds up to (saved chapters and cache
+        // together) and how much room is left on this reMarkable.
+        Text {
+            objectName: "storageSummary"
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: screen.storageSummary
+            font.pointSize: Style.smallSize
+            color: Style.muted
+            visible: screen.storageSummary.length > 0
         }
 
         Rectangle {
