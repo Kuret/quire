@@ -1782,10 +1782,25 @@ Window {
         win.want("opened in saved mode", reader.mode, "saved")
         win.want("at the stored position", reader.index, 1)
 
+        // Reopen it, turn a page and leave through the escape gesture: the
+        // position at that page is what should reach the backend, flushed
+        // rather than left waiting out its debounce (ui/TryReader.qml's
+        // scheduleSavePosition/flushSavePosition).
+        win.deliver(Msg.SavedOpened, {
+            "sourceId": "src-a", "seriesId": "/manga/lantern/", "chapterId": "c9",
+            "chapterTitle": "Chapter 9", "pages": ["/tmp/s0.jpg", "/tmp/s1.jpg"], "position": 0})
+        reader.index = 1
+        backend.forget()
         win.want("the reader consumes the escape gesture here too",
                  win.app.escapeRequested(), true)
         win.want("leaving a saved chapter goes back to its series",
                  win.app.screen, "series")
+        win.want("leaving flushes the page it was on",
+                 backend.countOf(Msg.SavePosition), 1)
+        win.want("naming that page",
+                 backend.bodyOf(Msg.SavePosition).position, 1)
+        win.want("and the chapter it belongs to",
+                 backend.bodyOf(Msg.SavePosition).chapterId, "c9")
 
         // ---- leaving --------------------------------------------------------------------
         //

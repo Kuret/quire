@@ -285,13 +285,23 @@ Rectangle {
 
     // leaveReader is the one path off either reader screen — the header
     // Back, the reader's own overlay Back and the escape gesture all use it.
+    // Try's session is ended outright (endTry); a saved chapter has no
+    // session, only a reading position that might still be waiting out its
+    // debounce, so leaving flushes it immediately instead of losing up to
+    // 1.5s of it.
     function leaveReader() {
         if (tryReaderScreen.mode === "saved") {
-            root.showScreen("series")
+            root.closeSaved()
         } else {
             root.endTry()
-            root.showScreen("series")
         }
+        root.showScreen("series")
+    }
+
+    function closeSaved() {
+        if (!tryReaderScreen.chapterId)
+            return
+        tryReaderScreen.flushSavePosition()
     }
 
     // deleteDownload moves a document to xochitl's Trash and tells the backend
@@ -1817,5 +1827,10 @@ Rectangle {
         onPageWanted: root.send(Msg.TryPageRequest, {
             "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
             "chapterId": tryReaderScreen.chapterId, "index": index})
+        // Saved mode's reading position, debounced on a page turn and
+        // flushed once more on close (root.closeSaved / flushSavePosition).
+        onSavePositionWanted: root.send(Msg.SavePosition, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "chapterId": tryReaderScreen.chapterId, "position": index})
     }
 }

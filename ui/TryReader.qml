@@ -106,6 +106,11 @@ Item {
     // Asks the host to send MessageTryPageRequest for one page. Only ever
     // one at a time — see ensureRequested.
     signal pageWanted(int index)
+    // Saved mode only: asks the host to send MessageSavePosition. Emitted
+    // debounced on a page turn (savePositionTimer) and once more, straight
+    // away, when the reader is left (flushSavePosition) — see Main.qml's
+    // leaveReader/closeSaved.
+    signal savePositionWanted(int index)
 
     readonly property string currentPath: screen.pagePaths[screen.index] !== undefined
                                           ? screen.pagePaths[screen.index] : ""
@@ -174,6 +179,9 @@ Item {
     // "Fetching…" placeholder to show — the reader opens complete, straight
     // at the position the backend last stored for it.
     function openSaved(payload) {
+        // Stops a still-pending debounce from the chapter being left behind
+        // firing after this one has already replaced it.
+        savePositionTimer.stop()
         screen.mode = "saved"
         screen.sourceId = payload.sourceId
         screen.seriesId = payload.seriesId
@@ -270,8 +278,38 @@ Item {
         screen.pageWanted(i)
     }
 
-    onIndexChanged: screen.ensureRequested(screen.index)
+    onIndexChanged: {
+        screen.ensureRequested(screen.index)
+        screen.scheduleSavePosition()
+    }
     onVisibleChanged: if (screen.visible) screen.ensureRequested(screen.index)
+
+    // A reading position is worth keeping for a saved chapter — Try has none
+    // (PLAN's Try milestone: leaving discards the whole session) — but not
+    // worth one round trip a page turn: flicking through a chapter would
+    // otherwise fire a message every tap. The debounce holds the position at
+    // rest and sends the one that stuck; flushSavePosition sends
+    // immediately, for when the reader is about to close and there is no
+    // "later" left to wait for.
+    Timer {
+        id: savePositionTimer
+        interval: 1500
+        repeat: false
+        onTriggered: screen.savePositionWanted(screen.index)
+    }
+
+    function scheduleSavePosition() {
+        if (screen.mode !== "saved")
+            return
+        savePositionTimer.restart()
+    }
+
+    function flushSavePosition() {
+        if (screen.mode !== "saved")
+            return
+        savePositionTimer.stop()
+        screen.savePositionWanted(screen.index)
+    }
 
     Rectangle {
         anchors.fill: parent

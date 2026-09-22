@@ -214,6 +214,9 @@ Window {
     property string triedTitle: ""
     property int tryCloses: 0
     property var tryPageWants: []
+    // Saved mode's reading position (SavePosition), sent debounced or by
+    // flushSavePosition — see the reader's own comment.
+    property var savePositionWants: []
 
     // What the probe wizard answered with: the choice, and the value typed into
     // the question's own field. A counter, because the field must not turn into
@@ -552,6 +555,9 @@ Window {
         onCloseRequested: win.tryCloses++
         onPageWanted: {
             win.tryPageWants.push(index)
+        }
+        onSavePositionWanted: {
+            win.savePositionWants.push(index)
         }
     }
     Settings {
@@ -1806,6 +1812,31 @@ Window {
         win.want("nor in the overlay",
                  win.findChild(tryReader, "tryOverlayNotice").visible, false)
         win.findChild(tryReader, "tryMiddleZone").clicked(null)
+
+        // ---- remembering the page: debounced on a turn, flushed on close ---
+        //
+        // A page turn does not send a position straight away — flicking
+        // through a chapter would otherwise fire a message every tap — but
+        // it does start the wait, and leaving the reader (flushSavePosition,
+        // Main.qml's leaveReader) sends immediately rather than losing it.
+        win.savePositionWants = []
+        win.findChild(tryReader, "tryRightZone").clicked(null)
+        win.want("turning a page schedules a save rather than sending one",
+                 win.savePositionWants.length, 0)
+        win.want("the reader did turn the page", tryReader.index, 2)
+
+        tryReader.flushSavePosition()
+        win.want("leaving flushes it immediately", win.savePositionWants.join(","), "2")
+
+        // Try mode never sends one, scheduled or flushed: there is no
+        // position to keep for a session that ends when the reader closes.
+        win.savePositionWants = []
+        tryReader.begin("src", "series", "c1", "Chapter 1")
+        tryReader.ready({"sourceId": "src", "seriesId": "series", "chapterId": "c1",
+                         "index": 0, "path": "/tmp/p0.jpg", "pageCount": 2, "complete": true})
+        tryReader.index = 1
+        tryReader.flushSavePosition()
+        win.want("Try mode never asks to remember a page", win.savePositionWants.length, 0)
 
         // A position past the last page (a stale or malformed one) is
         // clamped rather than trusted — see openSaved's own comment.
