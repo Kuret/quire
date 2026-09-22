@@ -283,6 +283,10 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	if err != nil {
 		return nil, err
 	}
+	// The search/browse page just fetched above — the page these covers are
+	// actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL, _ := s.Resolve(path)
 
 	var out []theme.SeriesStub
 	doc.Find(sel[SearchItem]).Each(func(_ int, item *goquery.Selection) {
@@ -306,14 +310,19 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if sel[SearchCover] != "" {
 			cover = theme.ImageURL(item.Find(sel[SearchCover]).First())
 		}
-		out = append(out, theme.SeriesStub{ID: id, Title: title, CoverURL: cover})
+		stub := theme.SeriesStub{ID: id, Title: title, CoverURL: cover}
+		if stub.CoverURL != "" && pageURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
 
 // Series implements theme.Theme.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, _, err := t.doc(ctx, s, seriesPath(s, id))
+	path := seriesPath(s, id)
+	doc, _, err := t.doc(ctx, s, path)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +333,13 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 	}
 	if sel[SeriesCover] != "" {
 		out.CoverURL = theme.ImageURL(doc.Find(sel[SeriesCover]).First())
+		if out.CoverURL != "" {
+			// The series page just fetched above, the page the cover markup
+			// was actually parsed from — not a value assembled by hand.
+			if abs, err := s.Resolve(path); err == nil {
+				out.CoverReferrer = abs
+			}
+		}
 	}
 	if sel[SeriesDescription] != "" {
 		out.Description = theme.Text(doc.Find(sel[SeriesDescription]).First())

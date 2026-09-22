@@ -43,25 +43,31 @@ func TestSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The search page just fetched — the exact URL, per PLAN §7.6 — is the
+	// referrer every cover in this result set must carry.
+	const referrer = "https://example.invalid/?s=lantern"
 	want := []theme.SeriesStub{
 		{
 			// The title comes from the anchor attribute, not the .tt, so the
 			// "HOT" badge does not end up in it.
-			ID:       "/manga/the-lantern-keeper/",
-			Title:    "The Lantern Keeper",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper.jpg",
+			ID:            "/manga/the-lantern-keeper/",
+			Title:         "The Lantern Keeper",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper.jpg",
+			CoverReferrer: referrer,
 		},
 		{
 			// The older .utao/.uta/.imgu card markup.
-			ID:       "/manga/salt-and-cedar/",
-			Title:    "Salt and Cedar",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/02/salt-cedar.jpg",
+			ID:            "/manga/salt-and-cedar/",
+			Title:         "Salt and Cedar",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/02/salt-cedar.jpg",
+			CoverReferrer: referrer,
 		},
 		{
 			// No title attribute, so the .tt is used; cover from a srcset.
-			ID:       "/manga/paper-lanterns-of-the-ninth-ward/",
-			Title:    "Paper Lanterns of the Ninth Ward",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/03/ninth-ward.jpg",
+			ID:            "/manga/paper-lanterns-of-the-ninth-ward/",
+			Title:         "Paper Lanterns of the Ninth Ward",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/03/ninth-ward.jpg",
+			CoverReferrer: referrer,
 		},
 	}
 	if len(got) != len(want) {
@@ -112,6 +118,7 @@ func TestSeries(t *testing.T) {
 	}{
 		{"Title", got.Title, "The Lantern Keeper"},
 		{"CoverURL", got.CoverURL, "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper.jpg"},
+		{"CoverReferrer", got.CoverReferrer, "https://example.invalid/manga/the-lantern-keeper/"},
 		{"Status", got.Status, theme.StatusOngoing},
 		{"Authors", strings.Join(got.Authors, "|"), "E. Marchetti|M. Ferrer"},
 		// The Artist row is the theme's "-" placeholder; it must yield nothing

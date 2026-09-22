@@ -55,9 +55,10 @@ func TestSearchReturnsSeriesAndNotTabsOrEpisodes(t *testing.T) {
 		t.Fatalf("got %d results, want 2 (the same series appears twice and must be returned once): %+v", len(got), got)
 	}
 	want := theme.SeriesStub{
-		ID:       seriesID,
-		Title:    "The Lantern Keeper",
-		CoverURL: "https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90",
+		ID:            seriesID,
+		Title:         "The Lantern Keeper",
+		CoverURL:      "https://pages.example.invalid/20240101_1/lantern_thumb.jpg?type=q90",
+		CoverReferrer: "https://www.example.invalid/en/search?keyword=lantern",
 	}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
@@ -123,6 +124,9 @@ func TestSeriesReadsTheDetailHeader(t *testing.T) {
 	}
 	if got.CoverURL != "https://pages.example.invalid/20240101_1/lantern_cover.png" {
 		t.Errorf("cover = %q", got.CoverURL)
+	}
+	if want := "https://www.example.invalid" + seriesID; got.CoverReferrer != want {
+		t.Errorf("cover referrer = %q, want the series page actually fetched, %q", got.CoverReferrer, want)
 	}
 	// The author block holds a button whose label must not become part of the
 	// name.

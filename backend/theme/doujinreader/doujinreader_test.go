@@ -48,18 +48,23 @@ func TestSearchWithNoQueryBrowsesTheHomeListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The listing page just fetched — the exact URL, per PLAN §7.6 — is the
+	// referrer every cover in this result set must carry.
+	const browseReferrer = "https://example.invalid/?page=1"
 	want := []theme.SeriesStub{
 		{
-			ID:       "/g/42",
-			Title:    "A Story About Nothing in Particular",
-			CoverURL: "https://images.example.invalid/005/42/thumb.jpg",
+			ID:            "/g/42",
+			Title:         "A Story About Nothing in Particular",
+			CoverURL:      "https://images.example.invalid/005/42/thumb.jpg",
+			CoverReferrer: browseReferrer,
 		},
 		{
 			// No .caption on this card and an empty thumbnail alt; the title
 			// comes from the .g_title heading instead.
-			ID:       "/g/43",
-			Title:    "Second Sample Story, Side A",
-			CoverURL: "https://images.example.invalid/005/43/thumb.jpg",
+			ID:            "/g/43",
+			Title:         "Second Sample Story, Side A",
+			CoverURL:      "https://images.example.invalid/005/43/thumb.jpg",
+			CoverReferrer: browseReferrer,
 		},
 	}
 	if len(got) != len(want) {
@@ -87,9 +92,10 @@ func TestSearchWithAQuery(t *testing.T) {
 		t.Fatalf("got %d results, want 1: %+v", len(got), got)
 	}
 	want := theme.SeriesStub{
-		ID:       "/g/42",
-		Title:    "A Story About Nothing in Particular",
-		CoverURL: "https://images.example.invalid/005/42/thumb.jpg",
+		ID:            "/g/42",
+		Title:         "A Story About Nothing in Particular",
+		CoverURL:      "https://images.example.invalid/005/42/thumb.jpg",
+		CoverReferrer: "https://example.invalid/search/?q=sample&page=1",
 	}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result:\n got %+v\nwant %+v", got[0], want)
@@ -133,6 +139,9 @@ func TestSeries(t *testing.T) {
 	}
 	if got.CoverURL != "https://images.example.invalid/005/42/cover.jpg" {
 		t.Errorf("cover = %q", got.CoverURL)
+	}
+	if want := "https://example.invalid/g/42/"; got.CoverReferrer != want {
+		t.Errorf("cover referrer = %q, want the gallery page actually fetched, %q", got.CoverReferrer, want)
 	}
 	// Both taxonomy skins compared live are exercised: one nests a plain
 	// count span inside the anchor, the other wraps the name itself in

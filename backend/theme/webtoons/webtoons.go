@@ -285,10 +285,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		qs.Set("page", strconv.Itoa(page))
 	}
 
-	doc, err := t.doc(ctx, s, path+"?"+qs.Encode())
+	reqPath := path + "?" + qs.Encode()
+	doc, err := t.doc(ctx, s, reqPath)
 	if err != nil {
 		return nil, err
 	}
+	// The search page just fetched above — the page these covers are
+	// actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL := t.absolute(s, reqPath)
 
 	var out []theme.SeriesStub
 	seen := make(map[string]bool)
@@ -307,11 +312,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if title == "" {
 			title = theme.Text(a)
 		}
-		out = append(out, theme.SeriesStub{
+		stub := theme.SeriesStub{
 			ID:       id,
 			Title:    title,
 			CoverURL: t.absolute(s, strings.TrimSpace(a.Find("img[src]").First().AttrOr("src", ""))),
-		})
+		}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
@@ -321,7 +330,8 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 // One page, and the same selectors for both tiers: they differ in heading
 // level and in which element carries the author, not in class names.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, t.seriesPath(id))
+	seriesPath := t.seriesPath(id)
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +341,11 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 		Title:       theme.Text(doc.Find("h1.subj, h3.subj").First()),
 		Description: theme.Text(doc.Find("p.summary").First()),
 		CoverURL:    t.absolute(s, strings.TrimSpace(doc.Find(".thmb img[src]").First().AttrOr("src", ""))),
+	}
+	if out.CoverURL != "" {
+		// The series page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		out.CoverReferrer = t.absolute(s, seriesPath)
 	}
 
 	// The author block holds a button on one tier and a profile link on the

@@ -195,9 +195,17 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	qs := url.Values{}
 	qs.Set("s", q)
 
-	doc, err := t.doc(ctx, s, path+"?"+qs.Encode())
+	reqPath := path + "?" + qs.Encode()
+	doc, err := t.doc(ctx, s, reqPath)
 	if err != nil {
 		return nil, err
+	}
+	// The search results page just fetched above — the page these covers are
+	// actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL, err := s.Resolve(reqPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve %s: %w", ID, reqPath, err)
 	}
 
 	var out []theme.SeriesStub
@@ -217,18 +225,23 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if title == "" {
 			title = theme.Text(a.Find(".tt, .luf h4, h4").First())
 		}
-		out = append(out, theme.SeriesStub{
+		stub := theme.SeriesStub{
 			ID:       id,
 			Title:    theme.Collapse(title),
 			CoverURL: theme.ImageURL(a.Find("img").First()),
-		})
+		}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
 
 // Series implements theme.Theme.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, t.seriesPath(s, id))
+	seriesPath := t.seriesPath(s, id)
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +249,13 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 	out := &theme.Series{ID: id}
 	out.Title = theme.Text(doc.Find(".seriestuheader h1.entry-title, h1.entry-title").First())
 	out.CoverURL = theme.ImageURL(doc.Find(".thumb img, .seriestucontl .thumb img").First())
+	if out.CoverURL != "" {
+		// The series page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		if pageURL, err := s.Resolve(seriesPath); err == nil {
+			out.CoverReferrer = pageURL
+		}
+	}
 	out.Description = theme.Text(doc.Find(".entry-content[itemprop=description], [itemprop=description], .seriestuhead .entry-content").First())
 
 	doc.Find(".mgen a, .seriestugenre a").Each(func(_ int, a *goquery.Selection) {

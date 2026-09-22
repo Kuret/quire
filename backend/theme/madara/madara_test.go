@@ -101,23 +101,29 @@ func TestSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The search page just fetched — the exact URL, per PLAN §7.6 — is the
+	// referrer every cover in this result set must carry.
+	const referrer = "https://example.invalid/?post_type=wp-manga&s=lantern"
 	want := []theme.SeriesStub{
 		{
-			ID:       "/manga/the-lantern-keeper/",
-			Title:    "The Lantern Keeper",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg",
+			ID:            "/manga/the-lantern-keeper/",
+			Title:         "The Lantern Keeper",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg",
+			CoverReferrer: referrer,
 		},
 		{
 			// Whitespace and a newline inside the anchor must be collapsed.
-			ID:       "/manga/salt-and-cedar/",
-			Title:    "Salt and Cedar",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/02/salt-cedar-193x278.jpg",
+			ID:            "/manga/salt-and-cedar/",
+			Title:         "Salt and Cedar",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/02/salt-cedar-193x278.jpg",
+			CoverReferrer: referrer,
 		},
 		{
 			// <h4> skin variation, and a srcset rather than a src.
-			ID:       "/manga/paper-lanterns-of-the-ninth-ward/",
-			Title:    "Paper Lanterns of the Ninth Ward",
-			CoverURL: "https://example.invalid/wp-content/uploads/2026/03/ninth-ward-193x278.jpg",
+			ID:            "/manga/paper-lanterns-of-the-ninth-ward/",
+			Title:         "Paper Lanterns of the Ninth Ward",
+			CoverURL:      "https://example.invalid/wp-content/uploads/2026/03/ninth-ward-193x278.jpg",
+			CoverReferrer: referrer,
 		},
 	}
 	if len(got) != len(want) {
@@ -221,6 +227,7 @@ func TestSeries(t *testing.T) {
 		{"ID", got.ID, "/manga/the-lantern-keeper/"},
 		{"Title", got.Title, "The Lantern Keeper"},
 		{"CoverURL", got.CoverURL, "https://example.invalid/wp-content/uploads/2026/01/lantern-keeper-193x278.jpg"},
+		{"CoverReferrer", got.CoverReferrer, "https://example.invalid/manga/the-lantern-keeper/"},
 		{"Status", got.Status, theme.StatusOngoing},
 		{"Authors", strings.Join(got.Authors, "|"), "E. Marchetti"},
 		{"Artists", strings.Join(got.Artists, "|"), "E. Marchetti|Studio Quay"},

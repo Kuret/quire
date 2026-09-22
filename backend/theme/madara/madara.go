@@ -252,9 +252,17 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	qs.Set("s", q)
 	qs.Set("post_type", o.String(KeySearchPostType))
 
-	doc, err := t.doc(ctx, s, path+"?"+qs.Encode())
+	reqPath := path + "?" + qs.Encode()
+	doc, err := t.doc(ctx, s, reqPath)
 	if err != nil {
 		return nil, err
+	}
+	// The search results page just fetched above — the page these covers are
+	// actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL, err := s.Resolve(reqPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve %s: %w", ID, reqPath, err)
 	}
 
 	var candidates []searchCandidate
@@ -299,14 +307,19 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		if seg != "" && firstSegment(c.id) != seg {
 			continue
 		}
-		out = append(out, theme.SeriesStub{ID: c.id, Title: c.title, CoverURL: c.cover})
+		stub := theme.SeriesStub{ID: c.id, Title: c.title, CoverURL: c.cover}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	}
 	return out, nil
 }
 
 // Series implements theme.Theme.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, t.seriesPath(s, id))
+	seriesPath := t.seriesPath(s, id)
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +327,13 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 	out := &theme.Series{ID: id}
 	out.Title = theme.Text(doc.Find(".post-title h1, .post-title h3, .post-title h2").First())
 	out.CoverURL = theme.ImageURL(doc.Find(".summary_image img, .tab-summary img").First())
+	if out.CoverURL != "" {
+		// The series page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		if pageURL, err := s.Resolve(seriesPath); err == nil {
+			out.CoverReferrer = pageURL
+		}
+	}
 	out.Description = theme.Text(doc.Find(".description-summary .summary__content, .summary__content, .manga-excerpt").First())
 
 	doc.Find(".genres-content a, .summary-content .genres-content a").Each(func(_ int, a *goquery.Selection) {

@@ -290,6 +290,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	if err != nil {
 		return nil, err
 	}
+	// The page this listing's covers are extracted from — the search results
+	// or directory page just fetched above, not the site root or the series
+	// page a result points at. theme.CoverRefererFrom needs the truth of what
+	// was actually requested, so this is s.Resolve(path) rather than a value
+	// assembled by hand.
+	pageURL, err := s.Resolve(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve %s: %w", ID, path, err)
+	}
 
 	var out []theme.SeriesStub
 	seen := make(map[string]bool)
@@ -313,18 +322,23 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 			title = theme.Text(li.Find(".manga-list-1-item-title, .manga-list-2-item-title, .manga-list-4-item-title").First())
 		}
 
-		out = append(out, theme.SeriesStub{
+		stub := theme.SeriesStub{
 			ID:       id,
 			Title:    title,
 			CoverURL: t.absolute(s, strings.TrimSpace(li.Find("img[src]").First().AttrOr("src", ""))),
-		})
+		}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
 
 // Series implements theme.Theme.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, t.seriesPath(id))
+	seriesPath := t.seriesPath(id)
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -334,6 +348,13 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 		Title:    theme.Text(doc.Find(".detail-info-right-title-font").First()),
 		CoverURL: t.absolute(s, strings.TrimSpace(doc.Find(".detail-info-cover-img").First().AttrOr("src", ""))),
 		Status:   parseStatus(theme.Text(doc.Find(".detail-info-right-title-tip").First())),
+	}
+	if out.CoverURL != "" {
+		// The series page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		if pageURL, err := s.Resolve(seriesPath); err == nil {
+			out.CoverReferrer = pageURL
+		}
 	}
 
 	// The summary is truncated in one paragraph and complete in a hidden one

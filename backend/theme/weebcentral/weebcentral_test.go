@@ -54,9 +54,10 @@ func TestSearchAsksTheFragmentEndpointWithADisplayMode(t *testing.T) {
 		t.Fatalf("got %d results, want 2: %+v", len(got), got)
 	}
 	want := theme.SeriesStub{
-		ID:       seriesID,
-		Title:    "The Lantern Keeper",
-		CoverURL: "https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp",
+		ID:            seriesID,
+		Title:         "The Lantern Keeper",
+		CoverURL:      "https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp",
+		CoverReferrer: "https://example.invalid/search/data?adult=False&display_mode=Full+Display&limit=32&offset=0&order=Descending&sort=Best+Match&text=lantern",
 	}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
@@ -168,6 +169,9 @@ func TestSeriesReadsTheLabelledRows(t *testing.T) {
 	}
 	if got.CoverURL != "https://covers.example.invalid/cover/normal/01EXAMPLE0LANTERNKEEPER01.webp" {
 		t.Errorf("cover = %q", got.CoverURL)
+	}
+	if want := "https://example.invalid" + seriesID; got.CoverReferrer != want {
+		t.Errorf("cover referrer = %q, want the series page actually fetched, %q", got.CoverReferrer, want)
 	}
 	if got.Status != theme.StatusCompleted {
 		t.Errorf("status = %q, want the site's %q normalised to Quire's vocabulary", got.Status, "Complete")

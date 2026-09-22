@@ -345,9 +345,17 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	// this is not cosmetic: without it the rows come back unnamed.
 	qs.Set("display_mode", "Full Display")
 
-	doc, err := t.doc(ctx, s, searchPath+"?"+qs.Encode())
+	reqPath := searchPath + "?" + qs.Encode()
+	doc, err := t.doc(ctx, s, reqPath)
 	if err != nil {
 		return nil, err
+	}
+	// The fragment request just made above — the page these covers are
+	// actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL, err := s.Resolve(reqPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve %s: %w", ID, reqPath, err)
 	}
 
 	var out []theme.SeriesStub
@@ -365,11 +373,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		}
 		seen[id] = true
 
-		out = append(out, theme.SeriesStub{
+		stub := theme.SeriesStub{
 			ID:       id,
 			Title:    rowTitle(a),
 			CoverURL: t.absolute(s, coverURL(a)),
-		})
+		}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
@@ -419,13 +431,19 @@ func firstSrcsetCandidate(srcset string) string {
 
 // Series implements theme.Theme.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, t.seriesPath(id))
+	seriesPath := t.seriesPath(id)
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
 
 	out := &theme.Series{ID: id, Title: theme.Text(doc.Find("h1").First())}
 	out.CoverURL = t.absolute(s, seriesCover(doc))
+	if out.CoverURL != "" {
+		// The series page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		out.CoverReferrer = t.absolute(s, seriesPath)
+	}
 
 	// The metadata is a flat list of rows, each a <strong> label followed by
 	// the value. Matching on the label text rather than on row position is

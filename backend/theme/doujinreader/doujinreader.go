@@ -288,6 +288,10 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	if err != nil {
 		return nil, err
 	}
+	// The listing or search page just fetched above — the page these covers
+	// are actually parsed from, resolved the same way t.doc resolved it. PLAN
+	// §7.6: truthful, per-request, never a constant.
+	pageURL := t.absolutise(s, path)
 
 	seen := make(map[string]bool)
 	var out []theme.SeriesStub
@@ -301,11 +305,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		}
 		seen[id] = true
 
-		out = append(out, theme.SeriesStub{
+		stub := theme.SeriesStub{
 			ID:       id,
 			Title:    theme.Collapse(cardTitle(card)),
 			CoverURL: t.absolutise(s, theme.ImageURL(card.Find("img").First())),
-		})
+		}
+		if stub.CoverURL != "" {
+			stub.CoverReferrer = pageURL
+		}
+		out = append(out, stub)
 	})
 	return out, nil
 }
@@ -355,7 +363,8 @@ func cardTitle(card *goquery.Selection) string {
 // cards), and an unscoped selector would credit this gallery with another
 // one's tags — or its own site's navigation.
 func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.Series, error) {
-	doc, err := t.doc(ctx, s, id+"/")
+	seriesPath := id + "/"
+	doc, err := t.doc(ctx, s, seriesPath)
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +372,11 @@ func (t *Theme) Series(ctx context.Context, s *theme.Source, id string) (*theme.
 	out := &theme.Series{ID: id}
 	out.Title = theme.Text(doc.Find("h1").First())
 	out.CoverURL = t.absolutise(s, theme.ImageURL(doc.Find(".cover img").First()))
+	if out.CoverURL != "" {
+		// The gallery page just fetched above, the page the cover markup was
+		// actually parsed from — not a value assembled by hand.
+		out.CoverReferrer = t.absolutise(s, seriesPath)
+	}
 
 	info := doc.Find(".info").First()
 	info.Find(`a[href*="/tag/"]`).Each(func(_ int, a *goquery.Selection) {

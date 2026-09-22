@@ -46,18 +46,23 @@ func TestSearchWithNoQueryBrowsesTheListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The listing page just fetched — the exact URL, per PLAN §7.6 — is the
+	// referrer every cover in this result set must carry.
+	const browseReferrer = "https://example.invalid/manga-list/latest-manga?page=1"
 	want := []theme.SeriesStub{
 		{
-			ID:       "/manga/the-lantern-keeper",
-			Title:    "The Lantern Keeper",
-			CoverURL: "https://images.example.invalid/thumb/the-lantern-keeper.webp",
+			ID:            "/manga/the-lantern-keeper",
+			Title:         "The Lantern Keeper",
+			CoverURL:      "https://images.example.invalid/thumb/the-lantern-keeper.webp",
+			CoverReferrer: browseReferrer,
 		},
 		{
 			// No title attribute on this card, so the link text is the title;
 			// the cover is only in data-src, which is where a lazy skin puts it.
-			ID:       "/manga/paper-birds",
-			Title:    "Paper Birds",
-			CoverURL: "https://images.example.invalid/thumb/paper-birds.webp",
+			ID:            "/manga/paper-birds",
+			Title:         "Paper Birds",
+			CoverURL:      "https://images.example.invalid/thumb/paper-birds.webp",
+			CoverReferrer: browseReferrer,
 		},
 	}
 	if len(got) != len(want) {
@@ -84,12 +89,15 @@ func TestSearchUsesTheNormalisedQueryPath(t *testing.T) {
 	}
 	want := []theme.SeriesStub{
 		{
-			ID:       "/manga/the-lantern-keeper",
-			Title:    "The Lantern Keeper",
-			CoverURL: "https://images.example.invalid/thumb/the-lantern-keeper.webp",
+			ID:            "/manga/the-lantern-keeper",
+			Title:         "The Lantern Keeper",
+			CoverURL:      "https://images.example.invalid/thumb/the-lantern-keeper.webp",
+			CoverReferrer: "https://example.invalid/search/story/the_lantern_keeper?page=2",
 		},
 		{
-			// No cover at all on this row, which must not drop the result.
+			// No cover at all on this row, which must not drop the result — and
+			// must not acquire a referrer naming a page nothing was fetched
+			// from.
 			ID:    "/manga/lantern-keeper-side-stories",
 			Title: "Lantern Keeper: Side Stories",
 		},
@@ -138,6 +146,9 @@ func TestSeries(t *testing.T) {
 	}
 	if got.CoverURL != "https://images.example.invalid/thumb/the-lantern-keeper.webp" {
 		t.Errorf("cover = %q", got.CoverURL)
+	}
+	if want := "https://example.invalid/manga/the-lantern-keeper"; got.CoverReferrer != want {
+		t.Errorf("cover referrer = %q, want the series page actually fetched, %q", got.CoverReferrer, want)
 	}
 	if got.Status != theme.StatusOngoing {
 		t.Errorf("status = %q, want %q", got.Status, theme.StatusOngoing)

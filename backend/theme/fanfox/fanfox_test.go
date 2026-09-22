@@ -55,9 +55,10 @@ func TestSearchReturnsOneResultPerRow(t *testing.T) {
 		t.Fatalf("got %d results, want 2: %+v", len(got), got)
 	}
 	want := theme.SeriesStub{
-		ID:       seriesID,
-		Title:    "The Lantern Keeper",
-		CoverURL: "https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&ttl=1789610400&v=1362908853",
+		ID:            seriesID,
+		Title:         "The Lantern Keeper",
+		CoverURL:      "https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&ttl=1789610400&v=1362908853",
+		CoverReferrer: "https://example.invalid/search?page=1&stype=1&title=the+lantern+keeper",
 	}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("result 0 = %+v, want %+v", got[0], want)
@@ -91,6 +92,11 @@ func TestBrowseReadsTheDirectory(t *testing.T) {
 	}
 	if f.Requested("GET", "/search") {
 		t.Error("the search endpoint was asked to answer an empty query")
+	}
+	for i, r := range got {
+		if want := "https://example.invalid/directory/"; r.CoverReferrer != want {
+			t.Errorf("result %d cover referrer = %q, want %q (the directory page actually fetched)", i, r.CoverReferrer, want)
+		}
 	}
 }
 
@@ -145,6 +151,9 @@ func TestSeriesReadsTheInfoBlock(t *testing.T) {
 	}
 	if got.CoverURL != "https://covers.example.invalid/store/manga/4085/cover.jpg?token=abc&ttl=1789610400" {
 		t.Errorf("cover = %q", got.CoverURL)
+	}
+	if want := "https://example.invalid" + seriesID; got.CoverReferrer != want {
+		t.Errorf("cover referrer = %q, want %q (the series page actually fetched)", got.CoverReferrer, want)
 	}
 }
 

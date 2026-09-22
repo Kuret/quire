@@ -66,9 +66,12 @@ func TestSearchFromSelectorsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The search page just fetched — the exact URL, per PLAN §7.6 — is the
+	// referrer every cover in this result set must carry.
+	const referrer = "https://example.invalid/search?q=lantern+keeper&p=2"
 	want := []theme.SeriesStub{
-		{ID: "/read/the-lantern-keeper", Title: "The Lantern Keeper", CoverURL: "https://example.invalid/covers/lantern-keeper.png"},
-		{ID: "/read/salt-and-cedar", Title: "Salt and Cedar", CoverURL: "https://example.invalid/covers/salt-cedar.png"},
+		{ID: "/read/the-lantern-keeper", Title: "The Lantern Keeper", CoverURL: "https://example.invalid/covers/lantern-keeper.png", CoverReferrer: referrer},
+		{ID: "/read/salt-and-cedar", Title: "Salt and Cedar", CoverURL: "https://example.invalid/covers/salt-cedar.png", CoverReferrer: referrer},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d results, want %d: %+v", len(got), len(want), got)
@@ -188,6 +191,9 @@ func TestSeriesAndChaptersFromSelectorsAlone(t *testing.T) {
 	}
 	if series.CoverURL != "https://example.invalid/covers/lantern-keeper-large.png" {
 		t.Errorf("CoverURL = %q", series.CoverURL)
+	}
+	if want := "https://example.invalid/read/the-lantern-keeper"; series.CoverReferrer != want {
+		t.Errorf("CoverReferrer = %q, want the series page actually fetched, %q", series.CoverReferrer, want)
 	}
 	if series.Status != theme.StatusOngoing {
 		t.Errorf("Status = %q, want ongoing", series.Status)
