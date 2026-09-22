@@ -823,7 +823,7 @@ func (s *Source) Policy() (*fetch.Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("theme: source %q: parse baseUrl: %w", s.ID, err)
 	}
-	p := &fetch.Policy{BaseURL: u, AllowedHosts: s.AllowedHosts, RateLimit: s.RateLimit}
+	p := &fetch.Policy{SourceID: s.ID, BaseURL: u, AllowedHosts: s.AllowedHosts, RateLimit: s.RateLimit}
 	if s.SelfHosted != nil {
 		// Checked here as well as in Registry.Validate, and it fails the whole
 		// Policy rather than dropping the field: this is the last point before

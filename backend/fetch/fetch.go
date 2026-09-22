@@ -147,6 +147,14 @@ type RateLimit struct {
 // fetch deliberately does not import the theme package: the dependency runs the
 // other way, and a Policy is the narrow slice of a source that matters here.
 type Policy struct {
+	// SourceID names the source this Policy belongs to. It is set only by
+	// theme.Source.Policy and carries no meaning inside fetch itself — the
+	// guard's rules never consult it — but a caller that wants to know *which
+	// source* an off-domain refusal was for (Client's OnOffDomainRefusal hook)
+	// has nowhere else to read it from, since Guard.CheckURL only ever sees a
+	// URL and a Policy.
+	SourceID string
+
 	// BaseURL is the source root. Its registrable domain is the boundary a
 	// redirect may not cross (PLAN §7.4).
 	BaseURL *url.URL
@@ -375,6 +383,66 @@ type Client struct {
 	sleep         func(context.Context, time.Duration) error
 	now           func() time.Time
 	rand          func() float64
+
+	// onOffDomain is the record-and-offer sink (PLAN, the allowedHosts editor):
+	// called whenever a request is refused for being off the source's
+	// registrable domain and not already covered by AllowedHosts —
+	// GuardError.OffDomain, never anything else. It is not called for a
+	// private, loopback, link-local or otherwise reserved address, however
+	// that host was named: those are a different refusal (OffDomain is false)
+	// and offering them for allowance would be offering to defeat the guard
+	// the whole feature exists downstream of.
+	//
+	// It is a callback rather than a channel because Client already owns
+	// exactly one goroutine's worth of call site for it (see reportOffDomain)
+	// and the service that wants to know sets it once, before the client ever
+	// serves a request — see SetOffDomainHook. Guard itself stays ignorant of
+	// this entirely: it returns GuardError and nothing else, so it cannot grow
+	// a dependency on whatever the service does with the news.
+	onOffDomain func(sourceID, host string, kind Kind)
+}
+
+// SetOffDomainHook installs the record-and-offer sink. Call it once, before
+// the client serves any request — typically right after both the client and
+// the service that owns the sink exist, which on the production start-up path
+// is after service.New, because the service is what the client's Options
+// cannot yet reference when NewClient runs.
+//
+// It is a setter rather than an Options field for that reason: Options is
+// consumed once, inside NewClient, and the sink's owner is built from the
+// client that must already exist.
+func (c *Client) SetOffDomainHook(fn func(sourceID, host string, kind Kind)) {
+	c.onOffDomain = fn
+}
+
+// reportOffDomain calls the off-domain hook exactly when err is a GuardError
+// whose OffDomain is true, and never otherwise. p may be nil (no source to
+// name), in which case there is nothing to report and reportOffDomain does
+// nothing — Guard.CheckURL never sets OffDomain without a Policy carrying a
+// BaseURL to compare against, so a nil Policy here would mean the error came
+// from somewhere else.
+//
+// The host reported is read back out of the GuardError itself (its URL field)
+// rather than passed in by the caller, so the same code covers both call
+// sites: the initial URL, checked in do, and a redirect hop, checked deep
+// inside http.Client's own CheckRedirect and surfaced here only as an error
+// out of attempt. The redirect hop's host is what actually needs a decision —
+// it is the one the caller never resolved a URL for — so getting it from
+// anywhere else would name the wrong host on every redirect that triggered
+// this.
+func (c *Client) reportOffDomain(p *Policy, kind Kind, err error) {
+	if c.onOffDomain == nil || p == nil {
+		return
+	}
+	var ge *GuardError
+	if !errors.As(err, &ge) || !ge.OffDomain {
+		return
+	}
+	host := ge.URL
+	if u, perr := url.Parse(ge.URL); perr == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	c.onOffDomain(p.SourceID, host, kind)
 }
 
 // NewClient builds a Client. Caps are clamped against DefaultCaps so the
@@ -652,6 +720,7 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 		u = p.BaseURL.ResolveReference(u)
 	}
 	if err := c.guard.CheckURL(ctx, u, p); err != nil {
+		c.reportOffDomain(p, kind, err)
 		return nil, err
 	}
 
@@ -701,6 +770,10 @@ func (c *Client) do(ctx context.Context, p *Policy, kind Kind, method, rawurl st
 		release()
 
 		if err != nil {
+			// A redirect hop's own refusal surfaces here, from inside
+			// http.Client's CheckRedirect — it never reaches the CheckURL call
+			// above, which only ever saw the request's starting URL.
+			c.reportOffDomain(p, kind, err)
 			return nil, err
 		}
 		resp.Attempts = attempt
