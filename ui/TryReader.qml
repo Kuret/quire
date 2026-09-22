@@ -205,8 +205,11 @@ Item {
         screen.note = ""
         screen.overlayVisible = false
         screen.requested = ({})
-        screen.chapterInLibrary = false
-        screen.sourcePrivate = false
+        // Carried on the payload itself (backend/service/saved.go), not
+        // borrowed from whatever ChapterList screen happened to be open —
+        // a chapter opened from the Downloaded overview never had one.
+        screen.chapterInLibrary = !!payload.inLibrary
+        screen.sourcePrivate = !!payload.private
 
         var pages = payload.pages ? payload.pages : []
         var paths = {}

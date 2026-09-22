@@ -698,19 +698,13 @@ Rectangle {
 
         case Msg.SavedOpened:
             if (msg) {
+                // "Send to library" checks private and inLibrary, both
+                // carried on the payload itself (backend/service/saved.go)
+                // and set by openSaved above — not borrowed from whatever
+                // ChapterList screen happened to be open, which is wrong for
+                // a row reached through the Downloaded overview's "Read
+                // latest".
                 tryReaderScreen.openSaved(msg)
-                // "Send to library" checks the same two facts Try's does.
-                // The source is known private only when the row that opened
-                // this reader came from the current series screen — a row
-                // reached through the Downloaded overview's "Read latest"
-                // never carries a private series at all (they are excluded
-                // from that list entirely — backend/service/downloaded.go),
-                // so false is always correct there.
-                var known = msg.sourceId === root.currentSourceId
-                          && msg.seriesId === root.currentSeriesId
-                tryReaderScreen.sourcePrivate = known ? chapterListScreen.isPrivate : false
-                tryReaderScreen.chapterInLibrary = known
-                    ? root.chapterHasDocument(msg.chapterId) : false
                 root.showScreen("saved")
             }
             return
@@ -1125,18 +1119,6 @@ Rectangle {
                 rows.setProperty(i, "saved", true)
             return
         }
-    }
-
-    // chapterHasDocument says whether a chapter already on screen is in the
-    // library — the reader's own "already there" check, read off the row
-    // rather than asked for again.
-    function chapterHasDocument(chapterId) {
-        for (var i = 0; i < chaptersModel.count; ++i) {
-            var row = chaptersModel.get(i)
-            if (row.chapterId === chapterId)
-                return !!row.documentUuid
-        }
-        return false
     }
 
     // clearSavedFlag is SavedDeleted's phase "done": the row goes back to

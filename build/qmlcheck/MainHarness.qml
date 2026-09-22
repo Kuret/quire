@@ -1852,6 +1852,18 @@ Window {
                  reader.sourcePrivate, false)
         win.want("not known to be in the library either", reader.chapterInLibrary, false)
 
+        // Both facts come off the payload itself (backend/service/saved.go),
+        // not off whatever ChapterList screen happens to be open — this is
+        // what makes them right for a chapter opened from the Downloaded
+        // overview, which never had one.
+        win.deliver(Msg.SavedOpened, {
+            "sourceId": "src-a", "seriesId": "/manga/lantern/", "chapterId": "c9",
+            "chapterTitle": "Chapter 9", "pages": ["/tmp/s0.jpg"], "position": 0,
+            "private": true, "inLibrary": true})
+        win.want("private carried on the payload, not the series screen",
+                 reader.sourcePrivate, true)
+        win.want("and inLibrary too", reader.chapterInLibrary, true)
+
         // The overlay's two library actions, both an ordinary EnqueueDownload
         // naming the chapter and a destination.
         backend.forget()
