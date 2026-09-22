@@ -32,10 +32,12 @@ import (
 	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/probe/prober"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/asurascans"
 	"github.com/rickl/quire/backend/theme/comick"
 	"github.com/rickl/quire/backend/theme/doujinreader"
 	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
+	"github.com/rickl/quire/backend/theme/globalcomix"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
@@ -229,6 +231,8 @@ func themeRegistry(client *fetch.Client) *theme.Registry {
 	reg.MustRegister(comick.New(client))
 	reg.MustRegister(doujinreader.New(client))
 	reg.MustRegister(shelfmark.New(client))
+	reg.MustRegister(asurascans.New(client))
+	reg.MustRegister(globalcomix.New(client))
 	reg.MustRegister(generic.New(client))
 	return reg
 }

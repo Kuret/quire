@@ -36,10 +36,12 @@ import (
 	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/asurascans"
 	"github.com/rickl/quire/backend/theme/comick"
 	"github.com/rickl/quire/backend/theme/doujinreader"
 	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
+	"github.com/rickl/quire/backend/theme/globalcomix"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
@@ -517,6 +519,15 @@ func themeRegistry(client *fetch.Client) *theme.Registry {
 	// what makes it different is downstream, in the download path — see
 	// service.runFileDownload.
 	reg.MustRegister(shelfmark.New(client))
+	// Astro-built site driven by the site's own JSON API rather than its markup;
+	// its API and CDN hosts are derived at runtime from the source's baseUrl
+	// rather than hardcoded, because this site has already moved domain twice.
+	reg.MustRegister(asurascans.New(client))
+	// Licensed platform, API-driven, and the first theme to use the
+	// theme.SourceHeaders and theme.CookieUser side interfaces: its API requires
+	// a public client-identifier header, and its reading grant issues a session
+	// cookie that the page-image fetches need.
+	reg.MustRegister(globalcomix.New(client))
 	reg.MustRegister(generic.New(client))
 	return reg
 }

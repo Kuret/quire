@@ -9,10 +9,12 @@ import (
 
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/theme"
+	"github.com/rickl/quire/backend/theme/asurascans"
 	"github.com/rickl/quire/backend/theme/comick"
 	"github.com/rickl/quire/backend/theme/doujinreader"
 	"github.com/rickl/quire/backend/theme/fanfox"
 	"github.com/rickl/quire/backend/theme/generic"
+	"github.com/rickl/quire/backend/theme/globalcomix"
 	"github.com/rickl/quire/backend/theme/madara"
 	"github.com/rickl/quire/backend/theme/mangadex"
 	"github.com/rickl/quire/backend/theme/mangakakalot"
@@ -106,12 +108,24 @@ func newRegistry(t *testing.T) *theme.Registry {
 	if err := reg.Register(shelfmark.New(nil)); err != nil {
 		t.Fatal(err)
 	}
+	// asurascans is an Astro-built site driven by the site's own JSON API rather
+	// than its markup. It is registered here to ensure the fingerprint correctly
+	// distinguishes it from other families.
+	if err := reg.Register(asurascans.New(nil)); err != nil {
+		t.Fatal(err)
+	}
+	// globalcomix is an API-driven licensed platform. It has no HTML fixtures,
+	// only JSON responses, so it is registered here to ensure other themes do not
+	// falsely claim its pages; it is not given a "must win" test case.
+	if err := reg.Register(globalcomix.New(nil)); err != nil {
+		t.Fatal(err)
+	}
 	return reg
 }
 
 // scorers is how many themes Registry.Fingerprint scores. The generic escape
 // hatch is excluded by the registry itself, so it is not counted here.
-const scorers = 10
+const scorers = 12
 
 func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 	reg := newRegistry(t)
@@ -289,6 +303,16 @@ func TestFingerprintDistinguishesTheTwoThemes(t *testing.T) {
 			name:       "a WordPress comic site of neither family",
 			file:       "testdata/near-miss-wordpress.html",
 			wantWinner: "",
+		},
+		{
+			name:       "an asurascans home page",
+			file:       "asurascans/testdata/home.html",
+			wantWinner: asurascans.ID,
+		},
+		{
+			name:       "an asurascans series page",
+			file:       "asurascans/testdata/series-page.html",
+			wantWinner: asurascans.ID,
 		},
 	}
 
