@@ -28,8 +28,13 @@
 // "short" and "phrase" being empty already says that. Nothing here does
 // arithmetic on them, because the moment it did it would be composing, and the
 // backend composes (PLAN §2).
-function summaryOf(msg) {
-    var s = msg && msg.summary ? msg.summary : null
+// key defaults to "summary", the ordinary Watching list's counts. The
+// private list's mirror rides on the same message as "privateSummary" — same
+// shape, computed from private sources' watches only (backend/service/watch.go)
+// — and is read with summaryOf(msg, "privateSummary").
+function summaryOf(msg, key) {
+    var k = key ? key : "summary"
+    var s = msg && msg[k] ? msg[k] : null
     return {
         "short": s && s.short ? s.short : "",
         "phrase": s && s.phrase ? s.phrase : ""
@@ -46,15 +51,21 @@ function summaryOf(msg) {
 // "Watching" button on the source-list screen, which is usually not even the
 // screen the user is looking at the list on, and on e-ink a flash for no news
 // is worse than no indicator.
-function applySummary(target, msg) {
-    var next = summaryOf(msg)
+// key, shortProp and phraseProp default to the ordinary list's own
+// ("summary", "watchShort", "watchPhrase"); the private list's screen passes
+// ("privateSummary", "privateWatchShort", "privateWatchPhrase") to write its
+// own pair instead, off the same message.
+function applySummary(target, msg, key, shortProp, phraseProp) {
+    var sp = shortProp ? shortProp : "watchShort"
+    var pp = phraseProp ? phraseProp : "watchPhrase"
+    var next = summaryOf(msg, key)
     var wrote = false
-    if (target.watchShort !== next.short) {
-        target.watchShort = next.short
+    if (target[sp] !== next.short) {
+        target[sp] = next.short
         wrote = true
     }
-    if (target.watchPhrase !== next.phrase) {
-        target.watchPhrase = next.phrase
+    if (target[pp] !== next.phrase) {
+        target[pp] = next.phrase
         wrote = true
     }
     return wrote
@@ -92,7 +103,12 @@ function row(w) {
         // watch row: it arrives later, on its own MessageCoverReady, because
         // nothing image-shaped crosses the socket (PLAN §7.1). The role has to
         // exist from the first append or that later write would be dropped.
-        "coverPath": w && w.coverPath ? w.coverPath : ""
+        "coverPath": w && w.coverPath ? w.coverPath : "",
+        // Which list this row belongs on — the ordinary Watching screen or
+        // the private one. Carried on every row (rather than only decided by
+        // which model it landed in) so a MessageWatchUpdate streamed mid-round
+        // can be routed correctly by Main.qml's applyWatchUpdate.
+        "private": w && w.private ? true : false
     }
 }
 
@@ -129,6 +145,27 @@ function markWatched(rows, watched, sourceId) {
         var have = rows.get(i)
         var src = have.sourceId ? have.sourceId : sourceId
         var want = indexOf(watched, src, have.seriesId) >= 0
+        if (have.watched !== want) {
+            rows.setProperty(i, "watched", want)
+            wrote++
+        }
+    }
+    return wrote
+}
+
+// markWatchedAcross is markWatched, checked against two watch models rather
+// than one: the browse screen serves one source's catalogue, and that source
+// can be either ordinary or private, so a row here counts as watched if it is
+// on **either** list — a watch's (source, series) key can only ever exist on
+// one of them at a time (round 2's private Watching list), so there is no
+// double-counting to guard against.
+function markWatchedAcross(rows, watched, privateWatched, sourceId) {
+    var wrote = 0
+    for (var i = 0; i < rows.count; ++i) {
+        var have = rows.get(i)
+        var src = have.sourceId ? have.sourceId : sourceId
+        var want = indexOf(watched, src, have.seriesId) >= 0 ||
+                   indexOf(privateWatched, src, have.seriesId) >= 0
         if (have.watched !== want) {
             rows.setProperty(i, "watched", want)
             wrote++
