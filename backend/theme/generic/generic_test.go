@@ -467,6 +467,54 @@ func TestBadBase64IsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
+// TestPageRefererIsEmptyWhenUnconfigured pins the off-by-default rule: a
+// generic source that never set pageReferrer must behave exactly as one that
+// predates the feature, and send no Referer with its page images.
+func TestPageRefererIsEmptyWhenUnconfigured(t *testing.T) {
+	th := generic.New(nil)
+	src := selectorSource()
+	if got := th.PageReferer(src, "/read/the-lantern-keeper/4"); got != "" {
+		t.Errorf("PageReferer = %q, want empty: pageReferrer was never set", got)
+	}
+}
+
+// TestPageRefererNamesThePageThatWasFetched checks the opt-in path names the
+// exact chapter URL Pages() itself requests — not a fabricated or otherwise
+// derived one — per PLAN §7.6.
+func TestPageRefererNamesThePageThatWasFetched(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /read/the-lantern-keeper/4": {File: "reader.html"},
+	})
+	th := generic.NewWithClock(f, clock)
+	src := selectorSource()
+	src.Overrides = map[string]any{generic.KeyPageReferrer: true}
+	chapterID := "/read/the-lantern-keeper/4"
+
+	if _, err := th.Pages(context.Background(), src, chapterID); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+
+	got := th.PageReferer(src, chapterID)
+	if got != calls[0].URL {
+		t.Errorf("PageReferer = %q, but Pages fetched %q; the header would name a page we did not read", got, calls[0].URL)
+	}
+}
+
+// TestPageRefererOverrideRejectsNonBool pins the shared override-validation
+// path: pageReferrer is a boolean, and a non-boolean value is an error at
+// source-add time rather than something silently coerced.
+func TestPageRefererOverrideRejectsNonBool(t *testing.T) {
+	th := generic.New(nil)
+	err := th.ValidateOverrides(map[string]any{generic.KeyPageReferrer: "yes"})
+	if err == nil || !strings.Contains(err.Error(), "pageReferrer") {
+		t.Fatalf("ValidateOverrides = %v, want an error naming pageReferrer", err)
+	}
+}
+
 // TestRegistryValidatesGenericSources wires the last check in: the registry is
 // the one gate every source passes through, so a bad selector or an
 // uncompilable script must be caught there and not only by calling

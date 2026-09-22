@@ -19,6 +19,29 @@
 //     fetched into a list of strings. Anything more would put an arbitrary
 //     program from a config file between Quire and the network, which is
 //     exactly what the §7.4 fetch invariants exist to prevent.
+//
+// # The pageReferrer override
+//
+// A CSS-selector site can still fail for a reason that has nothing to do with
+// selectors: its image host answers 403 to a request with no `Referer` and 200
+// to the identical one with `Referer` naming one of the site's own pages
+// (PLAN §7.6). comick, fanfox and webtoons answer this by implementing
+// theme.PageReferrer; the escape hatch has no fixed page shape to hang that on
+// automatically, so it is a config knob instead: KeyPageReferrer, off by
+// default.
+//
+// It defaults to off, and not merely to a safe default, because sending a
+// Referer nobody asked for is sending a header the site did not require —
+// exactly what PLAN §7.6 says not to do. A generic source configured against
+// an ordinary site should behave byte-for-byte as it always has; a user turns
+// this on only once they have measured, as the finding behind this feature
+// did, that the image host actually wants one.
+//
+// When it is on, the value sent is never invented: it is the exact absolute
+// URL Pages() itself requested for that chapter — the same one-line
+// s.Resolve(chapterID) call t.doc already makes — so the header states a fact
+// about a request Quire actually made, not a fabrication. See PageReferer
+// below.
 package generic
 
 import (
@@ -93,6 +116,10 @@ var spec = theme.OverrideSpec{
 			Key: KeyScriptTimeoutMs, Kind: theme.KindInt, Default: 2000,
 			Why: "wall-clock limit on the goja hook; a script that overruns is interrupted rather than allowed to hang the backend",
 		},
+		{
+			Key: KeyPageReferrer, Kind: theme.KindBool, Default: false,
+			Why: "some image hosts 403 a page-image request with no Referer and 200 the identical one naming the chapter page (PLAN §7.6); off by default because most sites need no such header, and this sends one only for the page Pages() actually fetched",
+		},
 	},
 }
 
@@ -100,6 +127,10 @@ var spec = theme.OverrideSpec{
 const (
 	KeyDateFormat      = "dateFormat"
 	KeyScriptTimeoutMs = "scriptTimeoutMs"
+
+	// KeyPageReferrer opts a source into sending a `Referer` header with its
+	// page images, naming the chapter page Pages() fetched. See PageReferer.
+	KeyPageReferrer = "pageReferrer"
 )
 
 // ErrNotConfigured is returned when a generic source is missing the selectors
@@ -396,6 +427,27 @@ func (t *Theme) Pages(ctx context.Context, s *theme.Source, chapterID string) ([
 		}
 	})
 	return absolutise(s, raw), nil
+}
+
+// PageReferer implements theme.PageReferrer (PLAN §7.6). It answers "" unless
+// the source has set the pageReferrer override, which defaults to off — a
+// generic source that never asked for this behaves exactly as it always has.
+//
+// When it is on, the page named is the exact URL Pages() fetches for
+// chapterID: the same s.Resolve(chapterID) call t.doc makes to read that
+// chapter's markup. That makes the header a true statement about a request
+// Quire actually made, never one invented for the occasion. An unresolvable
+// chapterID yields "" and no header, the same as an unconfigured source.
+func (t *Theme) PageReferer(s *theme.Source, chapterID string) string {
+	o, err := spec.Resolve(s.Overrides)
+	if err != nil || !o.Bool(KeyPageReferrer) {
+		return ""
+	}
+	abs, err := s.Resolve(chapterID)
+	if err != nil {
+		return ""
+	}
+	return abs
 }
 
 func seriesPath(s *theme.Source, id string) string {
