@@ -13,7 +13,8 @@
     },
     "searchView": { "$ref": "#/$defs/view" },
     "downloadedView": { "$ref": "#/$defs/view" },
-    "watchingView": { "$ref": "#/$defs/view" }
+    "watchingView": { "$ref": "#/$defs/view" },
+    "reader": { "$ref": "#/$defs/reader" }
   },
   "$defs": {
     "view": {
@@ -21,6 +22,45 @@
       "enum": ["grid", "list"],
       "default": "grid",
       "description": "Which of the two layouts a screen draws: 'grid' of covers or 'list' of rows (PLAN §7.1 type 75). DEFAULT grid for every screen. Stored per screen rather than once for the whole app: searching wants a list often enough -- a row carries the title and the sources it was found in, where a tile carries a cover -- while Downloaded and Watching are for recognising something already known, which is what covers are good at. Each screen is a declared key rather than a map of screen to view, so that additionalProperties:false still catches a key nobody declared in an envelope imported from another device. Absent means the screen was never set and the default applies; an absent value and an explicit 'grid' are kept distinguishable so a future change of default cannot silently rewrite what an existing file meant."
+    },
+    "reader": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Quire's own book reader's global settings (books-contract.md §B), one configuration for every book. Absent means every field below applies at its default.",
+      "required": ["font", "size", "margins", "spacing", "align"],
+      "properties": {
+        "font": {
+          "type": "string",
+          "enum": ["book", "garamond", "noto"],
+          "default": "book",
+          "description": "'book' keeps the book's own typeface; 'garamond' and 'noto' override it via @font-face with a device font, falling back to 'book' silently (and logged) when that font's files are missing from this build."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9,
+          "default": 4,
+          "description": "A 1..9 step mapping to a point size: 9,10,11,12,13,14,16,18,20pt. Default 4 = 12pt."
+        },
+        "margins": {
+          "type": "string",
+          "enum": ["narrow", "normal", "wide"],
+          "default": "normal",
+          "description": "@page margin, top-bottom/sides in em: narrow 0.8/1, normal 1.4/1.8, wide 2/3."
+        },
+        "spacing": {
+          "type": "string",
+          "enum": ["book", "normal", "relaxed"],
+          "default": "book",
+          "description": "'book' leaves the publisher's own line-height; 'normal' and 'relaxed' override it to 1.45 and 1.7 respectively."
+        },
+        "align": {
+          "type": "string",
+          "enum": ["book", "left"],
+          "default": "book",
+          "description": "'book' leaves the publisher's own text alignment (often justified); 'left' overrides it to left-aligned."
+        }
+      }
     }
   }
 }

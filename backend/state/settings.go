@@ -50,6 +50,113 @@ type Settings struct {
 	SearchView     *string `json:"searchView,omitempty"`
 	DownloadedView *string `json:"downloadedView,omitempty"`
 	WatchingView   *string `json:"watchingView,omitempty"`
+
+	// Reader is Quire's own book reader's global settings (books-contract.md
+	// §B, Settings) — one configuration for every book, not per-book,
+	// because the reader overlay is where it is changed and there is only
+	// one reader. A pointer for the same reason ConsultRobots is one: an
+	// envelope that never mentions books at all (an install with no book
+	// source configured yet) should not silently start meaning "the
+	// defaults, explicitly chosen" the moment some future default changes.
+	StoredReader *ReaderSettings `json:"reader,omitempty"`
+}
+
+// The reader settings' enum values (books-contract.md §B, Settings). These
+// are wire values, sent in BookOpened's settings and accepted by
+// SetReaderSettings, so they are spelled out rather than derived from
+// anything a rename could silently break.
+const (
+	ReaderFontBook     = "book"
+	ReaderFontGaramond = "garamond"
+	ReaderFontNoto     = "noto"
+
+	ReaderMarginsNarrow = "narrow"
+	ReaderMarginsNormal = "normal"
+	ReaderMarginsWide   = "wide"
+
+	ReaderSpacingBook    = "book"
+	ReaderSpacingNormal  = "normal"
+	ReaderSpacingRelaxed = "relaxed"
+
+	ReaderAlignBook = "book"
+	ReaderAlignLeft = "left"
+)
+
+// ReaderSizeMin and ReaderSizeMax are the font-size step range.
+const (
+	ReaderSizeMin = 1
+	ReaderSizeMax = 9
+)
+
+// ReaderSettings is Quire's own book reader's global configuration. The zero
+// value is not meaningful on its own — see DefaultReaderSettings.
+type ReaderSettings struct {
+	Font    string `json:"font"`
+	Size    int    `json:"size"`
+	Margins string `json:"margins"`
+	Spacing string `json:"spacing"`
+	Align   string `json:"align"`
+}
+
+// DefaultReaderSettings is the reader's out-of-the-box configuration
+// (books-contract.md §B): font book, size 4 (12pt — see the wire contract's
+// size-to-point table), margins normal, spacing book, align book.
+func DefaultReaderSettings() ReaderSettings {
+	return ReaderSettings{
+		Font: ReaderFontBook, Size: 4, Margins: ReaderMarginsNormal,
+		Spacing: ReaderSpacingBook, Align: ReaderAlignBook,
+	}
+}
+
+// Valid reports whether every field of s is a value SetReaderSettings would
+// accept.
+func (s ReaderSettings) Valid() bool {
+	switch s.Font {
+	case ReaderFontBook, ReaderFontGaramond, ReaderFontNoto:
+	default:
+		return false
+	}
+	switch s.Margins {
+	case ReaderMarginsNarrow, ReaderMarginsNormal, ReaderMarginsWide:
+	default:
+		return false
+	}
+	switch s.Spacing {
+	case ReaderSpacingBook, ReaderSpacingNormal, ReaderSpacingRelaxed:
+	default:
+		return false
+	}
+	switch s.Align {
+	case ReaderAlignBook, ReaderAlignLeft:
+	default:
+		return false
+	}
+	return s.Size >= ReaderSizeMin && s.Size <= ReaderSizeMax
+}
+
+// Reader returns the stored reader settings, applying the defaults for any
+// field that reads as invalid — the same "never fail to draw" rule View
+// applies to the layout setting, for the same reason: a hand-edited file or
+// one imported from a newer Quire must still leave the reader usable.
+func (s Settings) Reader() ReaderSettings {
+	if s.StoredReader == nil || !s.StoredReader.Valid() {
+		return DefaultReaderSettings()
+	}
+	return *s.StoredReader
+}
+
+// SetReader stores the reader settings and saves. It refuses a value Valid
+// says is not one of the recognised enum combinations, leaving the file
+// exactly as it was — the same rule SetView applies to an unrecognised view.
+func (s *Store) SetReader(settings ReaderSettings) error {
+	if !settings.Valid() {
+		return fmt.Errorf("state: %+v is not a valid reader setting", settings)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := settings
+	s.settings.StoredReader = &v
+	return s.save()
 }
 
 // RobotsConsulted applies the default of false.
@@ -185,6 +292,10 @@ func copySettings(in Settings) Settings {
 	out.SearchView = copyString(in.SearchView)
 	out.DownloadedView = copyString(in.DownloadedView)
 	out.WatchingView = copyString(in.WatchingView)
+	if in.StoredReader != nil {
+		v := *in.StoredReader
+		out.StoredReader = &v
+	}
 	return out
 }
 

@@ -200,6 +200,100 @@ func TestUnrecognisedStoredViewReadsAsTheDefault(t *testing.T) {
 	}
 }
 
+// books-contract.md §B: the reader defaults to font book, size 4, margins
+// normal, spacing book, align book on a store nobody has configured.
+func TestReaderSettingsDefaultToDefaults(t *testing.T) {
+	s, err := state.Open(t.TempDir(), registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.Settings().Reader()
+	want := state.DefaultReaderSettings()
+	if got != want {
+		t.Errorf("Reader() = %+v, want the defaults %+v", got, want)
+	}
+}
+
+func TestReaderSettingsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chosen := state.ReaderSettings{
+		Font: state.ReaderFontGaramond, Size: 7,
+		Margins: state.ReaderMarginsWide, Spacing: state.ReaderSpacingRelaxed,
+		Align: state.ReaderAlignLeft,
+	}
+	if err := s.SetReader(chosen); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Settings().Reader(); got != chosen {
+		t.Fatalf("Reader() = %+v, want %+v", got, chosen)
+	}
+
+	reopened, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Settings().Reader(); got != chosen {
+		t.Errorf("after a reload Reader() = %+v, want %+v", got, chosen)
+	}
+}
+
+// A reader setting SetReaderSettings would refuse must not be written at
+// all — the same rule SetView applies to an unrecognised view.
+func TestSetReaderRefusesAnInvalidCombination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   state.ReaderSettings
+	}{
+		{"bad font", state.ReaderSettings{Font: "helvetica", Size: 4, Margins: "normal", Spacing: "book", Align: "book"}},
+		{"bad margins", state.ReaderSettings{Font: "book", Size: 4, Margins: "huge", Spacing: "book", Align: "book"}},
+		{"bad spacing", state.ReaderSettings{Font: "book", Size: 4, Margins: "normal", Spacing: "cramped", Align: "book"}},
+		{"bad align", state.ReaderSettings{Font: "book", Size: 4, Margins: "normal", Spacing: "book", Align: "center"}},
+		{"size too small", state.ReaderSettings{Font: "book", Size: 0, Margins: "normal", Spacing: "book", Align: "book"}},
+		{"size too large", state.ReaderSettings{Font: "book", Size: 10, Margins: "normal", Spacing: "book", Align: "book"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := state.Open(dir, registry(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SetReader(tc.in); err == nil {
+				t.Fatalf("SetReader(%+v) should have been refused", tc.in)
+			}
+			if got := s.Settings().Reader(); got != state.DefaultReaderSettings() {
+				t.Errorf("a refused reader setting was stored anyway: %+v", got)
+			}
+			if _, err := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(err) {
+				t.Errorf("a refused reader setting saved the store: %v", err)
+			}
+		})
+	}
+}
+
+// A stored reader value this build cannot recognise (a hand-edited file, or
+// one written by a newer Quire) must read as the default rather than fail to
+// open the store at all.
+func TestUnrecognisedStoredReaderReadsAsTheDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, state.FileName)
+	stored := `{"version":` + strconv.Itoa(state.CurrentVersion) + `,"sources":[],` +
+		`"settings":{"reader":{"font":"comic-sans","size":4,"margins":"normal","spacing":"book","align":"book"}}}`
+	if err := os.WriteFile(path, []byte(stored), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Open(dir, registry(t))
+	if err != nil {
+		t.Fatalf("a reader setting this build does not know stopped the store from opening: %v", err)
+	}
+	if got := s.Settings().Reader(); got != state.DefaultReaderSettings() {
+		t.Errorf("an unreadable stored reader setting read as %+v, want the defaults", got)
+	}
+}
+
 // The Go struct and schema/settings.schema.json are two spellings of one
 // contract; neither is allowed to drift from the other.
 func TestSettingsMatchTheSchema(t *testing.T) {
@@ -227,6 +321,10 @@ func TestSettingsMatchTheSchema(t *testing.T) {
 		{"one screen set", state.Settings{SearchView: &list}},
 		{"every screen set", state.Settings{
 			SearchView: &list, DownloadedView: &grid, WatchingView: &grid}},
+		{"reader settings", state.Settings{StoredReader: &state.ReaderSettings{
+			Font: state.ReaderFontNoto, Size: 9, Margins: state.ReaderMarginsNarrow,
+			Spacing: state.ReaderSpacingRelaxed, Align: state.ReaderAlignLeft,
+		}}},
 	} {
 		b, err := json.Marshal(tc.in)
 		if err != nil {
@@ -258,6 +356,10 @@ func TestSettingsMatchTheSchema(t *testing.T) {
 		`{"downloadedView": ""}`,
 		`{"watchingView": true}`,
 		`{"detailView": "grid"}`,
+		`{"reader": {"font": "comic-sans", "size": 4, "margins": "normal", "spacing": "book", "align": "book"}}`,
+		`{"reader": {"font": "book", "size": 0, "margins": "normal", "spacing": "book", "align": "book"}}`,
+		`{"reader": {"font": "book", "size": 4, "margins": "huge", "spacing": "book", "align": "book"}}`,
+		`{"reader": {"font": "book", "size": 4, "margins": "normal", "spacing": "book", "align": "book", "extra": true}}`,
 	} {
 		v, err := jsonschema.UnmarshalJSON(strings.NewReader(bad))
 		if err != nil {
