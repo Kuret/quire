@@ -228,6 +228,10 @@ Window {
     property int sendToLibraryAsks: 0
     property int saveInQuireAsks: 0
 
+    // Book mode's own settings panel: every settings object the reader asked
+    // to change, in order.
+    property var settingsChangeAsks: []
+
     // Saved in Quire: what a saved row's Read/Delete asked for.
     property int readSavedAsks: 0
     property string readSavedChapterId: ""
@@ -608,6 +612,7 @@ Window {
         }
         onSendToLibraryRequested: win.sendToLibraryAsks++
         onSaveInQuireRequested: win.saveInQuireAsks++
+        onSettingsChangeRequested: win.settingsChangeAsks.push(settings)
     }
     Settings {
         id: settings
@@ -2045,6 +2050,166 @@ Window {
                              "position": 99})
         win.want("a position past the end is clamped to the last page",
                  tryReader.index, 0)
+
+        // ---- book mode: MuPDF-rendered pages, Contents and the Aa panel ----
+        //
+        // Driven the same way as try/saved above — directly, through the
+        // reader's own API — since this is the same screen and the same tap
+        // zones, just a third mode of it.
+        win.tryPageWants = []
+        tryReader.openBook({
+            "sourceId": "src", "seriesId": "series", "chapterId": "b1",
+            "title": "Dune Messiah", "mode": "try", "fixedLayout": false,
+            "pageCount": 20, "page": 0,
+            "toc": [{"title": "Part One", "page": 0, "level": 0},
+                    {"title": "Part Two", "page": 10, "level": 0}],
+            "settings": {"font": "book", "size": 4, "margins": "normal",
+                         "spacing": "book", "align": "book"},
+            "fontChoices": [{"id": "book", "label": "The book's own"},
+                            {"id": "garamond", "label": "EB Garamond"},
+                            {"id": "noto", "label": "Noto Sans"}],
+            "sizeMin": 1, "sizeMax": 9})
+        win.want("opening a book sets the reader's mode", tryReader.mode, "book")
+        win.want("carrying which kind of session it is", tryReader.bookMode, "try")
+        win.want("asking for the page on screen, the same way Try's page 0 is",
+                 win.tryPageWants.join(","), "0")
+        win.want("nothing to show until it arrives",
+                 win.findChild(tryReader, "tryPageImage").visible, false)
+
+        tryReader.bookStatus({"sourceId": "src", "seriesId": "series", "chapterId": "b1",
+                              "message": "Laying out the book…"})
+        win.want("a BookStatus sentence shows on the opening screen",
+                 win.findChild(tryReader, "tryBookStatusLabel").text,
+                 "Laying out the book…")
+        win.want("and it is visible there", win.findChild(tryReader, "tryBookStatusLabel").visible, true)
+
+        tryReader.pageArrived({"sourceId": "src", "seriesId": "series", "chapterId": "b1",
+                               "index": 0, "path": "/tmp/b0.png"})
+        win.want("the page reuses Try's own page-arrived handling",
+                 win.findChild(tryReader, "tryPageImage").visible, true)
+
+        var bookMiddleZone = win.findChild(tryReader, "tryMiddleZone")
+        bookMiddleZone.clicked(null)
+        win.want("the overlay opens the same way", tryReader.overlayVisible, true)
+        win.want("naming the chapter under the current page",
+                 win.findChild(tryReader, "tryOverlayChapterTitle").text, "Part One")
+        win.want("Contents is offered", win.findChild(tryReader, "tryContentsButton").visible, true)
+        win.want("so is Aa", win.findChild(tryReader, "tryAaButton").visible, true)
+        // A book's own session is never the Try honesty line's to draw — that
+        // is a comic's "Preview only" sentence, not a book's.
+        win.want("book mode carries none of Try's own honesty line",
+                 win.findChild(tryReader, "tryOverlayNotice").visible, false)
+
+        win.findChild(tryReader, "tryContentsArea").clicked(null)
+        win.want("Contents opens its own panel", tryReader.contentsVisible, true)
+        var tocEntries = win.findChildren(tryReader, "tryContentsList", [])[0]
+        win.want("every toc entry is drawn",
+                 win.findChildren(tocEntries, "tryContentsEntryArea-0", []).length, 1)
+        win.findChild(tryReader, "tryContentsEntryArea-1").clicked(null)
+        win.want("tapping an entry jumps to its page", tryReader.index, 10)
+        win.want("and closes the panel", tryReader.contentsVisible, false)
+        win.want("and the overlay with it", tryReader.overlayVisible, false)
+
+        // Fetching the new page, the same as any other turn.
+        win.want("the jump asked for its page", win.tryPageWants.indexOf(10) >= 0, true)
+        tryReader.pageArrived({"sourceId": "src", "seriesId": "series", "chapterId": "b1",
+                               "index": 10, "path": "/tmp/b10.png"})
+
+        bookMiddleZone.clicked(null)
+        win.findChild(tryReader, "tryAaArea").clicked(null)
+        win.want("Aa opens the settings panel", tryReader.settingsVisible, true)
+        win.want("offering the backend's own font choices",
+                 win.findChild(tryReader, "trySettingsFont-garamond") !== null, true)
+        win.want("labelled the backend's way, not this file's",
+                 win.wordsOn(win.findChild(tryReader, "trySettingsFont-garamond")),
+                 "EB Garamond")
+
+        win.settingsChangeAsks = []
+        // The MouseArea inside the font button carries no name of its own
+        // (unlike the button it is one of several in); found by what a
+        // MouseArea *is* — the presence of onClicked — rather than a name.
+        var fontButton = win.findChild(tryReader, "trySettingsFont-garamond")
+        var fontArea = null
+        for (var fc = 0; fc < fontButton.children.length; ++fc)
+            if (fontButton.children[fc].clicked !== undefined)
+                fontArea = fontButton.children[fc]
+        fontArea.clicked(null)
+        win.want("tapping a font asks for it once", win.settingsChangeAsks.length, 1)
+        win.want("naming the choice", win.settingsChangeAsks[0].font, "garamond")
+        win.want("carrying the rest of the settings along unchanged",
+                 win.settingsChangeAsks[0].size, 4)
+
+        win.want("size can go up from the middle", win.findChild(tryReader, "trySettingsSizeUp").enabled, true)
+        win.want("and down too", win.findChild(tryReader, "trySettingsSizeDown").enabled, true)
+        tryReader.settings = {"font": "book", "size": 9, "margins": "normal",
+                              "spacing": "book", "align": "book"}
+        win.want("size is dead at the top", win.findChild(tryReader, "trySettingsSizeUp").enabled, false)
+        win.want("but still live going down", win.findChild(tryReader, "trySettingsSizeDown").enabled, true)
+        tryReader.settings = {"font": "book", "size": 1, "margins": "normal",
+                              "spacing": "book", "align": "book"}
+        win.want("and dead at the bottom the other way",
+                 win.findChild(tryReader, "trySettingsSizeDown").enabled, false)
+
+        win.settingsChangeAsks = []
+        var marginsButton = win.findChild(tryReader, "trySettingsMargins-wide")
+        var marginsArea = null
+        for (var mc = 0; mc < marginsButton.children.length; ++mc)
+            if (marginsButton.children[mc].clicked !== undefined)
+                marginsArea = marginsButton.children[mc]
+        marginsArea.clicked(null)
+        win.want("margins ask by their schema value", win.settingsChangeAsks[0].margins, "wide")
+
+        // BookRelaid answers a settings change: new count, new page, new toc,
+        // and every cached page path is dropped — a stale page under the old
+        // layout would otherwise show under the new one.
+        tryReader.settingsVisible = false
+        win.tryPageWants = []
+        tryReader.relaid({"sourceId": "src", "seriesId": "series", "chapterId": "b1",
+                          "pageCount": 24, "page": 3,
+                          "toc": [{"title": "Part One", "page": 0, "level": 0}],
+                          "settings": {"font": "garamond", "size": 4, "margins": "wide",
+                                       "spacing": "book", "align": "book"}})
+        win.want("BookRelaid moves to the page it names", tryReader.index, 3)
+        win.want("with the new count", tryReader.pageCount, 24)
+        win.want("and asks for that page fresh, the cache having been dropped",
+                 win.tryPageWants.join(","), "3")
+        win.want("nothing left showing from before the relayout",
+                 win.findChild(tryReader, "tryPageImage").visible, false)
+
+        // Fixed-layout books (PDF/XPS/CBZ) have nothing the Aa panel would
+        // control, so the button that opens it is not offered at all —
+        // Contents is what such a book keeps.
+        tryReader.openBook({
+            "sourceId": "src", "seriesId": "series", "chapterId": "b2",
+            "title": "A Scanned Comic", "mode": "saved", "fixedLayout": true,
+            "pageCount": 5, "page": 0, "toc": [],
+            "settings": {"font": "book", "size": 4, "margins": "normal",
+                         "spacing": "book", "align": "book"},
+            "fontChoices": [], "sizeMin": 1, "sizeMax": 9})
+        bookMiddleZone.clicked(null)
+        win.want("a fixed-layout book hides Aa entirely",
+                 win.findChild(tryReader, "tryAaButton").visible, false)
+        win.want("but keeps Contents", win.findChild(tryReader, "tryContentsButton").visible, true)
+
+        // Position is tracked for a saved book, the same way a saved comic's
+        // is — debounced on a turn (SavePosition (93) works for a book too),
+        // never for a Try session of either kind.
+        tryReader.pageArrived({"sourceId": "src", "seriesId": "series", "chapterId": "b2",
+                               "index": 0, "path": "/tmp/c0.png"})
+        win.savePositionWants = []
+        var bookRightZone = win.findChild(tryReader, "tryRightZone")
+        bookRightZone.clicked(null)
+        win.want("a saved book schedules a save rather than sending one",
+                 win.savePositionWants.length, 0)
+        tryReader.flushSavePosition()
+        win.want("and flushes it on leaving", win.savePositionWants.join(","), "1")
+
+        tryReader.bookMode = "try"
+        win.savePositionWants = []
+        tryReader.index = 0
+        tryReader.flushSavePosition()
+        win.want("a book Try session tracks no position at all",
+                 win.savePositionWants.length, 0)
 
         // The volume view offers it on the same terms as a downloaded
         // chapter — except for a saved row, which offers Read only (see
