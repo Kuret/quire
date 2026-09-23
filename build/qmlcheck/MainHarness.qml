@@ -1962,18 +1962,31 @@ Window {
         backend.forget()
         win.app.currentSourceId = "src-s"
         win.app.currentSeriesId = "/book/dune-messiah"
+        // Try started on a book row (ChapterList's own isBook, the same way
+        // it already knows kind for the release strip): the reader's
+        // placeholder must show the backend's BookStatus sentence, never
+        // Try's own "Fetching page N…" wording, while it waits for
+        // BookOpened.
+        chapterList.kind = "book"
         win.app.openTry("r0", "EPUB · 0.4MB · Direct Download · fiction")
         win.want("opening Try switches to the reader immediately, book or not",
                  win.app.screen, "try")
         win.want("sending the same TryChapter a manga row would",
                  backend.countOf(Msg.TryChapter), 1)
+        win.want("a book row starts the placeholder empty, not Try's own wording",
+                 win.findChild(reader, "tryLoadingLabel").visible, false)
 
         win.deliver(Msg.BookStatus, {
             "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
             "message": "Fetching the book…"})
         win.want("BookStatus reaches the reader while it waits",
                  reader.note, "Fetching the book…")
+        win.want("and shows on the placeholder, not Try's page-fetching wording",
+                 win.findChild(reader, "tryLoadingLabel").text, "Fetching the book…")
+        win.want("visibly, while the page is not yet there",
+                 win.findChild(reader, "tryLoadingLabel").visible, true)
 
+        chapterList.kind = "manga"
         backend.forget()
         win.deliver(Msg.BookOpened, {
             "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",

@@ -275,7 +275,12 @@ Rectangle {
     // "Fetching page 1…" immediately, before the backend has answered at
     // all — see TryReader.qml's begin().
     function openTry(chapterId, title) {
-        tryReaderScreen.begin(root.currentSourceId, root.currentSeriesId, chapterId, title)
+        // isBook comes straight off the chapter list screen (same source as
+        // sourcePrivate below): ChapterList already knows whether the row it
+        // offered Try on is a book (books-contract.md, TryReader's
+        // book-pending placeholder).
+        tryReaderScreen.begin(root.currentSourceId, root.currentSeriesId, chapterId, title,
+                               chapterListScreen.isBook)
         // Try is only ever offered on a row not already in the library (see
         // ChapterList.qml's tryButton), so the reader's "already there" flag
         // is always false here; "Send to library" still checks privacy.

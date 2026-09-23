@@ -73,6 +73,15 @@ Item {
     // leaveReader).
     property string mode: "try"
 
+    // Set by begin() when Try is starting on a book row (ChapterList's own
+    // isBook, passed through by Main.qml's openTry). While true and mode is
+    // still "try" — the window between the tap and BookOpened arriving — the
+    // placeholder shows the backend's BookStatus sentence (screen.note)
+    // rather than Try's own "Fetching page N…" wording, which is a comic's
+    // page-fetching sentence and wrong for a book being opened or laid out.
+    // Cleared once BookOpened lands and mode becomes "book".
+    property bool pendingBook: false
+
     // Whether the reader offers "Send to library" (never when the source is
     // private, never when the chapter is already there) and, in Try mode
     // only, "Save in Quire" — see the overlay below. Set by whoever opened
@@ -228,8 +237,9 @@ Item {
     // called the moment the user taps Try, so the screen already shows
     // "Fetching page 1…" instead of whatever the previous session left on
     // screen.
-    function begin(sourceId, seriesId, chapterId, title) {
+    function begin(sourceId, seriesId, chapterId, title, isBook) {
         screen.mode = "try"
+        screen.pendingBook = !!isBook
         screen.sourceId = sourceId
         screen.seriesId = seriesId
         screen.chapterId = chapterId
@@ -315,6 +325,7 @@ Item {
     function openBook(payload) {
         savePositionTimer.stop()
         screen.mode = "book"
+        screen.pendingBook = false
         screen.bookMode = payload.mode ? payload.mode : "try"
         screen.sourceId = payload.sourceId
         screen.seriesId = payload.seriesId
@@ -518,8 +529,13 @@ Item {
         id: tryLoadingLabel
         objectName: "tryLoadingLabel"
         anchors.centerIn: parent
-        visible: !screen.pageIsReady
-        text: "Fetching page " + (screen.index + 1) + "…"
+        // A book row's Try never shows this label's own page-fetching
+        // wording — it is a comic's sentence, wrong for a book being
+        // fetched, opened or laid out. While pendingBook (the window before
+        // BookOpened arrives), this shows the backend's own BookStatus
+        // sentence instead, empty until the first one arrives.
+        visible: !screen.pageIsReady && (!screen.pendingBook || screen.note.length > 0)
+        text: screen.pendingBook ? screen.note : "Fetching page " + (screen.index + 1) + "…"
         font.pointSize: Style.bodySize
         color: Style.muted
     }
