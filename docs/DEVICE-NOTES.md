@@ -1097,3 +1097,68 @@ downloads is the measurement that has not been taken.
 
 **Scratch was removed after the run** (`/home/root/quire-strip`). Write only
 under `/home`: `/` has ~47 MB free (§3.3).
+
+## 13. MuPDF `mutool run` for Quire's own book reader (PLAN §12.8)
+
+**Build** (macOS, no docker): `brew install zig`, MuPDF 1.28.4 source
+tarball, then
+
+```
+make OS=Linux build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_OBJCOPY=no \
+  HAVE_LIBCRYPTO=no CC="zig cc -target aarch64-linux-musl" CXX="zig c++ -target \
+  aarch64-linux-musl" AR="zig ar" LD="zig cc -target aarch64-linux-musl" XLDFLAGS=-static tools
+```
+
+→ a 43 MB static `mutool` for the device. `rm -rf` the build directory after
+changing any of those flags — stale objects from a previous set of flags kept
+producing OpenSSL link errors that had nothing to do with OpenSSL. A **host**
+build (macOS/Linux, `OUT=build/host`, no cross-compile flags, plain `make
+build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LIBCRYPTO=no tools`)
+is what `backend/bookrender`'s optional `QUIRE_MUTOOL` integration test runs
+against — it built and ran a real epub through the whole protocol in well
+under a second on a laptop.
+
+**Measured** (host build, disciple.epub — a public-domain-shaped test epub,
+236–239 pages depending on layout — laid out at 1620×2160 px @229 dpi, W=509.3
+H=679.2 pt, render scale 229/72, per the spike this section supersedes as the
+source of truth): layout+`countPages` 60–90 ms on a laptop; a page render
+25–110 ms; a page's text (`toStructuredText().asText()`) is effectively free
+once the page is loaded. The original spike's *on-device* numbers — layout
+0.4–1.4 s (the higher end with an `@font-face` override), first page
+100–260 ms, later pages ~25 ms — are the ones the per-request timeouts (30 s
+layout, 10 s render) and the reader's "Laying out the book…" status message
+are sized against; a laptop is not the device, and both numbers are recorded
+here rather than only in a memory that this document supersedes.
+
+**mutool's stdout needs a pty, not a plain pipe — the one gap the original
+spike memory did not catch, because its own testing always redirected stdout
+to a terminal or let the process exit immediately.** `mutool run`'s `print`
+and `write` builtins (`source/tools/murun.c`, `jsB_print`/`jsB_write`) go
+through libc's buffered `stdout` `FILE*` with no `setvbuf` or `fflush`
+anywhere in the file. Piped to a Go `exec.Cmd`'s `StdoutPipe()` — not a
+terminal — libc defaults to full buffering: a response the size of one JSON
+line sits in the C library's own buffer until either enough further output
+accumulates to fill it, or the process exits. Neither happens for a
+request/response child that is deliberately kept running between requests, so
+the very first request (`open`) simply never arrives — confirmed by hand:
+piping five requests into one script and letting the process run to
+completion and exit works fine (the exit flushes everything at once); driving
+the same script interactively, one request at a time over a real pipe, hangs
+forever on the first response. **Fix:** give the child's stdout a pty
+(`github.com/creack/pty`) instead of a plain pipe; libc's own `isatty()` check
+then picks line buffering, and each `print()`'s trailing newline flushes
+immediately. Stdin stays a plain pipe (nothing is ever "typed" into the pty's
+input side, so there is no terminal echo to contend with), and mutool itself
+is not modified — it stays the unpatched binary `THIRD_PARTY.md` promises.
+
+**API notes, confirmed against a real build** (extending the original spike's
+own list): `readline()` throws `"cannot read line from stdin"` at EOF rather
+than returning `null`/`undefined` — catch it, do not compare against it.
+`doc.loadOutline()` returns a flat array of `{title, uri}` (no `page` field
+and no `down` observed on disciple.epub's 48-entry, single-level table of
+contents, though `render.js` still follows `down` defensively for a book that
+does have a nested one); a page number comes from `doc.resolveLink(uri)`,
+never from the outline node itself. `doc.getMetaData("info:Title")` answers
+the book's title. `page.toPixmap(mupdf.Matrix.scale(s, s),
+mupdf.ColorSpace.DeviceGray, false)` then `.saveAsPNG(path)` is the whole
+render call; grayscale, no alpha.

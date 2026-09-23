@@ -805,9 +805,11 @@ for the page count.
 
 > **Now the opt-in path, 2026-09-22 — see §12.6.** This milestone describes
 > what happens when a download's destination is `"library"` — reached by an
-> explicit **"Send to library"** action — or when the download is a book
-> (`theme.FileTheme`, always the library: Quire's own reader is image-only).
-> The default destination for a comic or manga chapter is Quire's own storage,
+> explicit **"Send to library"** action, or by a book (`theme.FileTheme`)
+> whose format Quire's own reader cannot open. **Superseded 2026-09-23 for
+> books — see §12.8: a book now defaults to Quire's own storage and Quire's
+> own reader too**, the same as a comic or manga chapter, format permitting.
+> The default destination for anything readable is Quire's own storage,
 > which never touches any of this.
 
 **M0.5 settled this: use the upload endpoint.** Two facts from §11 Q1/Q1b make
@@ -3168,11 +3170,15 @@ into it is less code and less to go wrong, not more of either.
   for a **private** source (`theme.Source.IsPrivate`): the refusal is in the
   backend (`PrivateSourceLibraryRefusal`), not only in what the UI offers, so a
   replayed message or an older frontend cannot reach it either.
-- **Books are unchanged.** A `theme.FileTheme` source (Shelfmark epubs, and
-  anything like it) always goes to the library, whatever the request's
-  `destination` says: Quire's reader is image-only, and a book is not images —
-  see `backend/service/filedownload.go`'s own package comment, which predates
-  this and needed no change.
+- **Books were unchanged here — superseded 2026-09-23, see §12.8.** At the time
+  this was written, a `theme.FileTheme` source (Shelfmark epubs, and anything
+  like it) always went to the library regardless of `destination`, because
+  Quire's reader was image-only and a book is not images. Quire's reader is no
+  longer image-only (§12.8: `backend/bookrender` renders a book's own pages via
+  MuPDF), so a book now follows the same default as everything else — Quire's
+  own storage, format permitting — and §12.8 is the authoritative description of
+  what actually happens; this bullet is kept only so the "why" above still
+  reads true for the parts that did not change.
 - **A chapter can be both saved and in the library.** Sending a saved chapter
   to the library does not remove the saved copy; the two are independent from
   that point on, each deletable on its own.
@@ -3350,3 +3356,94 @@ request rather than caching it, and the UI re-requests the list after a saved
 delete if a Downloaded screen happens to be open — simpler than threading a
 fresher figure through `SavedDeleted`'s own reply, and correct either way
 since nothing here is pushed.
+
+### 12.8 Books in Quire's own reader — 2026-09-23
+
+**Why.** §12.6 made comics and manga default to Quire's own storage and
+Quire's own reader, and left books alone with a one-line excuse: "Quire's
+reader is image-only, and a book is not images." That excuse expired the
+moment a real MuPDF `mutool run` build was measured rendering an epub's pages
+fast enough for a reader on the device (layout+countPages 0.4–1.4 s, later
+pages 25–260 ms — see the spike memory this section is built from). Once a
+book can be turned into page images at all, the whole of §12.6's argument for
+"default to Quire, not xochitl" applies to it too: no PDF, no upload, no
+folder to place, no library record to lose track of, and MuPDF's own reflow
+does everything xochitl's stock reader did for free.
+
+**The decision:**
+
+- **A book (`theme.FileTheme`) now defaults to Quire's own storage and
+  Quire's own reader**, the same as a comic or manga chapter, *when its
+  format is one `backend/bookrender` can actually open* — epub, fb2, mobi,
+  pdf, xps, cbz, txt. A saved book is one file, not a per-page directory:
+  `<saved>/books/<safeSegment(source)>/<safeSegment(series)>/
+  <safeSegment(chapter)>.<ext>`, indexed by the same `backend/shelf.Store` as
+  a chapter of pages, distinguished by a new `Kind: "book"` field (an old
+  record with no `kind` at all still reads as a chapter, unchanged).
+- **A format Quire cannot open still goes to the library** — the one place a
+  finished document can still be read, on the device's own reader — with a
+  plain note explaining why ("Quire can't display AZW3 books, so this one
+  went to your reMarkable library."). **Except for a private source**, which
+  refuses instead: the whole point of marking a source private is that
+  nothing it names ever reaches xochitl's library, and an unreadable format
+  is not the one silent exception to that. A private source *can* now
+  download a book to Quire's own storage, exactly as it already could a
+  comic chapter — only the library stays off limits for it.
+- **Rendering is `mutool run` against an embedded script**
+  (`backend/bookrender/render.js`, `go:embed`), one long-lived process per
+  open book, line-based JSON over stdin/stdout: `open`, `layout`, `render`,
+  `text`, `outline`. A memory cap (`ulimit -v`, busybox `sh` on the device)
+  and per-request timeouts (30 s layout, 10 s render) bound what an untrusted
+  file parsed by MuPDF's C code can do to the device; a process that times
+  out or dies is killed and restarted exactly once, transparently — reopened
+  and re-laid-out before the request that triggered the restart is retried —
+  and only a second failure in a row surfaces to the user. **mutool's own
+  stdout needed a pty, not a plain pipe**, discovered while wiring this up:
+  `mutool run`'s `print`/`write` go through libc's buffered stdio with no
+  `setvbuf`/`fflush` anywhere in `murun.c`, so a response the size of one
+  JSON line sits in the C library's buffer until the process happens to
+  write enough further output to flush it — which, for a process
+  deliberately kept alive between requests, may be never. A pty on stdout
+  only (stdin stays a plain pipe, so nothing echoes back into what Quire
+  reads) makes libc pick line buffering instead, without touching the
+  unmodified mutool binary (`github.com/creack/pty`).
+- **Reader settings are global, not per-book**: font (the book's own,
+  EB Garamond or Noto Sans — a missing font's files fall back to the book's
+  own, silently, and logged), size (1–9 steps, 9–20 pt), margins
+  (narrow/normal/wide), spacing (book/normal/relaxed line-height) and
+  alignment (book/left), composed into CSS by the backend
+  (`backend/bookrender.ComposeCSS`) and stored in
+  `backend/state.Settings.Reader` / `schema/settings.schema.json`, exactly
+  the way the per-screen view settings already are.
+- **Reading position survives a re-layout.** A page number only means the
+  same thing across two `layout` calls when nothing about the layout
+  changed — changing the font, size, margins or spacing reflows the whole
+  book. A saved book's position is therefore kept three ways: the page
+  itself (for a reopen under the identical settings), a fraction through the
+  book, and a short text snippet — reopening under different settings
+  estimates the page from the fraction and searches ±6 pages for the
+  snippet (`backend/bookreader.Session.findPage`) rather than trusting a
+  stale page number.
+- **Try on a book fetches the file** — the same guarded
+  `Retrieve`+fetch `runFileDownload` already used — into a temporary session,
+  opens it in Quire's reader, and deletes everything on close: no shelf
+  record, nothing remembered, exactly as disposable as Try already was for a
+  page-based source.
+
+**The wire contract reuses three existing entry points** rather than adding
+ones QML would have to branch on kind to reach: `OpenSaved` (91) on a saved
+book answers `BookOpened` instead of `SavedOpened`; `TryChapter` (83) on a
+book source answers `BookStatus` progress then `BookOpened` (mode `"try"`)
+instead of the old `try_unavailable` refusal; `SavePosition` (93) works for a
+book too, its position being a page index the backend turns into a fraction
+and a snippet itself. New: `BookOpened`/`BookPageRequest`/`BookPage`/
+`SetReaderSettings`/`BookRelaid`/`CloseBook`/`BookStatus`, types 96–102
+(`backend/appload/messages.go`, `TestMessageTypeValues`) — see
+`backend/bookrender`, `backend/bookreader` and `backend/service/book.go` for
+the implementation, and the design note this section is built from
+(`books-contract.md`, superseded by this section as the source of truth) for
+the full message shapes.
+
+**MuPDF is AGPL-3.0-or-later**, bundled unmodified as a separate executable
+(`build/mupdf.sh`, `THIRD_PARTY.md`) — a licensing choice the user made
+explicitly, not a default this document assumes for future dependencies.
