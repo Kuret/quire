@@ -143,8 +143,12 @@ Item {
     // the row already has it — asking the backend to say it again would be a
     // second answer to a question already answered.
     //
-    // Never offered for a book (screen.isBook, below): a Shelfmark release
-    // has no page images at all, so there is nothing here to preview.
+    // Now offered on a book row too: a Shelfmark release renders through
+    // MuPDF the same as a saved book does (backend/bookrender), so there is
+    // something to preview after all — the same TryChapter this signal has
+    // always sent, answered with BookOpened instead of TryReady when the
+    // source turns out to be one (see Main.qml's dispatch; no branching on
+    // kind happens here or there).
     signal tryRequested(string chapterId, string title)
 
     // Saved in Quire: reading and deleting a chapter kept in Quire's own
@@ -1006,9 +1010,9 @@ Item {
                     }
 
                     // Try (milestone 1): read this chapter without
-                    // downloading it. Never for a book — a release has no
-                    // page images, so there is nothing here to preview
-                    // (theme.FileTheme) — and never once the chapter is
+                    // downloading it. Offered on a book row too — a release
+                    // renders through MuPDF the same as a saved book does
+                    // (backend/bookrender) — and never once the chapter is
                     // already on the tablet, where "Read" opens the real
                     // thing rather than a preview of it.
                     Rectangle {
@@ -1020,9 +1024,10 @@ Item {
                         anchors { right: downloadButton.left; rightMargin: Style.gap; verticalCenter: parent.verticalCenter }
                         width: 140
                         height: Style.buttonHeight
-                        // A saved chapter offers [Delete][Read] instead —
-                        // see the delete/download buttons below.
-                        visible: !screen.isBook && !model.documentUuid && !model.saved
+                        // A saved chapter (or saved book) offers
+                        // [Delete][Read] instead — see the delete/download
+                        // buttons below.
+                        visible: !model.documentUuid && !model.saved
                                  && !screen.selecting
                         color: tryArea.pressed ? Style.pressed : Style.paper
                         border.width: 2

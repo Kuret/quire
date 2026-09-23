@@ -1748,10 +1748,13 @@ Window {
         win.want("selection mode hides Try", visibleTries(chapterList), 0)
         chapterList.leaveSelection()
 
-        // A book has no page images at all (theme.FileTheme) — the mutation
-        // anchor for "offer Try for a book".
-        win.want("a book offers no Try on any row", visibleTries(bookChapterList), 0)
-        win.want("but Download remains reachable on a book",
+        // A book's release renders through MuPDF the same as a saved book
+        // does (backend/bookrender), so Try is offered on it too — the same
+        // TryChapter as a manga row sends, answered with BookOpened rather
+        // than TryReady when the source turns out to be one (books-contract
+        // §C: "book rows now get Try/Download and Read/Delete like comics").
+        win.want("a book offers Try too", visibleTries(bookChapterList) > 0, true)
+        win.want("and Download remains reachable beside it",
                  findByPrefix(bookChapterList, "downloadButton-", []).length > 0, true)
 
         // ---- saved in Quire: [Delete][Read] instead of [Try][Download] ----
