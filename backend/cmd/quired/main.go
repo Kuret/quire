@@ -28,6 +28,8 @@ import (
 
 	"github.com/rickl/quire/backend/annex"
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/bookreader"
+	"github.com/rickl/quire/backend/bookrender"
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/download"
 	"github.com/rickl/quire/backend/fetch"
@@ -534,6 +536,25 @@ func themeRegistry(client *fetch.Client) *theme.Registry {
 	return reg
 }
 
+// bookMutoolPath resolves the mutool executable Quire's own book reader
+// runs: next to the running backend executable, exactly where
+// build/build-rmpp.sh's bundle puts it (books-contract.md §A, §B). It
+// returns an error — never a guessed fallback path — when the executable
+// itself cannot be resolved or mutool is not sitting beside it, since a
+// silently wrong path would surface much later as a mystifying "could not
+// start mutool" instead of this one clear reason.
+func bookMutoolPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolving the running executable: %w", err)
+	}
+	path := filepath.Join(filepath.Dir(exe), "mutool")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("no mutool next to %s: %w", exe, err)
+	}
+	return path, nil
+}
+
 // newService wires the backend together: one guarded HTTP client, every theme,
 // the source store and the cover cache.
 //
@@ -597,6 +618,36 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 
 	lib := library.New(library.Options{Log: log})
 
+	// Quire's own book reader (books-contract.md §B): a mutool executable
+	// bundled next to this one (build/build-rmpp.sh's job — see
+	// THIRD_PARTY.md), driving the embedded render.js written out to the
+	// data dir once at startup. A missing mutool — an older bundle, or the
+	// AppLoad PC emulator, which never ships one — is not fatal: bookCache
+	// stays nil, and OpenSaved/TryChapter on a book fall back to a plain
+	// sentence exactly the way a nil TryCache/Library already do.
+	var bookCache *bookreader.Cache
+	if mutoolPath, err := bookMutoolPath(); err != nil {
+		log.Warn("no bundled mutool found; Quire's own book reader is disabled", "err", err)
+	} else if scriptPath, err := bookrender.WriteScript(filepath.Join(dir, "book")); err != nil {
+		log.Warn("could not write render.js; Quire's own book reader is disabled", "err", err)
+	} else {
+		log.Info("mutool found", "path", mutoolPath)
+		bookCache = bookreader.New(filepath.Join(dir, "bookcache"), func() bookreader.Renderer {
+			return bookrender.New(bookrender.Options{
+				MutoolPath: mutoolPath,
+				ScriptPath: scriptPath,
+				// ~390 MB: generous enough for a legitimate book (the spike's
+				// disciple.epub laid out and rendered comfortably well under
+				// this) while still well short of the ~2 GB the device shares
+				// with xochitl, so a hostile or corrupt file that tries to
+				// exhaust memory fails instead of pressuring the rest of the
+				// system (books-contract.md §B, Renderer robustness).
+				MemoryCapKB: 400_000,
+				Log:         log,
+			})
+		})
+	}
+
 	// The loopback alias is added here as well as before every upload. Doing
 	// it at startup means the endpoint is reachable untethered from the first
 	// moment, and doing it again later covers the fact that it does not
@@ -628,6 +679,8 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		// indexed by ShelfStore the way LibraryStore indexes the library.
 		SavedDir:   filepath.Join(dir, "saved"),
 		ShelfStore: shelfStore,
+
+		BookCache: bookCache,
 
 		PreviousSessionCrashed: previousCrashed,
 	})
