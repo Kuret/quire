@@ -219,34 +219,49 @@ func (s *Service) deleteSavedVolume(out Sender, req deleteSavedRequest) error {
 	})
 }
 
-// removeSavedChapter deletes one chapter's saved files outright — os.RemoveAll,
-// never the Trash, since there is no xochitl document here to put there — and
-// drops its shelf record.
+// removeSavedChapter deletes one saved chapter or book outright —
+// os.RemoveAll, never the Trash, since there is no xochitl document here to
+// put there — and drops its shelf record.
 //
-// The directory is built only from the saved root, safeSegment'd ids and
-// download.ChapterDir, never from anything stored on the record: the same
-// rule reclaim.go applies to the download cache, and for the same reason —
-// only a path built this way is provably inside the root this function is
-// allowed to touch.
+// A book (shelf.KindBook) is one file, saved at Record.File, and only that
+// file is removed — not download.ChapterDir's whole per-page directory,
+// which a book never has. Everything else is a chapter of page images, in
+// download.ChapterDir(seriesDir, chapterID) exactly as before. Either way the
+// path removed is built only from the saved root, safeSegment'd ids and (for
+// a book) the record's own File — never trusted beyond being joined under
+// root and checked — the same rule reclaim.go applies to the download cache,
+// and for the same reason: only a path built and verified this way is
+// provably inside the root this function is allowed to touch.
 func (s *Service) removeSavedChapter(sourceID, seriesID, chapterID string) error {
 	root, err := filepath.Abs(filepath.Clean(s.savedDir))
 	if err != nil {
 		return fmt.Errorf("resolving the saved directory: %w", err)
 	}
-	seriesDir := filepath.Join(root, safeSegment(sourceID), safeSegment(seriesID))
-	chapterDir := download.ChapterDir(seriesDir, chapterID)
+	key := shelf.Key{Source: sourceID, Series: seriesID, Chapter: chapterID}
 
-	if err := removeAllUnderRoot(root, chapterDir); err != nil {
-		return err
+	rec, ok := s.shelfStore.Get(key)
+	var prunable string // the directory to sweep upward from once the file/dir is gone
+	if ok && rec.IsBook() && rec.File != "" {
+		bookFile := filepath.Join(root, rec.File)
+		if err := removeAllUnderRoot(root, bookFile); err != nil {
+			return err
+		}
+		prunable = filepath.Dir(bookFile)
+	} else {
+		seriesDir := filepath.Join(root, safeSegment(sourceID), safeSegment(seriesID))
+		chapterDir := download.ChapterDir(seriesDir, chapterID)
+		if err := removeAllUnderRoot(root, chapterDir); err != nil {
+			return err
+		}
+		prunable = seriesDir
 	}
 
-	key := shelf.Key{Source: sourceID, Series: seriesID, Chapter: chapterID}
 	if err := s.shelfStore.Remove(key); err != nil {
 		return fmt.Errorf("forgetting the saved chapter: %w", err)
 	}
 
-	pruneEmpty(seriesDir, root)
-	pruneEmpty(filepath.Dir(seriesDir), root)
+	pruneEmpty(prunable, root)
+	pruneEmpty(filepath.Dir(prunable), root)
 	return nil
 }
 

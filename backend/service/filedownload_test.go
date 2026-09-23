@@ -856,6 +856,74 @@ func TestAPrivateSourceStillRefusesTheLibraryForABook(t *testing.T) {
 	}
 }
 
+// TestDeletingASavedBookRemovesOnlyItsFile is the mutation check for "delete
+// of a book removes only its file under the saved root": a book is one file,
+// not a per-page directory, and deleting it must not reach for
+// download.ChapterDir's directory shape (which would remove nothing, since a
+// book never has one) nor take a sibling book down with it.
+func TestDeletingASavedBookRemovesOnlyItsFile(t *testing.T) {
+	th := &bookTheme{}
+	env := newBookService(t, th)
+
+	const otherRelease = "/release/openlibrary/OL1W/direct_download/other456"
+
+	// Two releases of the same series, both saved in Quire. Each download
+	// gets its own recorder: waitForPhase matches against everything a
+	// recorder has ever seen, and the two downloads' "done" phases would
+	// otherwise be indistinguishable.
+	rec1 := &recorder{}
+	handle(t, env.svc, rec1, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, rec1, "done")
+	rec2 := &recorder{}
+	handle(t, env.svc, rec2, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			otherRelease+`"}`)
+	waitForPhase(t, rec2, "done")
+
+	keyA := shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID}
+	keyB := shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: otherRelease}
+	recA, ok := env.shelfStore.Get(keyA)
+	if !ok {
+		t.Fatal("the first book was not saved")
+	}
+	recB, ok := env.shelfStore.Get(keyB)
+	if !ok {
+		t.Fatal("the second book was not saved")
+	}
+	fileA := filepath.Join(env.savedDir, recA.File)
+	fileB := filepath.Join(env.savedDir, recB.File)
+	if _, err := os.Stat(fileA); err != nil {
+		t.Fatalf("the first book's file is missing before deleting anything: %v", err)
+	}
+	if _, err := os.Stat(fileB); err != nil {
+		t.Fatalf("the second book's file is missing before deleting anything: %v", err)
+	}
+
+	handle(t, env.svc, env.rec, appload.MessageDeleteSaved,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","chapterId":"`+bookReleaseID+`"}`)
+	env.rec.wait(t, appload.MessageSavedDeleted) // the confirm question
+	handle(t, env.svc, env.rec, appload.MessageDeleteSaved,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","chapterId":"`+bookReleaseID+`","confirmed":true}`)
+	env.rec.wait(t, appload.MessageSavedDeleted) // "done"
+
+	if _, err := os.Stat(fileA); !os.IsNotExist(err) {
+		t.Errorf("the deleted book's file still exists: %v", err)
+	}
+	if _, ok := env.shelfStore.Get(keyA); ok {
+		t.Error("the deleted book's record is still there")
+	}
+
+	// The sibling book — same series, same source — must be untouched.
+	if _, err := os.Stat(fileB); err != nil {
+		t.Errorf("deleting one book removed its sibling's file too: %v", err)
+	}
+	if _, ok := env.shelfStore.Get(keyB); !ok {
+		t.Error("deleting one book removed its sibling's record too")
+	}
+}
+
 // The number two packages have to agree on.
 //
 // fetch cannot import library — it imports nothing of Quire's, and the
