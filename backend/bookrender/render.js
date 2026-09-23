@@ -113,9 +113,17 @@ function handle(req) {
 // The main loop. readline() throws (rather than returning null) at EOF —
 // measured against mutool 1.28.4's mujs-based `mutool run` — so EOF is
 // caught, not compared against.
+// Requests arrive framed (see frameRequest in renderer.go): pieces of at most
+// 200 bytes, each prefixed with ">", then a lone "." — because readline()
+// reads into a 256-byte buffer and would split a longer line in two.
+var pending = "";
 while (true) {
-  var line;
-  try { line = readline(); } catch (e) { break; }
+  var raw;
+  try { raw = readline(); } catch (e) { break; }
+  if (raw.charAt(0) === ">") { pending += raw.slice(1); continue; }
+  if (raw !== ".") continue;
+  var line = pending;
+  pending = "";
   if (line === "") continue;
   var req, res;
   try {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -150,5 +151,32 @@ func TestRendererCrashTwiceSurfacesError(t *testing.T) {
 	err := r.Render(ctx, 1, filepath.Join(t.TempDir(), "p.png"), 0)
 	if err == nil {
 		t.Fatal("expected a second, unmasked failure")
+	}
+}
+
+// A layout carrying a font override is several hundred bytes, and `mutool
+// run`'s readline() reads 255 at a time: sent as one line, the request split
+// in two, failed to parse, and every reply after it answered the wrong
+// request. Measured on the device, where the fonts exist; off it the override
+// falls back and the request stays short. The fake reads the same way.
+func TestRendererLongRequestArrivesWhole(t *testing.T) {
+	r := newTestRenderer(t)
+	ctx := context.Background()
+	if _, err := r.Open(ctx, "book.epub"); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	css := strings.Repeat("body, p { font-family: 'Q' !important } /* é… */ ", 40) + "/*LEN*/"
+	pages, err := r.Layout(ctx, LayoutParams{W: 509.3, H: 679.2, Em: 12, CSS: css})
+	if err != nil {
+		t.Fatalf("Layout with a %d-byte stylesheet: %v", len(css), err)
+	}
+	if pages != len(css) {
+		t.Fatalf("the renderer received %d bytes of a %d-byte stylesheet", pages, len(css))
+	}
+
+	// The reply after it must answer its own request, not a leftover piece.
+	if _, err := r.Outline(ctx); err != nil {
+		t.Fatalf("Outline after a long request: %v", err)
 	}
 }

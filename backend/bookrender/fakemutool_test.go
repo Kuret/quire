@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -57,10 +58,26 @@ func runFakeMutool() {
 	fixedLayout := os.Getenv(envFixedLayout) == "1"
 	outlineTitle := os.Getenv(envOutlineTitle)
 
-	in := bufio.NewScanner(os.Stdin)
-	in.Buffer(make([]byte, 64*1024), 1024*1024)
-	for in.Scan() {
-		line := in.Text()
+	// Read exactly as `mutool run`'s readline() does — fgets into a 256-byte
+	// buffer, so a longer line comes back as several reads — and unframe the
+	// way render.js does. A request sent unframed, or framed in pieces too long
+	// for that buffer, fails here the way it fails on the device.
+	in := bufio.NewReader(os.Stdin)
+	pending := ""
+	for {
+		raw, err := fgets256(in)
+		if err != nil {
+			return
+		}
+		if strings.HasPrefix(raw, ">") {
+			pending += raw[1:]
+			continue
+		}
+		if raw != "." {
+			continue
+		}
+		line := pending
+		pending = ""
 		if line == "" {
 			continue
 		}
@@ -95,6 +112,13 @@ func runFakeMutool() {
 			b, _ := json.Marshal(resp)
 			fmt.Println(string(b))
 		case "layout":
+			// A stylesheet ending in /*LEN*/ lays out to as many pages as it
+			// has bytes, so a test can prove the whole request arrived intact.
+			css, _ := req["css"].(string)
+			if strings.HasSuffix(css, "/*LEN*/") {
+				fmt.Printf("{\"pages\":%d}\n", len(css))
+				break
+			}
 			fmt.Println(`{"pages":10}`)
 		case "render":
 			out, _ := req["out"].(string)
@@ -122,4 +146,24 @@ func runFakeMutool() {
 			fmt.Println(`{"ok":false,"error":"unknown command"}`)
 		}
 	}
+}
+
+// fgets256 returns what one fgets(line, 256, stdin) call followed by murun's
+// trailing-newline strip would: at most 255 bytes, ending early at a newline.
+func fgets256(in *bufio.Reader) (string, error) {
+	var b []byte
+	for len(b) < 255 {
+		c, err := in.ReadByte()
+		if err != nil {
+			if len(b) > 0 {
+				return string(b), nil
+			}
+			return "", err
+		}
+		b = append(b, c)
+		if c == '\n' {
+			return string(b[:len(b)-1]), nil
+		}
+	}
+	return string(b), nil
 }

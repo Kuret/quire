@@ -1162,3 +1162,16 @@ never from the outline node itself. `doc.getMetaData("info:Title")` answers
 the book's title. `page.toPixmap(mupdf.Matrix.scale(s, s),
 mupdf.ColorSpace.DeviceGray, false)` then `.saveAsPNG(path)` is the whole
 render call; grayscale, no alpha.
+
+### 13.x `readline()` reads 255 bytes at a time
+
+`mutool run`'s `readline()` is `fgets` into a 256-byte buffer
+(`source/tools/murun.c`), so a longer line comes back as two reads. Off the
+device the font override falls back (the fonts are not there) and every request
+stays short, so this only showed on the tablet: a layout carrying an
+`@font-face` override is ~700 bytes, failed to parse as "bad request", and would
+have left every later reply answering the wrong request. Requests are therefore
+framed — pieces of at most 200 bytes prefixed with `>`, ended by a lone `.`
+(`bookrender.frameRequest`, joined back up in `render.js`) — and the test fake
+reads with the same 256-byte limit. Measured 2026-09-23 on 3.28.0.172 with three
+epubs: every settings variant lays out in 0.5–2.1 s.

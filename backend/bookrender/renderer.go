@@ -42,6 +42,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 )
@@ -504,9 +505,7 @@ func (r *Renderer) callLocked(ctx context.Context, timeout time.Duration, req an
 	if err != nil {
 		return nil, fmt.Errorf("bookrender: %w", err)
 	}
-	b = append(b, '\n')
-
-	if _, err := r.stdin.Write(b); err != nil {
+	if _, err := r.stdin.Write(frameRequest(b)); err != nil {
 		r.killLocked()
 		return nil, fmt.Errorf("%w: %v", errCrashed, err)
 	}
@@ -537,4 +536,35 @@ func (r *Renderer) callLocked(ctx context.Context, timeout time.Duration, req an
 		}
 		return json.RawMessage(res.line), nil
 	}
+}
+
+// maxFrameLine is the most bytes of request one line on the child's stdin may
+// carry. `mutool run`'s readline() reads into a 256-byte fgets buffer
+// (source/tools/murun.c), so a longer line arrives as two reads: the request
+// fails to parse and every reply after it is answered for the wrong request.
+// Measured on the device, where a layout carrying an @font-face override is
+// well over 256 bytes.
+const maxFrameLine = 200
+
+// frameRequest splits one JSON request into lines of at most maxFrameLine
+// bytes, each prefixed with '>', followed by a lone "." that ends it —
+// render.js joins the pieces back up. The prefix keeps a piece that happens to
+// be "." from ending the request early, and pieces break on rune boundaries so
+// no UTF-8 sequence is split across two reads.
+func frameRequest(b []byte) []byte {
+	out := make([]byte, 0, len(b)+len(b)/maxFrameLine*2+8)
+	for len(b) > 0 {
+		n := len(b)
+		if n > maxFrameLine {
+			n = maxFrameLine
+			for n > 0 && !utf8.RuneStart(b[n]) {
+				n--
+			}
+		}
+		out = append(out, '>')
+		out = append(out, b[:n]...)
+		out = append(out, '\n')
+		b = b[n:]
+	}
+	return append(out, '.', '\n')
 }
