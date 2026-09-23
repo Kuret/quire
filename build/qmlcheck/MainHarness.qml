@@ -1064,6 +1064,14 @@ Window {
         win.want("titled as the backend titled them",
                  chapterList.model.get(0).title, "EPUB · 0.4MB · Direct Download · fiction")
 
+        // A book row now offers Try beside Download, the same as a manga
+        // row's (books-contract §C) — asserted here on the real screen, in
+        // the real shell, rather than only on the standalone fixture
+        // (build/qmlcheck/Harness.qml).
+        win.findChild(chapterList, "chapterRows").forceLayout()
+        win.want("a book's release offers Try",
+                 win.findChild(chapterList, "tryButton-r0").visible, true)
+
         // And the other half: a group that never mentioned a kind opens the
         // screen it has always opened.
         win.app.goBack()
@@ -1943,6 +1951,114 @@ Window {
         win.app.goBack()
         win.want("Back returns to Downloaded, not a series screen never opened",
                  win.app.screen, "downloaded")
+
+        // ---- books: BookOpened answering either TryChapter or OpenSaved ---------------
+        //
+        // No branching on kind at either call site (root.openTry/openSaved):
+        // the same TryChapter and OpenSaved a manga row sends are sent here
+        // too, and it is the *answer* — BookOpened rather than TryReady or
+        // SavedOpened — that moves the screen to "book".
+
+        backend.forget()
+        win.app.currentSourceId = "src-s"
+        win.app.currentSeriesId = "/book/dune-messiah"
+        win.app.openTry("r0", "EPUB · 0.4MB · Direct Download · fiction")
+        win.want("opening Try switches to the reader immediately, book or not",
+                 win.app.screen, "try")
+        win.want("sending the same TryChapter a manga row would",
+                 backend.countOf(Msg.TryChapter), 1)
+
+        win.deliver(Msg.BookStatus, {
+            "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
+            "message": "Fetching the book…"})
+        win.want("BookStatus reaches the reader while it waits",
+                 reader.note, "Fetching the book…")
+
+        backend.forget()
+        win.deliver(Msg.BookOpened, {
+            "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
+            "title": "Dune Messiah", "mode": "try", "fixedLayout": false,
+            "pageCount": 40, "page": 0, "toc": [],
+            "settings": {"font": "book", "size": 4, "margins": "normal",
+                         "spacing": "book", "align": "book"},
+            "fontChoices": [{"id": "book", "label": "The book's own"}],
+            "sizeMin": 1, "sizeMax": 9, "private": false, "inLibrary": false})
+        win.want("BookOpened moves the screen to book, whichever question it answered",
+                 win.app.screen, "book")
+        win.want("and the reader knows which kind of session it is",
+                 reader.bookMode, "try")
+        win.want("asking for the page on screen, the same way Try's own page 0 is",
+                 backend.countOf(Msg.BookPageRequest), 1)
+        win.want("naming the book", backend.bodyOf(Msg.BookPageRequest).chapterId, "r0")
+
+        win.deliver(Msg.BookPage, {
+            "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
+            "index": 0, "path": "/tmp/book0.png"})
+        win.want("BookPage reuses Try's own page-arrived handling",
+                 reader.pagePaths[0], "/tmp/book0.png")
+
+        // A settings change: SetReaderSettings names the book and the page
+        // on screen (for anchoring), and BookRelaid applies the answer.
+        backend.forget()
+        reader.settingsChangeRequested({"font": "garamond", "size": 4,
+                                        "margins": "normal", "spacing": "book", "align": "book"})
+        win.want("a settings change asks once", backend.countOf(Msg.SetReaderSettings), 1)
+        win.want("naming the book", backend.bodyOf(Msg.SetReaderSettings).chapterId, "r0")
+        win.want("and the page on screen", backend.bodyOf(Msg.SetReaderSettings).page, 0)
+        win.want("carrying the settings chosen",
+                 backend.bodyOf(Msg.SetReaderSettings).settings.font, "garamond")
+
+        win.deliver(Msg.BookRelaid, {
+            "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
+            "pageCount": 42, "page": 0, "toc": [],
+            "settings": {"font": "garamond", "size": 4, "margins": "normal",
+                         "spacing": "book", "align": "book"}})
+        win.want("BookRelaid updates the reader", reader.pageCount, 42)
+
+        // Leaving sends CloseBook, naming the page on screen — one message
+        // does everything a book's close needs (saves position in saved
+        // mode, ends the session, sweeps the render cache), never EndTry or
+        // SavePosition/flushSavePosition.
+        backend.forget()
+        win.want("the reader consumes the escape gesture for a book too",
+                 win.app.escapeRequested(), true)
+        win.want("leaving the way Back and the overlay's own Close both do",
+                 win.app.screen, "series")
+        win.want("sending CloseBook rather than EndTry",
+                 backend.countOf(Msg.CloseBook), 1)
+        win.want("and never EndTry for a book", backend.countOf(Msg.EndTry), 0)
+        win.want("naming the book that was open",
+                 backend.bodyOf(Msg.CloseBook).chapterId, "r0")
+
+        // OpenSaved on a book answers BookOpened instead of SavedOpened —
+        // the screen does not switch until that answer, same as a saved
+        // chapter's.
+        win.app.currentSourceId = "src-s"
+        win.app.currentSeriesId = "/book/dune-messiah"
+        win.app.openSaved("src-s", "/book/dune-messiah", "r0")
+        win.want("asking to read a saved book does not yet switch screens",
+                 win.app.screen, "series")
+        win.deliver(Msg.BookOpened, {
+            "sourceId": "src-s", "seriesId": "/book/dune-messiah", "chapterId": "r0",
+            "title": "Dune Messiah", "mode": "saved", "fixedLayout": true,
+            "pageCount": 300, "page": 12, "toc": [],
+            "settings": {"font": "book", "size": 4, "margins": "normal",
+                         "spacing": "book", "align": "book"},
+            "fontChoices": [], "sizeMin": 1, "sizeMax": 9,
+            "private": false, "inLibrary": false})
+        win.want("OpenSaved on a book answers BookOpened, not SavedOpened",
+                 win.app.screen, "book")
+        win.want("opened at the stored page", reader.index, 12)
+        win.want("a fixed-layout book carries the flag through",
+                 reader.fixedLayout, true)
+
+        backend.forget()
+        win.want("leaving a saved book consumes the gesture too",
+                 win.app.escapeRequested(), true)
+        win.want("going back to its series, the same as a saved chapter",
+                 win.app.screen, "series")
+        win.want("CloseBook names the page it was left on",
+                 backend.bodyOf(Msg.CloseBook).page, 12)
 
         // ---- leaving --------------------------------------------------------------------
         //
