@@ -1,6 +1,10 @@
 package service
 
-import "github.com/rickl/quire/backend/shelf"
+import (
+	"context"
+
+	"github.com/rickl/quire/backend/shelf"
+)
 
 // savePositionRequest is MessageSavePosition's payload: no reply, the same
 // shape as tryreader.go's page traffic in what it does not send back.
@@ -33,6 +37,34 @@ func (s *Service) savePosition(req savePositionRequest) error {
 		// gone (see openSaved). Nothing to save a position in any more.
 		return nil
 	}
+
+	if rec.IsBook() {
+		// A book's position is a page number too, but what it means depends
+		// on the layout it was recorded under (books-contract.md §B); the
+		// fraction and snippet only mean anything while the book session
+		// that page number came from is still the one open, so this is a
+		// no-op — not an error — for a stale send naming a book that is no
+		// longer the open one. See closeBook for where a book's position is
+		// actually computed and saved; MessageSavePosition on a book both
+		// exist so the reader's own debounced page-turn save keeps working
+		// unchanged (it does not know or care what kind it is reading).
+		if sess, mode, ok := s.currentBookSession(bookKey(req.key())); ok && mode == bookModeSaved {
+			fraction, snippet, hash, err := sess.PositionFor(context.Background(), req.Position)
+			if err != nil {
+				s.log.Warn("could not compute a book's reading position", "err", err)
+				return nil
+			}
+			rec.Position = req.Position
+			rec.PositionFraction = fraction
+			rec.PositionSnippet = snippet
+			rec.PositionLayout = hash
+			if err := s.shelfStore.Put(rec); err != nil {
+				s.log.Warn("could not remember a book's reading position", "err", err)
+			}
+		}
+		return nil
+	}
+
 	rec.Position = clampPosition(req.Position, len(rec.Pages))
 	if err := s.shelfStore.Put(rec); err != nil {
 		s.log.Warn("could not remember a saved chapter's reading position",

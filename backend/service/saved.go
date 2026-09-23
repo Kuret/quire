@@ -14,6 +14,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -56,7 +57,7 @@ const SavedMissingRemedy = "Quire could not find that chapter's saved pages. " +
 // or a page removed outside Quire — is treated exactly like one that was
 // never saved: the record is dropped, so the next look does not repeat the
 // same failed promise, and the same plain sentence is sent either way.
-func (s *Service) openSaved(out Sender, req savedRequest) error {
+func (s *Service) openSaved(ctx context.Context, out Sender, req savedRequest) error {
 	if s.shelfStore == nil || s.savedDir == "" {
 		return s.sendError(out, "unavailable", "This build of Quire has nothing saved to open.")
 	}
@@ -67,6 +68,13 @@ func (s *Service) openSaved(out Sender, req savedRequest) error {
 	rec, ok := s.shelfStore.Get(req.key())
 	if !ok {
 		return s.sendError(out, "saved_missing", SavedMissingRemedy)
+	}
+
+	// A book has no per-page files to hand over — it opens in Quire's own
+	// book reader instead (books-contract.md §B), answering MessageBookOpened
+	// rather than MessageSavedOpened. See openSavedBook.
+	if rec.IsBook() {
+		return s.openSavedBook(ctx, out, req, rec)
 	}
 
 	root, err := filepath.Abs(filepath.Clean(s.savedDir))
@@ -133,4 +141,3 @@ func clampPosition(position, pageCount int) int {
 	}
 	return position
 }
-

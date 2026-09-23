@@ -110,9 +110,6 @@ type tryPageCount struct {
 // here touches s.library or s.libStore, and end of story — MessageTryReady
 // carries no documentUuid, because there is no document.
 func (s *Service) startTry(ctx context.Context, out Sender, req tryRequest) error {
-	if s.tryCache == nil {
-		return s.sendError(out, "unavailable", "This build of Quire cannot open the Try reader.")
-	}
 	if req.SourceID == "" || req.SeriesID == "" || req.ChapterID == "" {
 		return s.sendError(out, "bad_request", "Quire needs a source, a series and a chapter to try.")
 	}
@@ -122,16 +119,24 @@ func (s *Service) startTry(ctx context.Context, out Sender, req tryRequest) erro
 		return s.sendError(out, "not_found", plain(err))
 	}
 
-	// A book has no page images at all — see theme.FileTheme's own comment —
-	// so there is nothing here to preview. The chapter list is expected to
-	// have hidden the Try action already (kindBook, ChapterList.qml); this is
-	// the backend saying no on its own account regardless, the same rule
-	// askToConfirm and runDownload apply to a book's grouping questions.
-	if _, ok := th.(theme.FileTheme); ok {
-		return s.sendError(out, "try_unavailable",
-			"This source's chapters are already finished files, so there is nothing to preview here — download it instead.")
+	// A book has no page images — see theme.FileTheme's own comment — but it
+	// can still be previewed: fetched into a temporary file and opened in
+	// Quire's own book reader (books-contract.md §B), rather than the old
+	// flat refusal. That needs a book reader to open it in, not the ordinary
+	// page-based Try cache — a build with no book reader falls back to the
+	// old refusal rather than a confusing error deep inside the fetch.
+	if ft, ok := th.(theme.FileTheme); ok {
+		if s.bookCache == nil {
+			return s.sendError(out, "try_unavailable",
+				"This source's chapters are already finished files, so there is nothing to preview here — download it instead.")
+		}
+		s.goBackground(ctx, func(ctx context.Context) { s.startTryBook(ctx, out, req, th, ft, src) })
+		return nil
 	}
 
+	if s.tryCache == nil {
+		return s.sendError(out, "unavailable", "This build of Quire cannot open the Try reader.")
+	}
 	s.goBackground(ctx, func(ctx context.Context) { s.runTry(ctx, out, req, th, src) })
 	return nil
 }

@@ -217,7 +217,7 @@ type bookEnv struct {
 
 // newBookService is newDownloadService with the book source added, so every
 // test here can compare the two paths in one process.
-func newBookService(t *testing.T, th *bookTheme) bookEnv {
+func newBookService(t *testing.T, th *bookTheme, tweaks ...func(*service.Options)) bookEnv {
 	t.Helper()
 
 	if th.fileURL == "" {
@@ -236,13 +236,14 @@ func newBookService(t *testing.T, th *bookTheme) bookEnv {
 	saved := ""
 	var fetcher *themetest.Fetcher
 	var shelfStore *shelf.Store
-	svc, store, libStore, fake, rec := newDownloadServiceWith(t, routes, func(o *service.Options) {
+	allTweaks := append([]func(*service.Options){func(o *service.Options) {
 		o.Registry.MustRegister(th)
 		dir = o.DownloadDir
 		saved = o.SavedDir
 		fetcher = o.Fetcher.(*themetest.Fetcher)
 		shelfStore = o.ShelfStore
-	})
+	}}, tweaks...)
+	svc, store, libStore, fake, rec := newDownloadServiceWith(t, routes, allTweaks...)
 	if _, err := store.Add(&theme.Source{
 		Name: "Example Books", Lang: "en", Theme: bookThemeID,
 		BaseURL: "https://books.example.invalid", AddedAt: fixedNow,

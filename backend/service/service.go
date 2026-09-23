@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/bookreader"
 	"github.com/rickl/quire/backend/covers"
 	"github.com/rickl/quire/backend/download"
 	"github.com/rickl/quire/backend/fetch"
@@ -77,6 +78,16 @@ type Options struct {
 	// it with a plain answer, the same shape as a nil Library disabling
 	// downloads.
 	TryCache *tryreader.Cache
+
+	// BookCache is Quire's own book reader's session cache
+	// (backend/bookreader), built over backend/bookrender's mutool driver.
+	// Nil disables opening a book in Quire's own reader — OpenSaved on a
+	// saved book, and TryChapter on a book source, both refuse with a plain
+	// answer instead, the same shape a nil TryCache/Library take. Built in
+	// backend/cmd/quired/main.go, which is also where the mutool executable
+	// itself is resolved (next to the running backend, overridable for
+	// tests by simply not wiring a BookCache and using a fake one instead).
+	BookCache *bookreader.Cache
 
 	// DownloadOptions tunes the page queue. The zero value is the defaults
 	// backend/download documents.
@@ -213,6 +224,19 @@ type Service struct {
 	tryMu      sync.Mutex
 	trySession *tryreader.Session
 	tryKey     tryKey
+
+	// bookCache is Quire's own book reader's session cache; nil disables it.
+	bookCache *bookreader.Cache
+
+	// bookMu guards the single book session in flight, exactly as tryMu
+	// does for Try and for the same reason: the reader is one screen.
+	// bookTryPath is only set in "try" mode — the fetched file to remove
+	// when the session ends.
+	bookMu      sync.Mutex
+	bookSession *bookreader.Session
+	bookKey     bookKey
+	bookMode    string
+	bookTryPath string
 }
 
 // tryKey identifies which chapter the current Try session belongs to, so a
@@ -242,6 +266,7 @@ func New(opts Options) *Service {
 		downloadDir:     opts.DownloadDir,
 		downloadOptions: opts.DownloadOptions,
 		tryCache:        opts.TryCache,
+		bookCache:       opts.BookCache,
 
 		savedDir:   opts.SavedDir,
 		shelfStore: opts.ShelfStore,
@@ -630,7 +655,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
-		return true, s.openSaved(out, req)
+		return true, s.openSaved(ctx, out, req)
 
 	case appload.MessageSavePosition:
 		var req savePositionRequest
@@ -646,6 +671,26 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		return true, s.deleteSaved(out, req)
 
+	case appload.MessageBookPageRequest:
+		var req bookPageRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.requestBookPage(ctx, out, req)
+
+	case appload.MessageSetReaderSettings:
+		var req setReaderSettingsRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.setReaderSettings(ctx, out, req)
+
+	case appload.MessageCloseBook:
+		var req closeBookRequest
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		return true, s.closeBook(ctx, req)
 
 	case robotsMessage:
 		return s.handleRobots(out, payload)
