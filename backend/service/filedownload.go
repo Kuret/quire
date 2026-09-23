@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -12,6 +14,7 @@ import (
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/fetch"
 	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/theme"
 )
 
@@ -134,6 +137,33 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 			return
 		}
 		fail("Quire could not download the file: %s", plain(err))
+		return
+	}
+
+	// The format decides where this actually lands, whatever the request
+	// asked for: Quire's own reader (backend/bookrender) only opens the
+	// formats bookFormatReadable names, so anything else falls back to the
+	// library — the one place a finished document can still be read, on the
+	// device's own reader — with a plain note saying so. A private source
+	// has nowhere to fall back to: the library is refused for it outright
+	// (see the package comment), so an unreadable format there is simply a
+	// failure, not a silent trip to the one place it is not allowed to go.
+	format := bookFormat(name)
+	dest := req.destination()
+	if !bookFormatReadable(format) {
+		if src.IsPrivate() {
+			fail("Quire can't display %s books, and a private source's downloads never go to your "+
+				"reMarkable library, so this one could not be saved.", strings.ToUpper(format))
+			return
+		}
+		dest = destinationLibrary
+		p.Note = strings.TrimSpace(p.Note + fmt.Sprintf(
+			" Quire can't display %s books, so this one went to your reMarkable library.", strings.ToUpper(format)))
+	}
+
+	if dest == destinationQuire {
+		step(phaseStoring, fmt.Sprintf("Saving %s in Quire…", name))
+		s.finishSavedBookDownload(out, &p, src.ID, req.SeriesID, req.VolumeID, series.Title, name, format, file)
 		return
 	}
 
@@ -281,6 +311,77 @@ func (s *Service) storeFile(ctx context.Context, name string, file []byte) (
 		return library.Result{}, place, err
 	}
 	return res, place, nil
+}
+
+// bookPath is where one saved book's file lives, relative to the saved
+// root: books/<safeSegment(sourceID)>/<safeSegment(seriesID)>/
+// <safeSegment(volumeID)>.<format> (books-contract.md §B, Storage) — a
+// single file, unlike a chapter's per-page directory, because a book is one
+// file to begin with.
+func bookPath(sourceID, seriesID, volumeID, format string) string {
+	name := safeSegment(volumeID)
+	if format != "" {
+		name += "." + format
+	}
+	return filepath.Join("books", safeSegment(sourceID), safeSegment(seriesID), name)
+}
+
+// finishSavedBookDownload writes a book's bytes under the saved root and
+// remembers it as a shelf.Record of Kind book — the book equivalent of
+// finishSavedDownload, which does the same for a chapter of page images.
+func (s *Service) finishSavedBookDownload(out Sender, p *downloadProgress,
+	sourceID, seriesID, volumeID, seriesTitle, name, format string, file []byte) {
+
+	root, err := filepath.Abs(filepath.Clean(s.savedDir))
+	if err != nil {
+		root = s.savedDir
+	}
+	rel := bookPath(sourceID, seriesID, volumeID, format)
+	full := filepath.Join(root, rel)
+
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		p.Phase = phaseFailed
+		p.Message = fmt.Sprintf("Quire could not save this book: %s", plain(err))
+		s.log.Warn("could not create a saved book's directory", "path", full, "err", err)
+		_ = send(out, appload.MessageDownloadProgress, *p)
+		return
+	}
+	if err := os.WriteFile(full, file, 0o644); err != nil {
+		p.Phase = phaseFailed
+		p.Message = fmt.Sprintf("Quire could not save this book: %s", plain(err))
+		s.log.Warn("could not write a saved book's file", "path", full, "err", err)
+		_ = send(out, appload.MessageDownloadProgress, *p)
+		return
+	}
+
+	rec := shelf.Record{
+		Key:          shelf.Key{Source: sourceID, Series: seriesID, Chapter: volumeID},
+		Kind:         shelf.KindBook,
+		SeriesTitle:  seriesTitle,
+		ChapterTitle: name,
+		File:         rel,
+		Format:       format,
+		Bytes:        int64(len(file)),
+		SavedAt:      time.Now(),
+	}
+	if err := s.shelfStore.Put(rec); err != nil {
+		s.log.Error("could not remember a saved book", "source", sourceID, "series", seriesID,
+			"chapter", volumeID, "err", err)
+		p.Note = strings.TrimSpace(p.Note +
+			" Quire could not remember this book, so opening it from Quire may not work.")
+	}
+	s.log.Info("book saved in Quire", "source", sourceID, "series", seriesID, "chapter", volumeID,
+		"bytes", len(file))
+
+	p.Phase = phaseDone
+	p.Saved = true
+	p.BytesStored = int64(len(file))
+	label := strings.TrimSpace(seriesTitle)
+	if label == "" {
+		label = "This book"
+	}
+	p.Message = capitalize(label) + " is saved in Quire."
+	_ = send(out, appload.MessageDownloadProgress, *p)
 }
 
 // progressSentence turns a theme's progress note into a line to show.

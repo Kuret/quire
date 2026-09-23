@@ -69,10 +69,12 @@ type downloadRequest struct {
 	Confirmed bool `json:"confirmed"`
 
 	// Destination is "quire" or "library"; empty means "quire" (the design
-	// doc's default, reversed from the old always-upload behaviour). It is
-	// ignored for a theme.FileTheme source, which always goes to the library
-	// — a book is a document xochitl's own reader already handles, and Quire's
-	// reader is image-only.
+	// doc's default, reversed from the old always-upload behaviour). This
+	// now applies to a theme.FileTheme source (a book) too, since Quire's
+	// own reader can render one (books-contract.md §B) — but a book whose
+	// format Quire cannot open still lands in the library regardless of
+	// what this asked for (see runFileDownload's format check), and a
+	// private source is refused the library outright either way.
 	Destination string `json:"destination,omitempty"`
 }
 
@@ -357,20 +359,20 @@ func (s *Service) enqueueDownload(ctx context.Context, out Sender, req downloadR
 		return s.sendError(out, "bad_request", "Quire needs a source, a series and a chapter to download.")
 	}
 
-	// A book always goes to the library, whatever the request asked for (see
-	// downloadRequest.Destination); everything else takes the destination the
-	// request named, defaulting to Quire's own storage. Looked up here, not
-	// only in runDownload, because it decides which of the two backing
-	// stores has to exist for this request to make sense at all.
-	th, src, err := s.themeFor(req.SourceID)
+	// A book now takes the destination the request named, the same as any
+	// other download — defaulting to Quire's own storage — rather than
+	// always going to the library (books-contract.md §B). Which backing
+	// store this needs is checked here, not only in runDownload, because it
+	// decides whether this request makes sense at all; the one thing this
+	// cannot yet know is whether the *format* Quire can actually read it —
+	// that depends on the file name a book source only names once Retrieve
+	// runs, so an unreadable format's fall back to the library happens in
+	// runFileDownload instead, after the fact.
+	_, src, err := s.themeFor(req.SourceID)
 	if err != nil {
 		return s.sendError(out, "not_found", plain(err))
 	}
-	_, isBook := th.(theme.FileTheme)
 	dest := req.destination()
-	if isBook {
-		dest = destinationLibrary
-	}
 
 	switch dest {
 	case destinationLibrary:

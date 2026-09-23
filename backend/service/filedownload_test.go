@@ -18,6 +18,7 @@ import (
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe"
 	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
 	"github.com/rickl/quire/backend/theme/themetest"
@@ -207,6 +208,11 @@ type bookEnv struct {
 	// test can check that the file went through it — which is the whole reason
 	// theme.FileTheme hands back a URL rather than bytes.
 	fetcher *themetest.Fetcher
+
+	// savedDir and shelfStore let a test check a book that landed in Quire's
+	// own storage rather than the library.
+	savedDir   string
+	shelfStore *shelf.Store
 }
 
 // newBookService is newDownloadService with the book source added, so every
@@ -227,11 +233,15 @@ func newBookService(t *testing.T, th *bookTheme) bookEnv {
 	routes["GET /api/localdownload"] = themetest.Route{Body: string(bookEPUB)}
 
 	dir := ""
+	saved := ""
 	var fetcher *themetest.Fetcher
+	var shelfStore *shelf.Store
 	svc, store, libStore, fake, rec := newDownloadServiceWith(t, routes, func(o *service.Options) {
 		o.Registry.MustRegister(th)
 		dir = o.DownloadDir
+		saved = o.SavedDir
 		fetcher = o.Fetcher.(*themetest.Fetcher)
+		shelfStore = o.ShelfStore
 	})
 	if _, err := store.Add(&theme.Source{
 		Name: "Example Books", Lang: "en", Theme: bookThemeID,
@@ -240,7 +250,7 @@ func newBookService(t *testing.T, th *bookTheme) bookEnv {
 		t.Fatal(err)
 	}
 	return bookEnv{svc: svc, store: store, libStore: libStore, fake: fake, rec: rec,
-		downloadDir: dir, fetcher: fetcher}
+		downloadDir: dir, fetcher: fetcher, savedDir: saved, shelfStore: shelfStore}
 }
 
 // downloadTheBook enqueues the one release and waits for the given phase.
@@ -661,6 +671,9 @@ func TestAPageBasedDownloadIsUnchangedByTheBookPath(t *testing.T) {
 // is ten chapters, download all of them?" question has no meaning here. The
 // check is skipped rather than answered, because answering it means listing the
 // book's releases — the slow source search — and Retrieve then does it again.
+// A book with no explicit "destination" now saves in Quire by default, the
+// same as any other download (books-contract.md §B) — reversed from the old
+// always-upload-to-the-library default this test used to pin.
 func TestTheFirstTapDownloadsABookWithoutAskingOrListingTwice(t *testing.T) {
 	th := &bookTheme{}
 	env := newBookService(t, th)
@@ -682,10 +695,164 @@ func TestTheFirstTapDownloadsABookWithoutAskingOrListingTwice(t *testing.T) {
 	if n := th.listedReleases(); n != 0 {
 		t.Errorf("the download listed the book's releases %d time(s); Retrieve does that itself", n)
 	}
+	// An epub is a format Quire's own reader can open, and nothing asked for
+	// the library, so it lands in Quire's own storage rather than being
+	// uploaded.
 	env.fake.mu.Lock()
-	defer env.fake.mu.Unlock()
-	if len(env.fake.uploaded) != 1 {
-		t.Errorf("%d documents uploaded, want 1", len(env.fake.uploaded))
+	uploaded := len(env.fake.uploaded)
+	env.fake.mu.Unlock()
+	if uploaded != 0 {
+		t.Errorf("%d documents uploaded, want 0 — a readable book with no explicit destination stays in Quire", uploaded)
+	}
+}
+
+// A readable book with no explicit destination lands in Quire's own
+// storage, as a shelf.Record of Kind book.
+func TestAReadableBookSavesInQuire(t *testing.T) {
+	th := &bookTheme{}
+	env := newBookService(t, th)
+
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, env.rec, "done")
+
+	rec, ok := env.shelfStore.Get(shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID})
+	if !ok {
+		t.Fatal("the book was not remembered in the shelf store")
+	}
+	if !rec.IsBook() {
+		t.Errorf("Kind = %q, want a book", rec.Kind)
+	}
+	if rec.Format != "epub" {
+		t.Errorf("Format = %q, want epub", rec.Format)
+	}
+	full := filepath.Join(env.savedDir, rec.File)
+	got, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatalf("the saved file is not readable: %v", err)
+	}
+	if !bytes.Equal(got, bookEPUB) {
+		t.Errorf("the saved file's bytes do not match what the source served")
+	}
+}
+
+// TestAnUnreadableBookFallsBackToLibrary is the mutation check for "unreadable
+// format falls back to library": a format backend/bookrender cannot open must
+// still reach the reMarkable library — the one place it can be read — with a
+// note saying so, and must not be remembered as a saved-in-Quire book.
+func TestAnUnreadableBookFallsBackToLibrary(t *testing.T) {
+	th := &bookTheme{filename: "An Example Book - Example Author (1970).azw3"}
+	env := newBookService(t, th)
+
+	env.fake.mu.Lock()
+	env.fake.entries = append(env.fake.entries, library.Entry{
+		ID: "books", Parent: "", Type: library.Collection, VisibleName: "Books",
+	})
+	env.fake.mu.Unlock()
+
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, env.rec, "done")
+
+	env.fake.mu.Lock()
+	uploaded := len(env.fake.uploaded)
+	env.fake.mu.Unlock()
+	if uploaded != 1 {
+		t.Fatalf("%d documents uploaded, want 1 — an unreadable format must fall back to the library", uploaded)
+	}
+	if _, ok := env.shelfStore.Get(shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID}); ok {
+		t.Error("an unreadable book was remembered as saved in Quire; it went to the library instead")
+	}
+
+	found := false
+	for _, m := range progressOf(t, env.rec) {
+		note, _ := m["note"].(string)
+		msg, _ := m["message"].(string)
+		if (strings.Contains(note, "AZW3") || strings.Contains(msg, "AZW3")) &&
+			(strings.Contains(note, "library") || strings.Contains(msg, "library")) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no progress note explained the fallback to the library")
+	}
+}
+
+// TestAPrivateSourceRefusesAnUnreadableBook is the mutation check for "a
+// private source refuses" instead of falling back to the library: the whole
+// point of a private source is that nothing it names reaches xochitl's
+// library, and an unreadable format must not be the one silent exception.
+func TestAPrivateSourceRefusesAnUnreadableBook(t *testing.T) {
+	th := &bookTheme{filename: "An Example Book - Example Author (1970).azw3"}
+	env := newBookService(t, th)
+	if err := env.store.SetPrivate("example-books", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, env.rec, "failed")
+
+	env.fake.mu.Lock()
+	uploaded := len(env.fake.uploaded)
+	env.fake.mu.Unlock()
+	if uploaded != 0 {
+		t.Error("a private source's unreadable book was uploaded to the library anyway")
+	}
+	if _, ok := env.shelfStore.Get(shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID}); ok {
+		t.Error("a refused book should not have been saved anywhere")
+	}
+}
+
+// TestAPrivateSourceCanSaveAReadableBookInQuire: private sources may now
+// download books to Quire's own storage, even though the library stays
+// refused for them (books-contract.md §B, Storage).
+func TestAPrivateSourceCanSaveAReadableBookInQuire(t *testing.T) {
+	th := &bookTheme{}
+	env := newBookService(t, th)
+	if err := env.store.SetPrivate("example-books", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, env.rec, "done")
+
+	rec, ok := env.shelfStore.Get(shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID})
+	if !ok {
+		t.Fatal("a private source's readable book should still save in Quire")
+	}
+	if !rec.IsBook() {
+		t.Errorf("Kind = %q, want a book", rec.Kind)
+	}
+}
+
+// A private source explicitly asking for the library is still refused, book
+// or not — the destination override in the previous tests must not have
+// weakened that existing rule.
+func TestAPrivateSourceStillRefusesTheLibraryForABook(t *testing.T) {
+	th := &bookTheme{}
+	env := newBookService(t, th)
+	if err := env.store.SetPrivate("example-books", true); err != nil {
+		t.Fatal(err)
+	}
+
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`","destination":"library"}`)
+
+	var e struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(env.rec.wait(t, appload.MessageError), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "private_library" {
+		t.Errorf("code %q, want private_library", e.Code)
 	}
 }
 
