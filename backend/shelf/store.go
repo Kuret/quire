@@ -40,9 +40,22 @@ func (k Key) valid() bool {
 	return k.Source != "" && k.Series != "" && k.Chapter != ""
 }
 
-// Record is one chapter saved in Quire's own storage.
+// Kind values distinguish what a Record actually holds. The zero value ""
+// means a chapter of page images, exactly what every record meant before
+// books existed — so an old saved.json, with no "kind" field at all, still
+// reads as a set of ordinary chapters without a migration step.
+const (
+	KindPages = ""
+	KindBook  = "book"
+)
+
+// Record is one chapter — or, since 2026-09-23, one whole book — saved in
+// Quire's own storage.
 type Record struct {
 	Key
+
+	// Kind says which of the two this record is. See the Kind* constants.
+	Kind string `json:"kind,omitempty"`
 
 	// SeriesTitle and ChapterTitle are the source's own titles, for the UI:
 	// the key holds ids, which are a source's path or slug and not something
@@ -69,8 +82,22 @@ type Record struct {
 	// root would be exactly the escape reclaim.go's own rule exists to forbid.
 	Pages []string `json:"pages,omitempty"`
 
-	// Bytes is the total size of the chapter's page files, for the same
-	// reporting library.Record.Bytes exists for.
+	// File is a book's own single saved file, relative to the saved root —
+	// the book equivalent of Pages, which a book record leaves empty. A
+	// book is one file (epub, pdf, …), never a set of page images, so there
+	// is no reason to force it through Pages's per-page-file shape; keeping
+	// the two separate is also what lets removeSavedChapter (service layer)
+	// tell "remove a directory of pages" from "remove one file" apart by
+	// Kind alone, rather than by guessing from what happens to be present.
+	File string `json:"file,omitempty"`
+
+	// Format is the book's file format, lower-cased (epub, fb2, mobi, pdf,
+	// xps, cbz, txt) — set only on a Kind: KindBook record, for the reader
+	// to know what it is opening without a filesystem stat.
+	Format string `json:"format,omitempty"`
+
+	// Bytes is the total size of the chapter's page files (or, for a book,
+	// its one file), for the same reporting library.Record.Bytes exists for.
 	Bytes int64 `json:"bytes,omitempty"`
 
 	SavedAt time.Time `json:"savedAt"`
@@ -80,7 +107,26 @@ type Record struct {
 	// Try record at all — this field exists only because a saved chapter is
 	// the one kind of read Quire remembers a place in.
 	Position int `json:"position,omitempty"`
+
+	// PositionFraction, PositionSnippet and PositionLayout are a book's own
+	// position bookkeeping, alongside Position (books-contract.md §B,
+	// Reader sessions): Position is still the page index for the settings
+	// last used, but a reflowable book's page numbering changes with every
+	// font size or margin change, so reopening under *different* settings
+	// re-derives the page from the fraction through the book and the text
+	// snippet that was on screen, searching near the fraction's estimate
+	// rather than trusting a page number that belonged to a different
+	// layout. PositionLayout is the settings-hash-plus-geometry Position was
+	// recorded under; matching it exactly is what lets a reopen under the
+	// *same* settings skip the search and use Position directly.
+	PositionFraction float64 `json:"positionFraction,omitempty"`
+	PositionSnippet  string  `json:"positionSnippet,omitempty"`
+	PositionLayout   string  `json:"positionLayout,omitempty"`
 }
+
+// IsBook reports whether r is a book record rather than a chapter of page
+// images.
+func (r Record) IsBook() bool { return r.Kind == KindBook }
 
 type storeFile struct {
 	Version int      `json:"version"`

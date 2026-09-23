@@ -10,6 +10,81 @@ import (
 	"github.com/rickl/quire/backend/shelf"
 )
 
+// TestOldRecordReadsAsPages is a backward-compatibility check: a saved.json
+// written before books existed has no "kind" field at all, and must still
+// read as an ordinary chapter of page images rather than as some new,
+// unrecognised kind.
+func TestOldRecordReadsAsPages(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"version":1,"records":[{"source":"mangadex","series":"abc","chapter":"ch1",
+		"seriesTitle":"Snotgirl","chapterTitle":"Chapter 1","pages":["abc/ch1/0001.jpg"],
+		"savedAt":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(dir, shelf.StoreFileName), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := shelf.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := s.Get(shelf.Key{Source: "mangadex", Series: "abc", Chapter: "ch1"})
+	if !ok {
+		t.Fatal("the old record was not read")
+	}
+	if rec.IsBook() {
+		t.Error("a record with no kind field must not read as a book")
+	}
+	if rec.Kind != shelf.KindPages {
+		t.Errorf("Kind = %q, want the zero value", rec.Kind)
+	}
+}
+
+func TestStoreRoundTripsABook(t *testing.T) {
+	dir := t.TempDir()
+	s, err := shelf.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := shelf.Key{Source: "shelfmark", Series: "dark-disciple", Chapter: "release-1"}
+	rec := shelf.Record{
+		Key:              key,
+		Kind:             shelf.KindBook,
+		SeriesTitle:      "Dark Disciple",
+		ChapterTitle:     "Dark Disciple",
+		File:             "books/shelfmark/dark-disciple/release-1.epub",
+		Format:           "epub",
+		Bytes:            553004,
+		Position:         12,
+		PositionFraction: 0.05,
+		PositionSnippet:  "For as long as I live",
+		PositionLayout:   "abc123:509x679",
+	}
+	if err := s.Put(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := shelf.OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := reopened.Get(key)
+	if !ok {
+		t.Fatal("the book was not remembered")
+	}
+	if !got.IsBook() {
+		t.Error("IsBook() = false for a Kind: book record")
+	}
+	if got.File != rec.File || got.Format != rec.Format {
+		t.Errorf("File/Format = %q/%q, want %q/%q", got.File, got.Format, rec.File, rec.Format)
+	}
+	if got.PositionFraction != rec.PositionFraction || got.PositionSnippet != rec.PositionSnippet ||
+		got.PositionLayout != rec.PositionLayout {
+		t.Errorf("position fields did not round-trip: %+v", got)
+	}
+	if len(got.Pages) != 0 {
+		t.Errorf("a book record should have no Pages, got %v", got.Pages)
+	}
+}
+
 func TestStoreRoundTripsAChapter(t *testing.T) {
 	dir := t.TempDir()
 	s, err := shelf.OpenStore(dir)
