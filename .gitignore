@@ -1,6 +1,10 @@
 output/
 output-rmpp/
 
+# MuPDF source download and built mutool binaries (build/mupdf.sh); large,
+# reproducible from the pinned SHA-256 in THIRD_PARTY.md, never vendored.
+/build/cache/
+
 # Extracted reMarkable resources: proprietary code pulled off the device for
 # local reference only (see tools/rccdump/README.md and docs/QMD-NOTES.md).
 # NEVER commit anything under here.
