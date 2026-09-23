@@ -90,6 +90,37 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 		_ = send(out, appload.MessageDownloadProgress, p)
 	}
 
+	// Send to library for a book already saved in Quire reuses the saved
+	// file rather than re-running Retrieve and re-fetching it: the bytes are
+	// already on disk (books-contract.md §B, Storage), and there is nothing
+	// left to ask the source for. The saved copy stays either way — this
+	// only uploads a second copy of it to the library.
+	if req.destination() == destinationLibrary && s.shelfStore != nil {
+		if rec, ok := s.shelfStore.Get(shelf.Key{Source: req.SourceID, Series: req.SeriesID, Chapter: req.VolumeID}); ok &&
+			rec.IsBook() && rec.File != "" {
+			p.Series, p.Title = rec.SeriesTitle, rec.SeriesTitle
+			file, err := s.readSavedBookFile(rec)
+			if err != nil {
+				s.log.Warn("could not read the saved copy of a book", "source", req.SourceID,
+					"series", req.SeriesID, "chapter", req.VolumeID, "err", err)
+				fail("Quire could not read the saved copy of this book: %s", plain(err))
+				return
+			}
+			step(phaseStoring, fmt.Sprintf("Putting %s in your reMarkable library…", rec.ChapterTitle))
+			res, place, err := s.storeFile(ctx, rec.ChapterTitle, file)
+			if err != nil {
+				if cancelled(err) {
+					stopped()
+					return
+				}
+				fail("%s", plain(err))
+				return
+			}
+			s.recordBookInLibrary(ctx, out, &p, req, src, rec.SeriesTitle, res, place, len(file))
+			return
+		}
+	}
+
 	step(phasePreparing, "Looking this book up…")
 
 	// The book's own metadata, for the document's series folder and for the
@@ -178,6 +209,16 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 		return
 	}
 
+	s.recordBookInLibrary(ctx, out, &p, req, src, series.Title, res, place, len(file))
+}
+
+// recordBookInLibrary remembers a book just uploaded to the library and
+// reports where it landed — the shared tail of a fresh Retrieve+fetch and of
+// reusing a saved copy for "Send to library" (see the reuse check at the top
+// of runFileDownload).
+func (s *Service) recordBookInLibrary(ctx context.Context, out Sender, p *downloadProgress,
+	req downloadRequest, src *theme.Source, seriesTitle string, res library.Result, place library.Placement, bytes int) {
+
 	rec := library.Record{
 		// The release id is the volume key. It is what makes the record
 		// findable, and unlike a chapter number it is unique among the releases
@@ -189,7 +230,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 		FolderUUID:   res.FolderUUID,
 		FolderPath:   place.Path,
 		VisibleName:  res.VisibleName,
-		SeriesTitle:  series.Title,
+		SeriesTitle:  seriesTitle,
 		// PDF is left empty: there is no file of Quire's on disk to reclaim.
 		// The document is on the tablet and the bytes never touched the download
 		// directory, which is why nothing here claims space back later.
@@ -197,7 +238,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 		// Pages likewise: an epub reflows, so it has no page count that would
 		// still be true at the next font size. 0 reads as "not known", which is
 		// the truth, and omitempty keeps it off the wire.
-		Bytes: int64(len(file)),
+		Bytes: int64(bytes),
 		// The release this document is, so M6's "Read" lands on the row the user
 		// tapped — storedVolumes maps chapter ids to records through this field.
 		Chapters: []string{req.VolumeID},
@@ -209,7 +250,7 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 			" Quire could not remember this book, so opening it from Quire may not work.")
 	}
 	s.log.Info("book stored", "document", res.DocumentUUID, "folder", res.FolderUUID,
-		"name", res.VisibleName, "bytes", len(file))
+		"name", res.VisibleName, "bytes", bytes)
 
 	// A book has no per-title subfolder — see kindOf and library.PlaceBook —
 	// so the only thing left to ask the frontend for is the Books folder
@@ -226,7 +267,24 @@ func (s *Service) runFileDownload(ctx, parent context.Context, out Sender, req d
 	}
 	p.Phase = phaseDone
 	p.Message = fmt.Sprintf("%s is in %s.", res.VisibleName, where)
-	_ = send(out, appload.MessageDownloadProgress, p)
+	_ = send(out, appload.MessageDownloadProgress, *p)
+}
+
+// readSavedBookFile reads a saved book's bytes, resolving rec.File under the
+// saved root with the same guard removeSavedChapter uses for deletes
+// (resolveUnderRoot, saved_delete.go) — a shelf.Record's File is never
+// trusted blindly, whether the caller means to remove it or, as here, reuse
+// it for "Send to library" instead of re-fetching.
+func (s *Service) readSavedBookFile(rec shelf.Record) ([]byte, error) {
+	root, err := filepath.Abs(filepath.Clean(s.savedDir))
+	if err != nil {
+		return nil, fmt.Errorf("resolving the saved directory: %w", err)
+	}
+	full, err := resolveUnderRoot(root, filepath.Join(root, rec.File))
+	if err != nil {
+		return nil, fmt.Errorf("refusing to read the saved book: %w", err)
+	}
+	return os.ReadFile(full)
 }
 
 // fileRetriever is the one capability this path needs that theme.Fetcher does

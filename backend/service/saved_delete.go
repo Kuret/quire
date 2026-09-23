@@ -291,13 +291,27 @@ func (s *Service) deleteSavedChaptersForSource(sourceID string) {
 // returns the bytes freed, which nothing here needs and would only be a
 // reason to get the two confused.
 func removeAllUnderRoot(root, path string) error {
+	abs, err := resolveUnderRoot(root, path)
+	if err != nil {
+		return fmt.Errorf("refusing to remove: %w", err)
+	}
+	return os.RemoveAll(abs)
+}
+
+// resolveUnderRoot resolves path and confirms it lands inside root, refusing
+// anything that does not — a stored path (a shelf.Record's File, say) is
+// never trusted blindly, whether the caller means to remove it or only read
+// it. Shared by removeAllUnderRoot here and by readSavedBookFile
+// (filedownload.go), which reads a saved book's bytes to reuse them rather
+// than re-fetching.
+func resolveUnderRoot(root, path string) (string, error) {
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
-		return fmt.Errorf("resolving %q: %w", path, err)
+		return "", fmt.Errorf("resolving %q: %w", path, err)
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to remove %q: it is outside %q", abs, root)
+		return "", fmt.Errorf("%q is outside %q", abs, root)
 	}
-	return os.RemoveAll(abs)
+	return abs, nil
 }

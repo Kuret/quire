@@ -857,6 +857,102 @@ func TestAPrivateSourceStillRefusesTheLibraryForABook(t *testing.T) {
 	}
 }
 
+// failAfterFirstRetrieval wraps a themetest.Fetcher and fails the test if
+// GetFileRetrieval is called more than once — the fetcher a saved book's
+// "Send to library" must never reach a second time, since the point of the
+// reuse is that the saved bytes are used instead of fetching again.
+type failAfterFirstRetrieval struct {
+	*themetest.Fetcher
+	t *testing.T
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *failAfterFirstRetrieval) GetFileRetrieval(ctx context.Context, p *fetch.Policy, rawurl string, from fetch.Referrer) (*fetch.Response, error) {
+	f.mu.Lock()
+	f.calls++
+	n := f.calls
+	f.mu.Unlock()
+	if n > 1 {
+		f.t.Error("the file was fetched again; Send to library for a saved book must reuse the saved bytes")
+		return nil, fmt.Errorf("refused: a saved book's file must be reused, not re-fetched")
+	}
+	return f.Fetcher.GetFileRetrieval(ctx, p, rawurl, from)
+}
+
+// TestSendToLibraryForASavedBookReusesTheSavedFile is the mutation check for
+// books-contract.md §B, Storage's "Send to library on a saved book reuses the
+// saved file (no refetch)": a book already saved in Quire must go straight to
+// the library upload from its saved bytes when "Send to library" is asked for
+// it, never through Retrieve and a second fetch. Remove the reuse in
+// runFileDownload and this fails, because failAfterFirstRetrieval refuses the
+// second GetFileRetrieval call the old (Retrieve+fetch) path would make.
+func TestSendToLibraryForASavedBookReusesTheSavedFile(t *testing.T) {
+	th := &bookTheme{}
+	var wrapped *failAfterFirstRetrieval
+	env := newBookService(t, th, func(o *service.Options) {
+		wrapped = &failAfterFirstRetrieval{Fetcher: o.Fetcher.(*themetest.Fetcher), t: t}
+		o.Fetcher = wrapped
+	})
+
+	env.fake.mu.Lock()
+	env.fake.entries = append(env.fake.entries, library.Entry{
+		ID: "books", Parent: "", Type: library.Collection, VisibleName: "Books",
+	})
+	env.fake.mu.Unlock()
+
+	// Save the book in Quire first — the default destination.
+	handle(t, env.svc, env.rec, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`"}`)
+	waitForPhase(t, env.rec, "done")
+
+	key := shelf.Key{Source: "example-books", Series: "/book/openlibrary/OL1W", Chapter: bookReleaseID}
+	rec, ok := env.shelfStore.Get(key)
+	if !ok {
+		t.Fatal("the book was not saved in Quire")
+	}
+	savedFile := filepath.Join(env.savedDir, rec.File)
+	savedBytes, err := os.ReadFile(savedFile)
+	if err != nil {
+		t.Fatalf("the saved file is not readable: %v", err)
+	}
+
+	// Now ask to send it to the library, with its own recorder: waitForPhase
+	// matches against everything a recorder has ever seen, and env.rec
+	// already has a "done" from the save above. If this reused Retrieve+fetch
+	// instead of the saved bytes, it would need a second retrieval and
+	// wrapped would fail the test above.
+	rec2 := &recorder{}
+	handle(t, env.svc, rec2, appload.MessageEnqueueDownload,
+		`{"sourceId":"example-books","seriesId":"/book/openlibrary/OL1W","volumeId":"`+
+			bookReleaseID+`","destination":"library"}`)
+	waitForPhase(t, rec2, "done")
+
+	if len(th.retrieved) != 1 {
+		t.Errorf("Retrieve was called %d time(s), want 1 — the saved copy should have been reused", len(th.retrieved))
+	}
+
+	env.fake.mu.Lock()
+	uploads := append([][]byte(nil), env.fake.uploaded...)
+	env.fake.mu.Unlock()
+	if len(uploads) != 1 {
+		t.Fatalf("%d uploads, want 1", len(uploads))
+	}
+	if !bytes.Equal(uploads[0], savedBytes) {
+		t.Error("the bytes uploaded to the library do not match the saved file")
+	}
+
+	// The saved copy stays — reusing it is not the same as moving it.
+	if _, ok := env.shelfStore.Get(key); !ok {
+		t.Error("the saved book was forgotten; Send to library should leave the saved copy in place")
+	}
+	if _, err := os.Stat(savedFile); err != nil {
+		t.Errorf("the saved file is gone: %v", err)
+	}
+}
+
 // TestDeletingASavedBookRemovesOnlyItsFile is the mutation check for "delete
 // of a book removes only its file under the saved root": a book is one file,
 // not a per-page directory, and deleting it must not reach for
