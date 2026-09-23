@@ -415,6 +415,16 @@ files and Annex loads them from disk by path.
 
 ---
 
+## Acknowledgements
+
+Quire's reader renders books by running MuPDF's `mutool` as a separate
+process, communicating over stdin/stdout — it is bundled unmodified, not
+linked into Quire's own binary or copied into this repository. See
+[`THIRD_PARTY.md`](THIRD_PARTY.md) for the exact source, its SHA-256, the
+build flags used, and its licence (AGPL-3.0-or-later, © Artifex Software,
+Inc.), which ships alongside it in the app bundle at
+`licenses/MuPDF-COPYING`.
+
 ## Licence
 
 [Apache-2.0](LICENSE).
