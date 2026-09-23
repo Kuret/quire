@@ -22,7 +22,7 @@ APP_DIR="$ANNEX_ROOT/apps/quire"
 BUNDLE="$REPO_ROOT/output-rmpp"
 
 [[ -d "$BUNDLE" ]] || die "$BUNDLE does not exist; run build/build-rmpp.sh first"
-for required in manifest.json icon.svg ui/Main.qml backend/run; do
+for required in manifest.json icon.svg ui/Main.qml backend/run backend/mutool licenses/MuPDF-COPYING; do
     [[ -e "$BUNDLE/$required" ]] || die "$BUNDLE/$required is missing; the bundle is incomplete"
 done
 
@@ -57,8 +57,8 @@ say "deploy  $APP_DIR"
 # (see deviceDataDir in backend/cmd/quired/main.go) precisely because this line
 # once ate a user's configured sources on a routine redeploy.
 COPYFILE_DISABLE=1 tar -C "$BUNDLE" --no-xattrs --exclude='._*' --exclude='.DS_Store' \
-    -cf - manifest.json icon.svg ui backend \
-    | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/run'"
+    -cf - manifest.json icon.svg ui backend licenses \
+    | "${SSH[@]}" "rm -rf '$APP_DIR' && mkdir -p '$APP_DIR' && tar -xof - -C '$APP_DIR' && chown -R root:root '$APP_DIR' && chmod 0755 '$APP_DIR/backend/run' '$APP_DIR/backend/mutool'"
 
 say "verify"
 # Repair earlier installs that shipped AppleDouble files, and prove none remain.
