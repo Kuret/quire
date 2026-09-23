@@ -91,8 +91,63 @@ Item {
     // (theme.FirstPageProber); plain language from the backend (PLAN §2),
     // carried in the overlay until the session ends rather than as a toast
     // that could be missed — a partial chapter is a state the reader stays
-    // in, not a moment.
+    // in, not a moment. Doubles as a book's BookStatus line (see the book
+    // mode section below): both are a plain sentence from the backend, shown
+    // in the same two places, for the same reason.
     property string note: ""
+
+    // ---- book mode (payload BookOpened / BookRelaid) ----------------------
+    //
+    // A third mode, alongside try/saved: a MuPDF-rendered book, opened either
+    // as a Try session or as a chapter saved in Quire — bookMode says which,
+    // straight off BookOpened's own `mode` field. Every tap zone, the overlay
+    // shell and the escape/swipe handling above (Main.qml) are shared with
+    // try/saved untouched; only what the overlay additionally offers
+    // (Contents, Aa) and what closing sends (CloseBook, Main.qml's
+    // leaveReader) differ. Pages arrive exactly like Try's — one at a time,
+    // through the same pagePaths/requested/ensureRequested machinery above —
+    // since a book page is rendered on demand the same way a Try page is
+    // fetched on demand.
+    property string bookMode: "try"
+
+    // Fixed-layout books (PDF/XPS/CBZ) have no reflow, so the Aa panel hides
+    // its layout controls — margins, spacing, font, alignment mean nothing on
+    // a page that is already a bitmap — and offers only Contents.
+    property bool fixedLayout: false
+
+    // [{title, page, level}], the book's outline. Empty for a book with none.
+    property var toc: []
+
+    // {font, size, margins, spacing, align} — the settings currently in
+    // effect, straight off BookOpened/BookRelaid, never invented here.
+    property var settings: ({})
+
+    // [{id, label}] — the backend's own labels for the font choices
+    // (PLAN §2: every user-facing sentence, including this one, is composed
+    // there).
+    property var fontChoices: []
+    property int sizeMin: 1
+    property int sizeMax: 9
+
+    // Which of the overlay's two book-only panels is open, if either. Both
+    // close the reader's ordinary overlay dismiss area from doing anything
+    // useful underneath them, so at most one is ever true.
+    property bool contentsVisible: false
+    property bool settingsVisible: false
+
+    // The chapter title for wherever the reader currently is: the last toc
+    // entry whose page is at or before the current one, same convention a
+    // running head uses. Empty for a book with no outline, or before the
+    // current page's chapter has been reached.
+    readonly property string currentChapterTitle: screen.tocTitleFor(screen.index)
+
+    function tocTitleFor(page) {
+        var best = ""
+        for (var i = 0; i < screen.toc.length; ++i)
+            if (screen.toc[i].page <= page)
+                best = screen.toc[i].title
+        return best
+    }
 
     // The overlay is shut by default: full screen means the page, not the
     // chrome, until the reader asks for it.
@@ -124,6 +179,12 @@ Item {
     // message to Main.qml, the same division every other control here keeps.
     signal sendToLibraryRequested()
     signal saveInQuireRequested()
+
+    // Book mode only: a tap in the Aa panel changed a setting. Main.qml
+    // composes MessageSetReaderSettings from it, naming the book currently
+    // open and the page on screen (for anchoring), and shows the BookStatus
+    // sentence that answers it (screen.note) until BookRelaid applies.
+    signal settingsChangeRequested(var settings)
 
     readonly property string currentPath: screen.pagePaths[screen.index] !== undefined
                                           ? screen.pagePaths[screen.index] : ""
@@ -246,6 +307,92 @@ Item {
         screen.requested = ({})
     }
 
+    // openBook is MessageBookOpened, whichever question it answered
+    // (OpenSaved or TryChapter — see Main.qml's dispatch). Unlike a saved
+    // comic, the payload carries no page paths at all: a book page is
+    // rendered on demand, so the current page is asked for exactly the way
+    // begin() asks for Try's page 0, through ensureRequested below.
+    function openBook(payload) {
+        savePositionTimer.stop()
+        screen.mode = "book"
+        screen.bookMode = payload.mode ? payload.mode : "try"
+        screen.sourceId = payload.sourceId
+        screen.seriesId = payload.seriesId
+        screen.chapterId = payload.chapterId
+        screen.chapterTitle = payload.title ? payload.title : ""
+        screen.fixedLayout = !!payload.fixedLayout
+        screen.pageCount = payload.pageCount ? payload.pageCount : 0
+        // Always the whole book: unlike Try's fast-first-page streaming, a
+        // book's page count is known outright on BookOpened.
+        screen.complete = true
+        screen.note = ""
+        screen.toc = payload.toc ? payload.toc : []
+        screen.settings = payload.settings ? payload.settings : {}
+        screen.fontChoices = payload.fontChoices ? payload.fontChoices : []
+        screen.sizeMin = payload.sizeMin ? payload.sizeMin : 1
+        screen.sizeMax = payload.sizeMax ? payload.sizeMax : 9
+        screen.chapterInLibrary = !!payload.inLibrary
+        screen.sourcePrivate = !!payload.private
+        screen.overlayVisible = false
+        screen.contentsVisible = false
+        screen.settingsVisible = false
+        screen.pagePaths = ({})
+        screen.requested = ({})
+        var pos = payload.page ? payload.page : 0
+        if (pos < 0)
+            pos = 0
+        screen.index = pos
+        // Explicit, not left to onIndexChanged: index can already be this
+        // value (a fresh reader's very first book), which emits no change
+        // signal at all — the same reasoning begin() explains.
+        screen.ensureRequested(screen.index)
+    }
+
+    // relaid is MessageBookRelaid, the answer to a settings change: a new
+    // layout means every cached page path is stale, so it is dropped and the
+    // page on screen is asked for again under the new settings.
+    function relaid(payload) {
+        if (!screen.matches(payload))
+            return
+        screen.pageCount = payload.pageCount ? payload.pageCount : 0
+        screen.toc = payload.toc ? payload.toc : []
+        screen.settings = payload.settings ? payload.settings : {}
+        screen.note = ""
+        screen.pagePaths = ({})
+        screen.requested = ({})
+        screen.index = payload.page ? payload.page : 0
+        screen.ensureRequested(screen.index)
+    }
+
+    // bookStatus is MessageBookStatus: a progress sentence while a book is
+    // fetched (Try), opened or laid out — shown on the placeholder/opening
+    // screen and in the overlay, the same as Try's partial-chapter note.
+    function bookStatus(payload) {
+        if (!screen.matches(payload))
+            return
+        screen.note = payload.message ? payload.message : ""
+    }
+
+    // changeSetting merges one field into the settings currently in effect
+    // and asks for it — never a whole new object invented here, so a field
+    // this reader does not draw a control for still survives the round trip.
+    function changeSetting(key, value) {
+        var next = {}
+        for (var k in screen.settings)
+            next[k] = screen.settings[k]
+        next[key] = value
+        screen.settingsChangeRequested(next)
+    }
+
+    // jumpToPage is the Contents panel's tap: closes both it and the overlay
+    // and turns straight to the page, the same "just go there" a page number
+    // would be if this reader had one.
+    function jumpToPage(page) {
+        screen.contentsVisible = false
+        screen.overlayVisible = false
+        screen.index = page
+    }
+
     // matches is whether a reply is about the session actually open, rather
     // than one the reader has since closed or moved on from — the same
     // discipline the backend applies to a page request naming a stale
@@ -318,14 +465,23 @@ Item {
         onTriggered: screen.savePositionWanted(screen.index)
     }
 
+    // A position is worth keeping for a saved chapter and for a saved book
+    // (SavePosition (93) works for both — the wire contract's own words) —
+    // never for a Try session of either kind, comic or book, which has none
+    // to keep.
+    function positionTracked() {
+        return screen.mode === "saved"
+            || (screen.mode === "book" && screen.bookMode === "saved")
+    }
+
     function scheduleSavePosition() {
-        if (screen.mode !== "saved")
+        if (!screen.positionTracked())
             return
         savePositionTimer.restart()
     }
 
     function flushSavePosition() {
-        if (screen.mode !== "saved")
+        if (!screen.positionTracked())
             return
         savePositionTimer.stop()
         screen.savePositionWanted(screen.index)
@@ -359,11 +515,26 @@ Item {
     // interactive while this shows, so a reader who turned ahead of the
     // fetch can still turn back or open the overlay.
     Text {
+        id: tryLoadingLabel
         objectName: "tryLoadingLabel"
         anchors.centerIn: parent
         visible: !screen.pageIsReady
         text: "Fetching page " + (screen.index + 1) + "…"
         font.pointSize: Style.bodySize
+        color: Style.muted
+    }
+
+    // Book mode's own BookStatus sentence — fetching (Try), opening or
+    // laying out — shown on this placeholder/opening screen as well as in
+    // the overlay (tryOverlayPartialNote), so it reaches whoever is looking
+    // whether or not they have opened the overlay yet.
+    Text {
+        objectName: "tryBookStatusLabel"
+        anchors { top: tryLoadingLabel.bottom; topMargin: Style.gap
+                  horizontalCenter: parent.horizontalCenter }
+        visible: screen.mode === "book" && !screen.pageIsReady && screen.note.length > 0
+        text: screen.note
+        font.pointSize: Style.smallSize
         color: Style.muted
     }
 
@@ -577,6 +748,93 @@ Item {
                     color: Style.muted
                 }
 
+                // A book's own chapter, alongside the page number — the last
+                // toc entry at or before the current page (currentChapterTitle
+                // above). Empty for a book with no outline.
+                Text {
+                    objectName: "tryOverlayChapterTitle"
+                    width: parent.width
+                    visible: screen.mode === "book" && screen.currentChapterTitle.length > 0
+                    elide: Text.ElideRight
+                    text: screen.currentChapterTitle
+                    font.pointSize: Style.smallSize
+                    color: Style.muted
+                }
+
+                // Book mode's own two ways into the outline and the settings
+                // panel — QML owns only these two short labels (PLAN §2); the
+                // toc entries and every settings sentence are the backend's.
+                Row {
+                    id: bookActions
+                    width: parent.width
+                    spacing: Style.gap
+                    visible: screen.mode === "book"
+
+                    Rectangle {
+                        id: contentsButton
+                        objectName: "tryContentsButton"
+                        width: 160
+                        height: Style.buttonHeight
+                        color: contentsArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Contents"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: contentsArea
+                            objectName: "tryContentsArea"
+                            anchors.fill: parent
+                            enabled: bookActions.visible
+                            onClicked: {
+                                screen.settingsVisible = false
+                                screen.contentsVisible = true
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        id: aaButton
+                        objectName: "tryAaButton"
+                        // Fixed-layout books (PDF/XPS/CBZ) have nothing this
+                        // panel controls — no reflow, so no margins, spacing,
+                        // font or alignment to change — so the button that
+                        // opens an otherwise-empty panel is not offered at
+                        // all: Contents is what a fixed-layout book keeps.
+                        visible: !screen.fixedLayout
+                        width: 160
+                        height: Style.buttonHeight
+                        color: aaArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Aa"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: aaArea
+                            objectName: "tryAaArea"
+                            anchors.fill: parent
+                            enabled: aaButton.visible
+                            onClicked: {
+                                screen.contentsVisible = false
+                                screen.settingsVisible = true
+                            }
+                        }
+                    }
+                }
+
                 // The reader's two library actions. Neither is a question —
                 // tapping one sends EnqueueDownload and the outcome comes
                 // back as whatever DownloadProgress sentence the row it came
@@ -626,8 +884,10 @@ Item {
                     Rectangle {
                         id: saveInQuireButton
                         objectName: "trySaveInQuireButton"
-                        // Try mode only — a saved chapter is already saved.
+                        // Try mode only — a saved chapter (or saved book) is
+                        // already saved.
                         visible: screen.mode === "try"
+                                 || (screen.mode === "book" && screen.bookMode === "try")
                         width: 220
                         height: Style.buttonHeight
                         color: saveInQuireArea.pressed ? Style.pressed : Style.paper
@@ -648,6 +908,358 @@ Item {
                             anchors.fill: parent
                             enabled: saveInQuireButton.visible
                             onClicked: screen.saveInQuireRequested()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- book mode: the outline ------------------------------------------
+    //
+    // Full screen, over everything else — the same weight as the overlay it
+    // is opened from. Not paged: an outline is read down, not turned through,
+    // and is nowhere near a chapter's worth of rows.
+    Item {
+        id: contentsPanel
+        objectName: "tryContentsPanel"
+        anchors.fill: parent
+        visible: screen.contentsVisible
+        z: 10
+
+        Rectangle { anchors.fill: parent; color: Style.paper }
+
+        Rectangle {
+            id: contentsPanelTop
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: Style.rowHeight
+            color: Style.paper
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: Style.hairline
+                color: Style.rule
+            }
+
+            Text {
+                id: contentsBackLabel
+                anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                text: "Back"
+                font.pointSize: Style.bodySize
+                color: contentsBackArea.pressed ? Style.muted : Style.ink
+            }
+
+            MouseArea {
+                id: contentsBackArea
+                objectName: "tryContentsBackArea"
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                width: Style.margin * 2 + contentsBackLabel.width
+                onClicked: screen.contentsVisible = false
+            }
+
+            Text {
+                anchors {
+                    left: contentsBackLabel.right; leftMargin: Style.gap
+                    right: parent.right; rightMargin: Style.margin
+                    verticalCenter: parent.verticalCenter
+                }
+                horizontalAlignment: Text.AlignHCenter
+                text: "Contents"
+                font.pointSize: Style.headingSize
+                color: Style.ink
+            }
+        }
+
+        Column {
+            id: tocColumn
+            objectName: "tryContentsList"
+            anchors {
+                top: contentsPanelTop.bottom; topMargin: Style.gap
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+
+            Repeater {
+                model: screen.toc
+
+                Rectangle {
+                    objectName: "tryContentsEntry-" + index
+                    width: tocColumn.width
+                    height: Style.rowHeight
+                    color: tocEntryArea.pressed ? Style.pressed : Style.paper
+
+                    Text {
+                        anchors {
+                            left: parent.left; leftMargin: Style.gap * (1 + modelData.level)
+                            right: parent.right; rightMargin: Style.margin
+                            verticalCenter: parent.verticalCenter
+                        }
+                        elide: Text.ElideRight
+                        text: modelData.title
+                        font.pointSize: Style.bodySize
+                        color: Style.ink
+                    }
+
+                    MouseArea {
+                        id: tocEntryArea
+                        objectName: "tryContentsEntryArea-" + index
+                        anchors.fill: parent
+                        onClicked: screen.jumpToPage(modelData.page)
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- book mode: the Aa settings panel ----------------------------------
+    //
+    // Reader settings are global (PLAN's own decision, not per-book), so
+    // every control here fires the moment it is tapped — there is no save
+    // step, the same as every other switch in ui/. Fixed-layout books never
+    // show this panel at all (see the Aa button above).
+    Item {
+        id: settingsPanel
+        objectName: "trySettingsPanel"
+        anchors.fill: parent
+        visible: screen.settingsVisible
+        z: 10
+
+        Rectangle { anchors.fill: parent; color: Style.paper }
+
+        Rectangle {
+            id: settingsPanelTop
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: Style.rowHeight
+            color: Style.paper
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: Style.hairline
+                color: Style.rule
+            }
+
+            Text {
+                id: settingsBackLabel
+                anchors { left: parent.left; leftMargin: Style.margin; verticalCenter: parent.verticalCenter }
+                text: "Back"
+                font.pointSize: Style.bodySize
+                color: settingsBackArea.pressed ? Style.muted : Style.ink
+            }
+
+            MouseArea {
+                id: settingsBackArea
+                objectName: "trySettingsBackArea"
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                width: Style.margin * 2 + settingsBackLabel.width
+                onClicked: screen.settingsVisible = false
+            }
+
+            Text {
+                anchors {
+                    left: settingsBackLabel.right; leftMargin: Style.gap
+                    right: parent.right; rightMargin: Style.margin
+                    verticalCenter: parent.verticalCenter
+                }
+                horizontalAlignment: Text.AlignHCenter
+                text: "Aa"
+                font.pointSize: Style.headingSize
+                color: Style.ink
+            }
+        }
+
+        Column {
+            id: settingsColumn
+            anchors {
+                top: settingsPanelTop.bottom; topMargin: Style.gap
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+            }
+            spacing: Style.gap
+
+            // Font, straight off the backend's own choices and labels
+            // (PLAN §2) — never a font name invented here.
+            Row {
+                objectName: "trySettingsFontRow"
+                spacing: Style.gap
+
+                Repeater {
+                    model: screen.fontChoices
+
+                    Rectangle {
+                        objectName: "trySettingsFont-" + modelData.id
+                        width: 220
+                        height: Style.buttonHeight
+                        color: fontArea.pressed ? Style.pressed
+                               : (screen.settings.font === modelData.id ? Style.rule : Style.paper)
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: fontArea
+                            anchors.fill: parent
+                            onClicked: screen.changeSetting("font", modelData.id)
+                        }
+                    }
+                }
+            }
+
+            // Size, as steps rather than a raw point size — the backend maps
+            // the step to an em size (PLAN's own table); this reader only
+            // ever sends the step.
+            Row {
+                objectName: "trySettingsSizeRow"
+                spacing: Style.gap
+
+                Rectangle {
+                    id: sizeDownButton
+                    objectName: "trySettingsSizeDown"
+                    // Disabled at the bound, not merely inert — the same
+                    // dead-as-well-as-hidden rule every other control in ui/
+                    // follows (ChapterList.qml's watchButton, for one), so a
+                    // check of this element alone says whether the control
+                    // really works.
+                    enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) > screen.sizeMin
+                    width: 80
+                    height: Style.buttonHeight
+                    color: sizeDownArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: enabled ? Style.ink : Style.rule
+                    radius: 6
+                    Text { anchors.centerIn: parent; text: "-"; font.pointSize: Style.bodySize; color: Style.ink }
+                    MouseArea {
+                        id: sizeDownArea
+                        objectName: "trySettingsSizeDownArea"
+                        anchors.fill: parent
+                        enabled: sizeDownButton.enabled
+                        onClicked: screen.changeSetting("size", screen.settings.size - 1)
+                    }
+                }
+
+                Rectangle {
+                    id: sizeUpButton
+                    objectName: "trySettingsSizeUp"
+                    enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) < screen.sizeMax
+                    width: 80
+                    height: Style.buttonHeight
+                    color: sizeUpArea.pressed ? Style.pressed : Style.paper
+                    border.width: 2
+                    border.color: enabled ? Style.ink : Style.rule
+                    radius: 6
+                    Text { anchors.centerIn: parent; text: "+"; font.pointSize: Style.bodySize; color: Style.ink }
+                    MouseArea {
+                        id: sizeUpArea
+                        objectName: "trySettingsSizeUpArea"
+                        anchors.fill: parent
+                        enabled: sizeUpButton.enabled
+                        onClicked: screen.changeSetting("size", screen.settings.size + 1)
+                    }
+                }
+            }
+
+            // Margins, spacing and alignment — each a row of the backend's
+            // own values (schema/settings.schema.json), this file's own
+            // short labels on top of them (PLAN §2).
+            Row {
+                objectName: "trySettingsMarginsRow"
+                spacing: Style.gap
+
+                Repeater {
+                    model: [{"key": "narrow", "label": "Narrow"},
+                            {"key": "normal", "label": "Normal"},
+                            {"key": "wide", "label": "Wide"}]
+
+                    Rectangle {
+                        objectName: "trySettingsMargins-" + modelData.key
+                        width: 140
+                        height: Style.buttonHeight
+                        color: marginsArea.pressed ? Style.pressed
+                               : (screen.settings.margins === modelData.key ? Style.rule : Style.paper)
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+                        MouseArea {
+                            id: marginsArea
+                            anchors.fill: parent
+                            onClicked: screen.changeSetting("margins", modelData.key)
+                        }
+                    }
+                }
+            }
+
+            Row {
+                objectName: "trySettingsSpacingRow"
+                spacing: Style.gap
+
+                Repeater {
+                    model: [{"key": "book", "label": "Book"},
+                            {"key": "normal", "label": "Normal"},
+                            {"key": "relaxed", "label": "Relaxed"}]
+
+                    Rectangle {
+                        objectName: "trySettingsSpacing-" + modelData.key
+                        width: 140
+                        height: Style.buttonHeight
+                        color: spacingArea.pressed ? Style.pressed
+                               : (screen.settings.spacing === modelData.key ? Style.rule : Style.paper)
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+                        MouseArea {
+                            id: spacingArea
+                            anchors.fill: parent
+                            onClicked: screen.changeSetting("spacing", modelData.key)
+                        }
+                    }
+                }
+            }
+
+            Row {
+                objectName: "trySettingsAlignRow"
+                spacing: Style.gap
+
+                Repeater {
+                    model: [{"key": "book", "label": "Book"},
+                            {"key": "left", "label": "Left"}]
+
+                    Rectangle {
+                        objectName: "trySettingsAlign-" + modelData.key
+                        width: 140
+                        height: Style.buttonHeight
+                        color: alignArea.pressed ? Style.pressed
+                               : (screen.settings.align === modelData.key ? Style.rule : Style.paper)
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+                        MouseArea {
+                            id: alignArea
+                            anchors.fill: parent
+                            onClicked: screen.changeSetting("align", modelData.key)
                         }
                     }
                 }
