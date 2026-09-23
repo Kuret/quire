@@ -4,6 +4,7 @@ go 1.25.14
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/creack/pty v1.1.24
 	github.com/dop251/goja v0.0.0-20260915173639-b3fa02110dbd
 	github.com/klauspost/compress v1.20.0
 	github.com/pdfcpu/pdfcpu v0.11.0
