@@ -169,3 +169,26 @@ var SavedOpened = 92
 var SavePosition = 93
 var DeleteSaved = 94
 var SavedDeleted = 95
+
+// Books, rendered by MuPDF as page images and read in the same reader
+// (TryReader.qml's "book" mode). Two entry points are reused rather than
+// branched on kind: OpenSaved on a saved book answers BookOpened instead of
+// SavedOpened, and TryChapter on a book source answers BookStatus progress
+// then BookOpened (mode "try") instead of the old try_unavailable refusal.
+// SavePosition (93) works for a book too, position being its page index.
+//
+// BookPageRequest/BookPage are Try's own page-by-page traffic
+// (TryPageRequest/TryPage), unchanged in shape, because a book page is
+// rendered on demand exactly like a Try page is fetched on demand.
+// SetReaderSettings carries the book currently open and the page on screen,
+// for anchoring; BookRelaid answers it with the new count, page and toc, and
+// CloseBook is the one path that ends a book session, saving position (saved
+// mode), ending the session and removing its render cache (and the try file
+// in try mode).
+var BookOpened = 96
+var BookPageRequest = 97
+var BookPage = 98
+var SetReaderSettings = 99
+var BookRelaid = 100
+var CloseBook = 101
+var BookStatus = 102

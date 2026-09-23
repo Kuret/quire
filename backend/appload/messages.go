@@ -569,6 +569,67 @@ const (
 	// each row's saved flag without a second fetch.
 	MessageDeleteSaved  MessageType = 94
 	MessageSavedDeleted MessageType = 95
+
+	// Books: a theme.FileTheme source's chapters now render as page images
+	// in Quire's own reader (backend/bookrender), rather than always going
+	// to the reMarkable library (books-contract.md §B). Three existing
+	// entry points are reused rather than branched on kind: MessageOpenSaved
+	// (91) on a saved book answers MessageBookOpened instead of
+	// MessageSavedOpened; MessageTryChapter (83) on a book source answers
+	// MessageBookStatus progress then MessageBookOpened (mode "try") instead
+	// of the old try_unavailable refusal; MessageSavePosition (93) works for
+	// a book too, its position being a page index the backend turns into a
+	// fraction and a text snippet itself.
+	//
+	// MessageBookOpened is BE→UI, JSON {sourceId, seriesId, chapterId,
+	// title, mode: "saved"|"try", fixedLayout, pageCount, page,
+	// toc:[{title,page,level}], settings:{font,size,margins,spacing,align},
+	// fontChoices:[{id,label}], sizeMin, sizeMax, private, inLibrary}: the
+	// book is open and its current page is ready. fixedLayout (PDF/XPS/CBZ)
+	// tells the overlay to hide the layout controls the settings panel
+	// otherwise shows. settings and fontChoices are the whole of what the
+	// "Aa" panel needs to draw — the labels are the backend's own, per
+	// PLAN §2, never invented in QML.
+	MessageBookOpened MessageType = 96
+
+	// MessageBookPageRequest is UI→BE, JSON {sourceId, seriesId, chapterId,
+	// index}: fetch (or serve from cache) one page, requested on demand the
+	// same way MessageTryPageRequest is. MessageBookPage is BE→UI, JSON
+	// {sourceId, seriesId, chapterId, index, path}: the answer. A page not
+	// yet rendered is not an error — the reader shows its own "not ready"
+	// placeholder and waits, exactly as Try's does.
+	MessageBookPageRequest MessageType = 97
+	MessageBookPage        MessageType = 98
+
+	// MessageSetReaderSettings is UI→BE, JSON {sourceId, seriesId,
+	// chapterId, page, settings:{font,size,margins,spacing,align}}: change
+	// the reader's global settings while a book is open. page is the page
+	// on screen at the moment of the change, so the backend can re-anchor
+	// the reading position across the re-layout the new settings require
+	// (books-contract.md §B, Reader sessions) — it is not itself a save of
+	// the reading position, which MessageSavePosition still owns.
+	// MessageBookRelaid is BE→UI, JSON {sourceId, seriesId, chapterId,
+	// pageCount, page, toc, settings}: the new layout, in place of whatever
+	// page count and table of contents the reader had before — every cached
+	// page path from the old layout is stale and must be dropped.
+	MessageSetReaderSettings MessageType = 99
+	MessageBookRelaid        MessageType = 100
+
+	// MessageCloseBook is UI→BE, JSON {sourceId, seriesId, chapterId,
+	// page}: leaving the reader. In "saved" mode this saves the position
+	// (the same computation MessageSavePosition does) before ending the
+	// session; in "try" mode it deletes the fetched file instead, the same
+	// as MessageEndTry's Try cleanup. Either way it ends the render session
+	// and removes its page cache — there is one book open at a time, the
+	// same rule Try's single session already keeps.
+	MessageCloseBook MessageType = 101
+
+	// MessageBookStatus is BE→UI, JSON {sourceId, seriesId, chapterId,
+	// message}: a progress sentence while a book is being fetched (Try),
+	// opened or laid out ("Laying out the book…") — the book equivalent of
+	// MessageDownloadProgress's running commentary, for the moments a book
+	// session cannot yet answer with a page.
+	MessageBookStatus MessageType = 102
 )
 
 // messageNames covers every type Quire defines, system types included. It is
@@ -651,6 +712,13 @@ var messageNames = map[MessageType]string{
 	MessageSavePosition:          "SavePosition",
 	MessageDeleteSaved:           "DeleteSaved",
 	MessageSavedDeleted:          "SavedDeleted",
+	MessageBookOpened:            "BookOpened",
+	MessageBookPageRequest:       "BookPageRequest",
+	MessageBookPage:              "BookPage",
+	MessageSetReaderSettings:     "SetReaderSettings",
+	MessageBookRelaid:            "BookRelaid",
+	MessageCloseBook:             "CloseBook",
+	MessageBookStatus:            "BookStatus",
 }
 
 // Name returns the PLAN §7.1 name of a message type, or "Unknown(<n>)".
