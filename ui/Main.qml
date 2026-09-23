@@ -307,14 +307,20 @@ Rectangle {
         root.send(Msg.OpenSaved, {"sourceId": sourceId, "seriesId": seriesId, "chapterId": chapterId})
     }
 
-    // leaveReader is the one path off either reader screen — the header
-    // Back, the reader's own overlay Back and the escape gesture all use it.
-    // Try's session is ended outright (endTry); a saved chapter has no
-    // session, only a reading position that might still be waiting out its
-    // debounce, so leaving flushes it immediately instead of losing up to
-    // 1.5s of it.
+    // leaveReader is the one path off any of the three reader screens — the
+    // header Back, the reader's own overlay Back and the escape gesture all
+    // use it. Try's session is ended outright (endTry); a saved chapter has
+    // no session, only a reading position that might still be waiting out
+    // its debounce, so leaving flushes it immediately instead of losing up
+    // to 1.5s of it. A book always sends CloseBook (101): the backend saves
+    // its position (saved mode), ends the session and sweeps its render
+    // cache from that one message, so there is nothing else to flush here.
     function leaveReader() {
-        if (tryReaderScreen.mode === "saved") {
+        if (tryReaderScreen.mode === "book") {
+            root.closeBook()
+            root.showScreen(tryReaderScreen.bookMode === "saved"
+                             ? root.savedReaderCameFrom : "series")
+        } else if (tryReaderScreen.mode === "saved") {
             root.closeSaved()
             root.showScreen(root.savedReaderCameFrom)
         } else {
@@ -327,6 +333,17 @@ Rectangle {
         if (!tryReaderScreen.chapterId)
             return
         tryReaderScreen.flushSavePosition()
+    }
+
+    // closeBook is CloseBook (101), naming the page on screen so the backend
+    // can save it in the same message rather than a separate SavePosition
+    // round trip.
+    function closeBook() {
+        if (!tryReaderScreen.chapterId)
+            return
+        root.send(Msg.CloseBook, {
+            "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+            "chapterId": tryReaderScreen.chapterId, "page": tryReaderScreen.index})
     }
 
     // deleteDownload moves a document to xochitl's Trash and tells the backend
@@ -744,6 +761,33 @@ Rectangle {
         case Msg.TryPageCount:
             if (msg)
                 tryReaderScreen.countUpdated(msg)
+            return
+
+        case Msg.BookOpened:
+            // Reused entry points, no branching on kind here: this answers
+            // either OpenSaved or TryChapter (root.openSaved/root.openTry),
+            // whichever the source turned out to need. The screen becomes
+            // "book" either way — the reader's own bookMode (off the
+            // payload's "mode") is what tells the two apart from here on.
+            if (msg) {
+                tryReaderScreen.openBook(msg)
+                root.showScreen("book")
+            }
+            return
+
+        case Msg.BookPage:
+            if (msg)
+                tryReaderScreen.pageArrived(msg)
+            return
+
+        case Msg.BookStatus:
+            if (msg)
+                tryReaderScreen.bookStatus(msg)
+            return
+
+        case Msg.BookRelaid:
+            if (msg)
+                tryReaderScreen.relaid(msg)
             return
 
         case Msg.SavedOpened:
@@ -1466,9 +1510,11 @@ Rectangle {
         // Leaving the Try reader always ends the session (PLAN's Try
         // milestone: leaving discards it) and always returns to the series
         // it was opened from — Try is only ever reached from there. A saved
-        // chapter's reader goes back the same way (leaveReader).
+        // chapter's reader goes back the same way, and so does a book's,
+        // whichever of Try or saved it turned out to be (leaveReader).
         case "try":
         case "saved":
+        case "book":
             root.leaveReader()
             break
         case "series":
@@ -1535,7 +1581,7 @@ Rectangle {
     // — spending it on a panel is a swipe not available to leave Quire the
     // moment it turns out this was not what the user meant to close.
     function escapeRequested() {
-        if (root.screen !== "try" && root.screen !== "saved")
+        if (root.screen !== "try" && root.screen !== "saved" && root.screen !== "book")
             return false
         root.leaveReader()
         return true
@@ -1558,6 +1604,7 @@ Rectangle {
         case "series": return chapterListScreen.seriesTitle
         case "try":
         case "saved":
+        case "book":
             return tryReaderScreen.chapterTitle.length > 0 ? tryReaderScreen.chapterTitle : "Preview"
         case "settings": return "Settings"
         }
@@ -1613,8 +1660,8 @@ Rectangle {
         // The Try reader is full screen (the owner's follow-up: every pixel
         // of chrome is a pixel of manga you cannot see) and draws its own
         // sparse overlay instead of this permanent bar — see TryReader.qml.
-        // A saved chapter shares the same reader and the same rule.
-        visible: root.screen !== "try" && root.screen !== "saved"
+        // A saved chapter and a book share the same reader and the same rule.
+        visible: root.screen !== "try" && root.screen !== "saved" && root.screen !== "book"
 
         Text {
             id: backLabel
@@ -2086,17 +2133,26 @@ Rectangle {
         id: tryReaderScreen
         objectName: "tryReader"
         anchors.fill: parent
-        visible: root.screen === "try" || root.screen === "saved"
+        visible: root.screen === "try" || root.screen === "saved" || root.screen === "book"
         // Leaving the reader always tears down whichever mode is open (see
         // root.leaveReader) — the overlay's Back is just another way in,
         // alongside the shared header Back button on every other screen.
         onCloseRequested: root.leaveReader()
         // The reader asks for exactly one page at a time (see
         // TryReader.qml's ensureRequested); this is the only place that
-        // becomes a MessageTryPageRequest.
-        onPageWanted: root.send(Msg.TryPageRequest, {
+        // becomes a page request — MessageTryPageRequest for a Try/saved
+        // comic, MessageBookPageRequest for a book, same shape either way.
+        onPageWanted: root.send(
+            tryReaderScreen.mode === "book" ? Msg.BookPageRequest : Msg.TryPageRequest, {
+                "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
+                "chapterId": tryReaderScreen.chapterId, "index": index})
+        // Book mode's Aa panel: every tap fires this, naming the book
+        // currently open and the page on screen (for anchoring) alongside
+        // the settings object the panel composed.
+        onSettingsChangeRequested: root.send(Msg.SetReaderSettings, {
             "sourceId": tryReaderScreen.sourceId, "seriesId": tryReaderScreen.seriesId,
-            "chapterId": tryReaderScreen.chapterId, "index": index})
+            "chapterId": tryReaderScreen.chapterId, "page": tryReaderScreen.index,
+            "settings": settings})
         // Saved mode's reading position, debounced on a page turn and
         // flushed once more on close (root.closeSaved / flushSavePosition).
         onSavePositionWanted: root.send(Msg.SavePosition, {
