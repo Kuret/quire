@@ -1,36 +1,42 @@
+// Package bookrender's CSS composer takes its settings values from
+// backend/state (the reader settings' one source of truth, per
+// books-contract.md §B) and turns them into what render.js's "layout"
+// command needs: a point size and a CSS string.
 package bookrender
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/rickl/quire/backend/state"
 )
 
-// Reader settings' enum values (books-contract.md §B, Settings). These are
-// wire values too — sent back in BookOpened's settings and fontChoices, and
-// accepted by SetReaderSettings — so they are spelled out rather than
-// derived from anything a rename could silently break.
+// Settings is an alias for state.ReaderSettings, kept under this package's
+// own name so callers that only deal with rendering do not have to import
+// backend/state just to spell the type out.
+type Settings = state.ReaderSettings
+
+// Re-exported enum values and range, so bookrender's own callers (and its
+// tests) do not have to import backend/state for them either.
 const (
-	FontBook     = "book"
-	FontGaramond = "garamond"
-	FontNoto     = "noto"
+	FontBook     = state.ReaderFontBook
+	FontGaramond = state.ReaderFontGaramond
+	FontNoto     = state.ReaderFontNoto
 
-	MarginsNarrow = "narrow"
-	MarginsNormal = "normal"
-	MarginsWide   = "wide"
+	MarginsNarrow = state.ReaderMarginsNarrow
+	MarginsNormal = state.ReaderMarginsNormal
+	MarginsWide   = state.ReaderMarginsWide
 
-	SpacingBook    = "book"
-	SpacingNormal  = "normal"
-	SpacingRelaxed = "relaxed"
+	SpacingBook    = state.ReaderSpacingBook
+	SpacingNormal  = state.ReaderSpacingNormal
+	SpacingRelaxed = state.ReaderSpacingRelaxed
 
-	AlignBook = "book"
-	AlignLeft = "left"
-)
+	AlignBook = state.ReaderAlignBook
+	AlignLeft = state.ReaderAlignLeft
 
-// SizeMin and SizeMax are the reader's font-size step range.
-const (
-	SizeMin = 1
-	SizeMax = 9
+	SizeMin = state.ReaderSizeMin
+	SizeMax = state.ReaderSizeMax
 )
 
 // sizeEm maps a 1..9 step to a point size (books-contract.md §B, Settings).
@@ -76,20 +82,10 @@ const (
 	notoRegular     = "/usr/share/fonts/ttf/noto/NotoSans-VariableFont_wdth,wght.ttf"
 )
 
-// Settings is the reader's global, per-book-independent configuration
-// (books-contract.md §B). The zero value is not valid — use Defaults().
-type Settings struct {
-	Font    string
-	Size    int
-	Margins string
-	Spacing string
-	Align   string
-}
-
-// Defaults is the reader's out-of-the-box configuration: font book, size 4
-// (12pt), margins normal, spacing book, align book.
+// Defaults is the reader's out-of-the-box configuration; see
+// state.DefaultReaderSettings.
 func Defaults() Settings {
-	return Settings{Font: FontBook, Size: 4, Margins: MarginsNormal, Spacing: SpacingBook, Align: AlignBook}
+	return state.DefaultReaderSettings()
 }
 
 // marginsEm returns the top/bottom and left/right margin, in em, for one of
