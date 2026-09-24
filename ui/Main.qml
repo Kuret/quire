@@ -982,13 +982,6 @@ Rectangle {
     // say.
     function fillSearchAll(msg) {
         searchAllScreen.busy = false
-
-        // The reply is kept whole, because the kind filter is drawn from it
-        // again every time it moves. **Nothing is re-fetched to filter**: this
-        // page was merged and paged by the backend out of a request to every
-        // configured site, and spending that again to show a subset of rows
-        // already on screen would make a filter something that can fail
-        // (PLAN §7.4).
         root.lastSearchAll = msg
 
         // Where the backend says we are. It clamps a page that ran past the
@@ -1003,26 +996,27 @@ Rectangle {
         root.showSearchAllGroups()
     }
 
-    // showSearchAllGroups draws the page in hand through the screen's kind
-    // filter. Called when a page lands and again whenever the filter moves.
+    // showSearchAllGroups draws the page exactly as the backend sent it.
     //
-    // The two emptinesses are kept apart here (ui/Kinds.js): a search that
-    // found nothing is the backend's answer, and a page whose results the
-    // filter is holding back is the filter's — and is undone by tapping All.
-    // Saying the first when the second is true is how a working search gets
-    // reported as broken.
+    // **There is no filtering here any more.** The kind filter travels with
+    // the request (requestSearchAllPage) and decides which sources are ever
+    // asked, so every group in a reply already belongs on screen — this used
+    // to also re-slice the page in hand through the screen's filter, which is
+    // the client-side hide the backend-side one replaced.
+    //
+    // The two emptinesses are still kept apart (ui/Kinds.js): a search that
+    // found nothing is the backend's answer either way, but the sentence
+    // names what was searched for when a filter is on ("No books in these
+    // results") rather than the plain "Nothing came back for that."
     function showSearchAllGroups() {
         var msg = root.lastSearchAll
-        var total = Grouping.countOf(msg)
-        root.searchAllMatches = Grouping.fill(searchAllModel, msg,
-                                              searchAllScreen.kindFilter)
-        searchAllScreen.hiddenCount = total - searchAllModel.count
+        root.searchAllMatches = Grouping.fill(searchAllModel, msg)
         searchAllScreen.emptyMessage = searchAllModel.count === 0
-            ? Kinds.emptyLine(searchAllScreen.kindFilter, total) : ""
+            ? Kinds.emptyLine(searchAllScreen.kindFilter) : ""
         // One batch for the rows now on screen, every entry naming its own
-        // source: this screen draws series from several at once. A filtered-out
-        // group is not in the batch, and an empty batch supersedes the last one
-        // — which is what drops fetches for covers nobody can see (Covers.js).
+        // source: this screen draws series from several at once. An empty
+        // batch supersedes the last one — which is what drops fetches for
+        // covers nobody can see (Covers.js).
         searchAllScreen.requestVisibleCovers()
     }
 
@@ -1364,6 +1358,11 @@ Rectangle {
         root.send(root.searchAllPrivate ? Msg.SearchAllPrivate : Msg.SearchAll, {
             "query": searchAllScreen.query,
             "page": page,
+            // "" asks every kind; the screen's own ALL is not a kind the
+            // backend's vocabulary has (backend/service/kind.go), so it is
+            // translated here rather than the screen sending a word the
+            // backend does not know.
+            "kind": searchAllScreen.kindFilter === Kinds.ALL ? "" : searchAllScreen.kindFilter,
             "pageSize": searchAllScreen.pageSize})
     }
 
@@ -2011,9 +2010,6 @@ Rectangle {
             // it per source was a real bug on Downloaded: each message
             // cancelled the one before it.
             onCoversRequested: root.requestCoversBySource(covers)
-            // The kind filter moved. The page is already here, so this only
-            // draws it again — see showSearchAllGroups.
-            onRefilterRequested: root.showSearchAllGroups()
             // Opening a group opens its first match — the one the backend put
             // first, which is first in the user's own source order. The rest
             // go with it, and become the chips on the series screen; nothing

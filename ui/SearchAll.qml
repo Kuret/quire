@@ -100,25 +100,33 @@ Item {
     // setting first.
     property string kindFilter: Kinds.ALL
 
-    // How many groups on the page in hand the filter is holding back. Set by
-    // the shell, which is what holds the reply; the line below is drawn from
-    // it. Zero is not "no filter": a filter can be on with nothing to hide.
-    property int hiddenCount: 0
-
-    readonly property string filterNote: Kinds.filterLine(screen.kindFilter, screen.hiddenCount)
-
-    // Asks the shell to draw the page in hand again through the new filter.
-    // Nothing is fetched: the groups are already here (Grouping.fill).
-    signal refilterRequested()
+    readonly property string filterNote: Kinds.filterLine(screen.kindFilter)
 
     // showKind is the one way the filter moves. Guarded, so tapping the filter
-    // already on re-renders nothing — a repaint of the whole page of results is
-    // the most expensive thing this screen can do for no change.
+    // already on asks for nothing — a fan-out to every configured site is the
+    // most expensive thing this screen can do for no change.
+    //
+    // **The filter is part of the search, not a view on one page of it.** The
+    // kind travels with the request (Main.qml's requestSearchAllPage), so
+    // choosing Books re-runs the same query from page 1 asking only book
+    // sources — a Books search never touches a manga site, and page 1 is the
+    // first N book groups rather than a page a client-side hide had hollowed
+    // out. That is also why this only fires the request when there is a query
+    // to run: tapping a filter on an empty screen must not fan out for a box
+    // nobody has typed in (searchRequested already carries that guard, in
+    // Main.qml's requestSearchAllPage).
     function showKind(kind) {
         if (screen.kindFilter === kind)
             return
         screen.kindFilter = kind
-        screen.refilterRequested()
+        if (!Grouping.searchable(screen.query))
+            return
+        screen.page = 1
+        screen.totalPages = 0
+        screen.hasMore = false
+        screen.pendingPage = 1
+        screen.busy = true
+        screen.searchRequested(screen.query)
     }
 
     // Where in the listing we are. All of it comes from the backend: it owns
@@ -174,7 +182,6 @@ Item {
         // not pass through here, so the filter survives that — what the user
         // was looking at is still what they were looking at.
         screen.kindFilter = Kinds.ALL
-        screen.hiddenCount = 0
         screen.page = 1
         screen.totalPages = 0
         screen.hasMore = false
@@ -185,13 +192,8 @@ Item {
     // the page in hand is the wrong size. Ask for a whole one rather than
     // leaving a gap or a clipped row. Only ever when there is a search to
     // re-run: an empty query must not fan out, whatever moved (Grouping.js).
-    // A page held back by the filter is legitimately shorter than a full one,
-    // so the mismatch this looks for would be true of every filtered page —
-    // and re-fetching would throw the user back to page 1 for a window resize
-    // that changed nothing they can see.
     onPageSizeChanged: {
         if (Grouping.searchable(screen.query) && screen.pageSize > 0
-                && screen.hiddenCount === 0
                 && screen.rowCount > 0 && screen.rowCount !== screen.pageSize)
             screen.turnTo(1)
     }

@@ -303,7 +303,6 @@ Window {
         // few milliseconds ago and has never been told anything.
         win.want("the combined search starts showing every kind",
                  win.screenNamed("searchAll").kindFilter, Kinds.ALL)
-        win.want("hiding nothing", win.screenNamed("searchAll").hiddenCount, 0)
 
         // Off the device there is no library to hand documents to, so every
         // document answer below is the no-bridge one. Asserted rather than
@@ -927,10 +926,10 @@ Window {
         //
         // Books and comics arrive on the same screen from different sources,
         // which is the whole reason the filter is here and on no other screen.
-        // **It filters the page already on screen.** The backend fanned out to
-        // every configured site, merged and paged to build this page; spending
-        // that again to show a subset of rows already in hand would make a
-        // filter something that can fail (PLAN §7.4).
+        // **The filter is part of the search, not a view on a page already in
+        // hand.** Choosing a kind re-runs the query from page 1 asking the
+        // backend to search only that kind (backend/service/searchall.go) — a
+        // Books search never touches a manga site.
 
         // **A reply must not re-fire the search that produced it.** A page
         // landing asks for its covers and nothing else: a combined search that
@@ -954,76 +953,76 @@ Window {
                  searchAll.model.get(0).sources, "Example Reader · Other Reader")
         win.want("and its tile is marked in the badge corner",
                  searchAll.model.get(2).badge, "Book")
-        win.want("nothing is being held back", searchAll.hiddenCount, 0)
 
         var kindNote = win.findChild(searchAll, "kindFilterNote")
         win.want("so the screen says nothing about a filter", kindNote.text, "")
 
         // Tapped, on the control the user would touch — not showKind(), which
-        // would step straight over `enabled`.
+        // would step straight over `enabled`. Choosing Books re-runs the
+        // query the screen already has, from page 1, naming the kind.
         backend.forget()
         win.findChild(searchAll, "kindFilterArea-book").clicked(null)
-        win.want("tapping Books filters the page in hand", searchAll.model.count, 1)
+        win.want("tapping Books asks the backend again", backend.countOf(Msg.SearchAll), 1)
+        win.want("carrying the query already on screen",
+                 backend.bodyOf(Msg.SearchAll).query, "lantern")
+        win.want("from page 1", backend.bodyOf(Msg.SearchAll).page, 1)
+        win.want("**naming the kind**", backend.bodyOf(Msg.SearchAll).kind, "book")
+        win.want("and moves the filter", searchAll.kindFilter, Kinds.BOOK)
+        win.want("**and says so in words**", kindNote.text, "Showing books only.")
+
+        // The backend answers with only the book: a filtered search never
+        // even asked the manga sources, so there is nothing here to hide.
+        backend.forget()
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [win.duneGroup], "sourceErrors": []})
+        win.want("the reply is the whole of the page", searchAll.model.count, 1)
         win.want("to the book", searchAll.model.get(0).title, "Dune Messiah")
-        win.want("counting what it holds back", searchAll.hiddenCount, 2)
-        win.want("**and says so in words**",
-                 kindNote.text, "Showing books only · 2 results hidden.")
-        win.want("**asking every source for nothing**",
-                 backend.countOf(Msg.SearchAll), 0)
-        // The covers are the one thing it does send, and only for the rows
-        // that are still on screen: an empty or smaller batch supersedes the
-        // last one, which is what drops fetches nobody can see (Covers.js).
         win.want("covers are asked for once", backend.countOf(Msg.RequestCover), 1)
-        win.want("only for the row still showing",
-                 backend.bodyOf(Msg.RequestCover).covers.length, 1)
         win.want("which is the book's",
                  backend.bodyOf(Msg.RequestCover).covers[0].seriesId, "/book/dune-messiah")
 
         backend.forget()
         win.findChild(searchAll, "kindFilterArea-manga").clicked(null)
+        win.want("tapping Manga asks again too", backend.countOf(Msg.SearchAll), 1)
+        win.want("**naming manga this time**", backend.bodyOf(Msg.SearchAll).kind, "manga")
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [win.lanternGroup, win.orphanGroup], "sourceErrors": []})
         win.want("tapping Manga shows the other two", searchAll.model.count, 2)
         win.want("**the one that said so and the one that said nothing**",
                  searchAll.model.get(0).title + "," + searchAll.model.get(1).title,
                  "The Lantern Keeper,An Orphan")
-        win.want("holding one back", searchAll.hiddenCount, 1)
-        win.want("and still asking for nothing", backend.countOf(Msg.SearchAll), 0)
+        win.want("still saying so", kindNote.text, "Showing manga only.")
 
-        // A page that lands while a filter is on arrives filtered, rather than
-        // the filter having to be re-applied by hand after every page turn.
-        win.deliver(Msg.SearchAllResults, win.mixedReply())
-        win.want("a page that lands under a filter arrives filtered",
-                 searchAll.model.count, 2)
-        win.want("still saying so", kindNote.text, "Showing manga only · 1 result hidden.")
-
-        // A filter that hides everything is **not** a search that found
-        // nothing, and the screen must not say the backend's sentence for it:
-        // that is the one that reads as broken.
+        // A filtered search that came back with nothing is **not** the plain
+        // "nothing came back" sentence: the screen names what was searched
+        // for, which is the way out that stays on screen.
         win.findChild(searchAll, "kindFilterArea-book").clicked(null)
         win.deliver(Msg.SearchAllResults, {
-            "query": "dune", "page": 1, "totalPages": 0, "hasMore": false,
-            "groups": [win.lanternGroup, win.orphanGroup], "sourceErrors": []})
-        win.want("a page with no books in it, under Books, has no rows",
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [], "sourceErrors": []})
+        win.want("a filtered search with nothing back has no rows",
                  searchAll.model.count, 0)
         win.want("**and says it was the filter**",
                  searchAll.emptyMessage, "No books in these results.")
         win.want("with the way out still named on the screen",
-                 kindNote.text, "Showing books only · 2 results hidden.")
+                 kindNote.text, "Showing books only.")
 
-        win.deliver(Msg.SearchAllResults, {
-            "query": "nothing", "page": 1, "totalPages": 0, "hasMore": false,
-            "groups": [], "sourceErrors": []})
-        win.want("while a search that really found nothing still says that",
-                 searchAll.emptyMessage, "Nothing came back for that.")
-        win.want("and claims to be hiding nothing", searchAll.hiddenCount, 0)
-
-        win.deliver(Msg.SearchAllResults, win.mixedReply())
         backend.forget()
         win.findChild(searchAll, "kindFilterArea-all").clicked(null)
+        win.want("All asks again too", backend.countOf(Msg.SearchAll), 1)
+        win.want("**naming no kind at all**", backend.bodyOf(Msg.SearchAll).kind, "")
+
+        win.deliver(Msg.SearchAllResults, {
+            "query": "lantern", "page": 1, "totalPages": 0, "hasMore": false,
+            "groups": [], "sourceErrors": []})
+        win.want("an unfiltered search that really found nothing says that",
+                 searchAll.emptyMessage, "Nothing came back for that.")
+
+        win.deliver(Msg.SearchAllResults, win.mixedReply())
         win.want("All brings the rest back", searchAll.model.count, 3)
-        win.want("hiding nothing", searchAll.hiddenCount, 0)
         win.want("and saying nothing", kindNote.text, "")
-        win.want("having asked no source for anything, either way",
-                 backend.countOf(Msg.SearchAll), 0)
 
         // ---- and what a book opens onto --------------------------------------
         //
@@ -1582,11 +1581,12 @@ Window {
                  searchAll.model.count, 0)
         backend.forget()
         win.findChild(searchAll, "kindFilterArea-book").clicked(null)
-        win.want("a filter tapped on an empty screen shows nothing",
+        win.want("a filter tapped on an empty screen moves the filter",
+                 searchAll.kindFilter, Kinds.BOOK)
+        win.want("**without asking anyone anything**",
+                 backend.sendCount, 0)
+        win.want("rather than the answer to somebody's earlier question",
                  searchAll.model.count, 0)
-        win.want("**rather than the answer to somebody's earlier question**",
-                 searchAll.emptyMessage, "Nothing came back for that.")
-        win.want("and asks no source for one", backend.sendCount, 0)
 
         win.app.showScreen("downloaded")
 

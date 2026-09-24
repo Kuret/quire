@@ -94,34 +94,36 @@ function mark(row) {
 //
 // **It is not decoration.** A filtered screen and a search that found nothing
 // look identical otherwise, and the second one is the one people report as
-// broken. So the line is there whenever the filter is not ALL — not only when
-// something was hidden — because "Showing books only" with nothing under it is
-// the answer to "why is this empty?", and a line that appeared only sometimes
-// would be missing exactly then.
-function filterLine(filter, hidden) {
+// broken. So the line is there whenever the filter is not ALL — because
+// "Showing books only" with nothing under it is the answer to "why is this
+// empty?", and a line that appeared only sometimes would be missing exactly
+// then.
+//
+// There is no longer a count of results the filter is "holding back": the
+// filter is part of the search itself (backend/service/searchall.go), not a
+// hide applied to a page that was fetched unfiltered, so there is nothing on
+// the page in hand for a hidden count to be worked out against.
+function filterLine(filter) {
     if (filter !== MANGA && filter !== BOOK)
         return ""
-    var what = filter === BOOK ? "Showing books only" : "Showing manga only"
-    if (!hidden || hidden <= 0)
-        return what + "."
-    return what + SEPARATOR + (hidden === 1 ? "1 result hidden." : hidden + " results hidden.")
+    return filter === BOOK ? "Showing books only." : "Showing manga only."
 }
 
 // emptyLine is what an empty page of results says.
 //
-// The two emptinesses are different answers and must not share a sentence: a
-// search that came back with nothing is the backend's "nothing came back", and
-// a page whose every result the filter hid is the filter's doing and is undone
-// by tapping All. Telling the second one the first one's sentence is how a
-// working search gets reported as a broken one.
-function emptyLine(filter, total) {
-    if (!total || total <= 0)
-        return "Nothing came back for that."
+// The filter is now part of the search itself (backend/service/searchall.go):
+// a Books search that came back empty found no books, full stop — there is no
+// separate "the filter hid everything" case any more, because nothing outside
+// the chosen kind was ever asked for. The wording still names the filter when
+// one is on, because "No books in these results" answers the question a bare
+// "Nothing came back for that" would leave open: whether trying All might find
+// something.
+function emptyLine(filter) {
     if (filter === BOOK)
         return "No books in these results."
     if (filter === MANGA)
         return "No manga in these results."
-    return ""
+    return "Nothing came back for that."
 }
 
 // kindFor looks a row's kind up in a model by whichever fields identify it.

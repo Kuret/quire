@@ -188,34 +188,24 @@ function groupRow(group) {
 // different reply than the rows is a switcher offering sources for a series
 // nobody is looking at.
 //
-// `kind` is the screen's filter, and an absent one is "all" — every caller that
-// does not filter gets exactly the page it sent. **Filtering happens here, over
-// the reply already in hand, rather than as a request.** The backend merged and
-// paged this page; asking it again for a subset would spend a fan-out to every
-// configured site to hide rows that are already on the screen, and would turn a
-// filter into something that can fail (PLAN §7.4).
-//
-// The matches are indexed for *every* group, filtered out or not. They are a
-// lookup by the key of the row that was tapped, and a hidden row cannot be
-// tapped; keeping the index whole means switching the filter never has to
-// rebuild it.
-function fill(model, msg, kind) {
+// **There is no filtering here.** The kind filter is part of the request
+// (backend/service/searchall.go decides which sources are ever asked), so
+// every group in a reply already belongs on screen; asking the backend again
+// for a subset already in hand would be spending a fan-out to every configured
+// site to hide rows that are already there, and would turn a filter into
+// something that can fail (PLAN §7.4). This function used to take the
+// screen's filter and drop rows that did not match it — that machinery moved
+// to the request itself.
+function fill(model, msg) {
     model.clear()
     var groups = msg && msg.groups ? msg.groups : []
     var matches = {}
     for (var i = 0; i < groups.length; ++i) {
         var row = groupRow(groups[i])
-        if (Kinds.matches(kind, row.kind))
-            model.append(row)
+        model.append(row)
         matches[row.key] = matchesOf(groups[i])
     }
     return matches
-}
-
-// countOf is how many groups a reply held, before any filtering — the number
-// the hidden count is worked out against.
-function countOf(msg) {
-    return msg && msg.groups ? msg.groups.length : 0
 }
 
 // matchesFor reads the switcher's list back out, or an empty list for a series

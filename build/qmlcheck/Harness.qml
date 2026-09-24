@@ -203,10 +203,6 @@ Window {
     property int searchAllPageAsked: 0
     property int searchAllCoverAsks: 0
     property var searchAllCovers: []
-    // What the kind filter asked for. A count, because the property under test
-    // is that the filter already on asks for **nothing**: re-rendering a page
-    // of results is this screen's most expensive repaint.
-    property int refilterAsks: 0
 
     property int searchAllOpens: 0
     property string searchAllOpenedKey: ""
@@ -527,7 +523,6 @@ Window {
             win.searchAllCoverAsks++
             win.searchAllCovers = covers
         }
-        onRefilterRequested: win.refilterAsks++
         onOpenRequested: {
             win.searchAllOpens++
             win.searchAllOpenedKey = key
@@ -4119,7 +4114,7 @@ Window {
         // requested under that cover's own source and series — not the row's
         // sourceId/seriesId, which name the opening match and would ask the
         // wrong source's SSRF guard to fetch a URL it never served.
-        Grouping.fill(searchAllModel, {"groups": [mixedOwnerGroup], "sourceErrors": []}, Kinds.ALL)
+        Grouping.fill(searchAllModel, {"groups": [mixedOwnerGroup], "sourceErrors": []})
         saRows.forceLayout()
         win.searchAllCoverAsks = 0
         win.searchAllCovers = []
@@ -4135,7 +4130,7 @@ Window {
 
         // Restored, because everything after this in the list-view section
         // assumes the two-group page from before.
-        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []}, Kinds.ALL)
+        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []})
         saRows.forceLayout()
 
         // The thumbnail, and the placeholder for a group whose cover has not
@@ -4333,25 +4328,27 @@ Window {
 
         // **The screen has to say a filter is on.** A filtered screen and a
         // search that found nothing look identical otherwise, and the second
-        // is the one people report as broken.
-        win.want("showing everything says nothing", Kinds.filterLine(Kinds.ALL, 4), "")
-        win.want("a filter with nothing to hide still says it is on",
-                 Kinds.filterLine(Kinds.BOOK, 0), "Showing books only.")
-        win.want("and says how much it is holding back",
-                 Kinds.filterLine(Kinds.BOOK, 3), "Showing books only · 3 results hidden.")
-        win.want("one of them included",
-                 Kinds.filterLine(Kinds.MANGA, 1), "Showing manga only · 1 result hidden.")
-
-        // The two emptinesses are different answers and must not share a
-        // sentence: one is the backend's, the other is undone by tapping All.
-        win.want("a search that found nothing says so",
-                 Kinds.emptyLine(Kinds.ALL, 0), "Nothing came back for that.")
-        win.want("a page the book filter emptied says that instead",
-                 Kinds.emptyLine(Kinds.BOOK, 4), "No books in these results.")
+        // is the one people report as broken. There is no "how much it is
+        // holding back" any more: the filter is part of the search itself
+        // (backend/service/searchall.go), not a hide applied to a page that
+        // was fetched unfiltered.
+        win.want("showing everything says nothing", Kinds.filterLine(Kinds.ALL), "")
+        win.want("a filter that is on says so",
+                 Kinds.filterLine(Kinds.BOOK), "Showing books only.")
         win.want("and the manga filter its own",
-                 Kinds.emptyLine(Kinds.MANGA, 4), "No manga in these results.")
-        win.want("an empty search is still an empty search under a filter",
-                 Kinds.emptyLine(Kinds.BOOK, 0), "Nothing came back for that.")
+                 Kinds.filterLine(Kinds.MANGA), "Showing manga only.")
+
+        // The two emptinesses are different sentences: an unfiltered search
+        // that found nothing is the backend's plain answer, and a filtered
+        // one names what it was searching for — which is now always the
+        // right answer, because the search itself was already scoped to that
+        // kind (there is no separate "the filter hid it" case any more).
+        win.want("a search that found nothing says so",
+                 Kinds.emptyLine(Kinds.ALL), "Nothing came back for that.")
+        win.want("a books search that found nothing says that instead",
+                 Kinds.emptyLine(Kinds.BOOK), "No books in these results.")
+        win.want("and the manga filter its own",
+                 Kinds.emptyLine(Kinds.MANGA), "No manga in these results.")
 
         // ---- a book among the groups ---------------------------------------
 
@@ -4415,39 +4412,27 @@ Window {
         win.want("and the badge is unaffected by any of this",
                  Grouping.badgeFor(duneWithAuthors), "Book")
 
-        // Filling one page through the filter. **Nothing is re-fetched**: the
-        // groups are the ones already in hand, so a filter cannot fail and
-        // cannot cost a fan-out to every configured site (PLAN §7.4).
+        // Filling one page. **There is no filtering here any more**: the kind
+        // filter now travels with the request and decides which sources are
+        // ever asked (backend/service/searchall.go), so fill only ever shows
+        // every group a reply carries — there is nothing left on the page in
+        // hand for it to hide.
         var mixedReply = {
             "query": "dune", "page": 1, "pageSize": 6, "totalPages": 0, "hasMore": false,
             "groups": [lanternGroup, orphanGroup, duneGroup], "sourceErrors": []}
 
-        win.want("a reply says how many it held", Grouping.countOf(mixedReply), 3)
-        win.want("and no reply held none", Grouping.countOf(null), 0)
-
-        var allIndex = Grouping.fill(searchAllModel, mixedReply, Kinds.ALL)
-        win.want("All shows every group", searchAllModel.count, 3)
-        Grouping.fill(searchAllModel, mixedReply)
-        win.want("**and so does a caller that passes no filter at all**",
-                 searchAllModel.count, 3)
-        Grouping.fill(searchAllModel, mixedReply, Kinds.BOOK)
-        win.want("Books shows only the book", searchAllModel.count, 1)
-        win.want("which is the book", searchAllModel.get(0).title, "Dune Messiah")
-        var mangaIndex = Grouping.fill(searchAllModel, mixedReply, Kinds.MANGA)
-        win.want("Manga shows the other two", searchAllModel.count, 2)
-        win.want("**including the one whose kind was never sent**",
-                 searchAllModel.get(0).title, "The Lantern Keeper")
-        // The switcher's index is built for every group, hidden or not: it is
-        // a lookup by the key of a row that was tapped, and rebuilding it on
-        // every filter change would be work for a case that cannot arise.
-        win.want("the switcher's sources survive filtering",
-                 Grouping.matchesFor(mangaIndex, "dune messiah").length, 1)
-        win.want("as they do unfiltered",
+        var allIndex = Grouping.fill(searchAllModel, mixedReply)
+        win.want("fill shows every group the reply carries", searchAllModel.count, 3)
+        win.want("**including the book, whatever the mix**",
+                 searchAllModel.get(2).title, "Dune Messiah")
+        win.want("the switcher indexes every group by key",
                  Grouping.matchesFor(allIndex, "the lantern keeper").length, 2)
+        win.want("the book too",
+                 Grouping.matchesFor(allIndex, "dune messiah").length, 1)
 
         // ---- authors, rendered on the combined screen's own tiles and rows -
 
-        Grouping.fill(searchAllModel, {"groups": [duneWithAuthors, duneGroup], "sourceErrors": []}, Kinds.ALL)
+        Grouping.fill(searchAllModel, {"groups": [duneWithAuthors, duneGroup], "sourceErrors": []})
         searchAll.visible = true
         searchAll.view = "grid"
         var authorTiles = win.findChild(searchAll, "searchAllTiles")
@@ -4473,7 +4458,7 @@ Window {
 
         // A page with nothing but manga must not grow the tile at all — the
         // geometry a search for a comic sees is untouched by this feature.
-        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []}, Kinds.ALL)
+        Grouping.fill(searchAllModel, {"groups": [lanternGroup, orphanGroup], "sourceErrors": []})
         searchAll.view = "grid"
         win.findChild(authorTiles, "coverTiles").forceLayout()
         win.want("a page with no authors at all keeps the tile as it always was",
@@ -4492,9 +4477,8 @@ Window {
         // are in is the filled one and is dead to touch, so it answers "which
         // am I in?" before it is touched.
 
-        Grouping.fill(searchAllModel, mixedReply, Kinds.ALL)
+        Grouping.fill(searchAllModel, mixedReply)
         searchAll.visible = true
-        searchAll.hiddenCount = 0
         var kindAll = win.findChild(searchAll, "kindFilter-all")
         var kindManga = win.findChild(searchAll, "kindFilter-manga")
         var kindBook = win.findChild(searchAll, "kindFilter-book")
@@ -4514,31 +4498,32 @@ Window {
 
         // Tapped, not called: a case that calls showKind() directly proves the
         // function works and says nothing about whether the segment is
-        // reachable — `enabled` is exactly what it would step over.
-        win.refilterAsks = 0
+        // reachable — `enabled` is exactly what it would step over. The
+        // filter is part of the search now (ui/SearchAll.qml's showKind), so
+        // tapping it — with a searchable query already on screen — asks for
+        // the page again, from page 1, naming the kind.
+        win.searchAllAsks = 0
         kindBookArea.clicked(null)
-        win.want("tapping Books asks for the page again once", win.refilterAsks, 1)
+        win.want("tapping Books asks for the page again once", win.searchAllAsks, 1)
+        win.want("carrying the query already on screen", win.searchAllAsked, "lantern")
         win.want("and moves the filter", searchAll.kindFilter, Kinds.BOOK)
         win.want("Books is the filled one now", win.colorOf(kindBook), Style.accent)
         win.want("All is back on paper", win.colorOf(kindAll), Style.paper)
         win.want("Books is the inert one now", kindBookArea.enabled, false)
         win.want("and All is live again", kindAllArea.enabled, true)
 
-        // Asking for the filter already on re-renders nothing. The guard is
+        // Asking for the filter already on asks for nothing. The guard is
         // asserted as well as `enabled`, because the two protect against
         // different mistakes: one is a tap, the other is a caller.
-        win.refilterAsks = 0
+        win.searchAllAsks = 0
         searchAll.showKind(Kinds.BOOK)
         win.want("asking for the filter already on costs nothing",
-                 win.refilterAsks, 0)
+                 win.searchAllAsks, 0)
 
         // **The screen says it is filtering, in words.** Without this a
         // filtered screen and a broken search are the same picture.
         win.want("a filter that is on says so", kindNote.text, "Showing books only.")
         win.want("and it is actually on screen", kindNote.visible, true)
-        searchAll.hiddenCount = 2
-        win.want("with how much it is holding back",
-                 kindNote.text, "Showing books only · 2 results hidden.")
         // In ink, like every other word in the app: the colour on this control
         // is the fill behind the segment and nothing else (ui/Style.js).
         win.want("said in ink, not in colour", win.colorOf(kindNote), Style.ink)
@@ -4562,12 +4547,15 @@ Window {
         win.want("no colour on the border of the filled one",
                  String(kindBook.border.color).toUpperCase(), Style.rule)
 
-        // A page the filter emptied is not a search that found nothing: the
-        // status text says which, and the strip above still says the filter is
-        // on, so the way out is on the screen.
-        searchAll.emptyMessage = Kinds.emptyLine(searchAll.kindFilter, 3)
-        Grouping.fill(searchAllModel, {"groups": [lanternGroup]}, Kinds.BOOK)
-        win.want("a page the filter emptied has no rows", searchAll.rowCount, 0)
+        // A reply a Books search found nothing in is not a search that found
+        // nothing at all: the status text names the filter, and the strip
+        // above still says it is on, so the way out is on the screen. The
+        // backend already scoped the request to book sources — this reply is
+        // exactly what it would send back for that.
+        searchAll.busy = false
+        searchAll.emptyMessage = Kinds.emptyLine(searchAll.kindFilter)
+        Grouping.fill(searchAllModel, {"groups": []})
+        win.want("a page the filter found nothing on has no rows", searchAll.rowCount, 0)
         win.want("and says it was the filter",
                  win.findChild(searchAll, "searchAllStatus").text,
                  "No books in these results.")
@@ -4582,7 +4570,6 @@ Window {
         searchAll.reset()
         win.want("a fresh screen is back to showing everything",
                  searchAll.kindFilter, Kinds.ALL)
-        win.want("hiding nothing", searchAll.hiddenCount, 0)
         win.want("and saying nothing about a filter", kindNote.text, "")
         win.want("All is the filled one again", win.colorOf(kindAll), Style.accent)
 
