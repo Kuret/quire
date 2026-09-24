@@ -165,11 +165,21 @@ func (p *seriesPager) slice(page, size int) pageResult {
 	return res
 }
 
-// pagerKey identifies the listing a pager holds. The empty query is the site's
-// own listing, which is what MessageBrowse asks for.
+// pagerKey identifies the listing a pager holds. The empty query is the
+// site's own default listing, which is what MessageBrowse asks for.
+//
+// listing is the theme.Listing ID the empty-query case is paging — "" and
+// "latest" both mean the default and are normalised to "" (runSearch does
+// that), so Browse and a Search naming "latest" share the one cache. It is
+// part of the key, not a detail alongside it, precisely so that switching
+// listings on the same source never serves the old listing's cached page: a
+// pager keyed only on (source, query) would hand "Popular" page 2 the tail
+// end of "Top rated"'s cache because both are empty-query listings on the
+// same source.
 type pagerKey struct {
 	sourceID string
 	query    string
+	listing  string
 }
 
 // pagerFor returns the pager for this listing, replacing the one held if the
