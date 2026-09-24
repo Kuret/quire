@@ -26,6 +26,7 @@ import (
 	"github.com/rickl/quire/backend/imageproc"
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/probe/prober"
+	"github.com/rickl/quire/backend/seriescache"
 	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
@@ -71,6 +72,13 @@ type Options struct {
 	// equivalent of LibraryStore. Nil disables "Saved in Quire" the same way
 	// a nil LibraryStore disables the reMarkable library.
 	ShelfStore *shelf.Store
+
+	// SeriesCache is PLAN §12.12's offline-first series detail cache: the last
+	// successful live fetch of each series' chapter list, served immediately
+	// while a fresh fetch runs behind it. Nil disables the cache — a series
+	// detail request always waits on the network, exactly as it did before
+	// this existed.
+	SeriesCache *seriescache.Store
 
 	// TryCache is the Try reader's page cache (milestone 1): read a chapter
 	// without downloading it and without a library entry. Nil disables Try —
@@ -130,6 +138,10 @@ type Service struct {
 	// what is there. See Options.SavedDir.
 	savedDir   string
 	shelfStore *shelf.Store
+
+	// seriesCache is PLAN §12.12's offline-first series detail cache; nil
+	// disables it. See Options.SeriesCache.
+	seriesCache *seriescache.Store
 
 	previousSessionCrashed bool
 
@@ -276,8 +288,9 @@ func New(opts Options) *Service {
 		tryCache:        opts.TryCache,
 		bookCache:       opts.BookCache,
 
-		savedDir:   opts.SavedDir,
-		shelfStore: opts.ShelfStore,
+		savedDir:    opts.SavedDir,
+		shelfStore:  opts.ShelfStore,
+		seriesCache: opts.SeriesCache,
 
 		uploadBudgetBytes: opts.UploadBudgetBytes,
 
@@ -388,6 +401,15 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		// is no library document to keep for it, so nothing is worth leaving
 		// behind here.
 		s.deleteSavedChaptersForSource(req.SourceID)
+		// Its cached chapter lists point at a theme that no longer exists —
+		// PLAN §12.12 ties the cache's lifetime to the same deletions that
+		// already remove saved chapters.
+		if s.seriesCache != nil {
+			if err := s.seriesCache.RemoveSource(req.SourceID); err != nil {
+				s.log.Warn("could not drop the series cache for a removed source",
+					"source", req.SourceID, "err", err)
+			}
+		}
 		// The thumbnails are ours and are worthless now. Downloaded volumes are
 		// the user's documents by this point and are left alone.
 		if s.covers != nil {

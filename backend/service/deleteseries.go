@@ -194,6 +194,16 @@ func (s *Service) deleteSeries(ctx context.Context, out Sender, req deleteSeries
 	// to be gone from Quire's downloads.
 	s.deleteSavedChaptersFor(req.SourceID, req.SeriesID)
 
+	// And the cached chapter list, for the same reason (PLAN §12.12): the
+	// series is gone from Quire's downloads, and a stale offline reply for it
+	// is worth nothing once nothing on the tablet backs it up any more.
+	if s.seriesCache != nil {
+		if err := s.seriesCache.Remove(req.SourceID, req.SeriesID); err != nil {
+			s.log.Warn("could not drop the series cache for a deleted series",
+				"source", req.SourceID, "series", req.SeriesID, "err", err)
+		}
+	}
+
 	// The list first, whatever else happened: the rows on screen are now wrong
 	// about several series at once — a row can lose a download, lose all of
 	// them, or be unaffected — and the backend is the side that works that out

@@ -36,6 +36,7 @@ import (
 	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/logging"
 	"github.com/rickl/quire/backend/service"
+	"github.com/rickl/quire/backend/seriescache"
 	"github.com/rickl/quire/backend/shelf"
 	"github.com/rickl/quire/backend/state"
 	"github.com/rickl/quire/backend/theme"
@@ -616,6 +617,15 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 	}
 	log.Info("shelf store opened", "path", shelfStore.Path(), "chapters", len(shelfStore.List()))
 
+	// The series detail cache (PLAN §12.12): opened as part of the data dir
+	// rather than the state dir, the same as downloads and covers, because it
+	// is a cache and not something an export/import needs to carry (see
+	// backend/state/covers.go's own file comment for the same reasoning).
+	seriesCache, err := seriescache.OpenStore(filepath.Join(dir, "seriescache"))
+	if err != nil {
+		return nil, nil, err
+	}
+
 	lib := library.New(library.Options{Log: log})
 
 	// Quire's own book reader (books-contract.md §B): a mutool executable
@@ -679,6 +689,8 @@ func newService(log *slog.Logger) (*service.Service, *state.Session, error) {
 		// indexed by ShelfStore the way LibraryStore indexes the library.
 		SavedDir:   filepath.Join(dir, "saved"),
 		ShelfStore: shelfStore,
+
+		SeriesCache: seriesCache,
 
 		BookCache: bookCache,
 
