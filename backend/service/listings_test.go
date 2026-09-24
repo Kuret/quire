@@ -83,6 +83,16 @@ func (f *fakeLister) List(_ context.Context, _ *theme.Source, listingID string, 
 	return f.pages[fmt.Sprintf("%s:%d", listingID, page)], nil
 }
 
+// fakeDefaultLister is a fakeLister that also implements theme.DefaultLister,
+// for asserting the service's relabel-and-deduplicate rule (see
+// backend/theme/listing.go's DefaultLister doc comment).
+type fakeDefaultLister struct {
+	fakeLister
+	defaultListing string
+}
+
+func (f *fakeDefaultLister) DefaultListing() string { return f.defaultListing }
+
 // fakeNonLister is an ordinary theme.Theme with no Lister at all — the other
 // half of "a non-Lister theme gets exactly [latest]".
 type fakeNonLister struct{ calls []string }
@@ -333,5 +343,63 @@ func TestListingLatestMatchesBrowse(t *testing.T) {
 		if c != `search:"":1` && c != `search:"":2` {
 			t.Fatalf("calls = %v, want only Search(\"\", ...) — List() must never be called for the default listing", th.calls)
 		}
+	}
+}
+
+// TestDefaultListerRelabelsLatestAndDropsTheDuplicate pins
+// backend/theme/listing.go's DefaultLister contract: a theme whose Search("")
+// is genuinely e.g. "popular" order relabels the always-first "latest" entry
+// with that listing's own well-known wording, keeps its id "latest" (so
+// paging/Search("") are unchanged), and drops the theme's own entry for that
+// same ID so it is never offered twice under two names.
+func TestDefaultListerRelabelsLatestAndDropsTheDuplicate(t *testing.T) {
+	th := &fakeDefaultLister{
+		fakeLister: fakeLister{listings: []theme.Listing{
+			{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+			{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		}},
+		defaultListing: theme.ListingPopular,
+	}
+	svc, sourceID := newListingsService(t, th)
+	got := fetchListingsReply(t, svc, sourceID)
+
+	var ids []string
+	for _, l := range got.Listings {
+		ids = append(ids, l.ID)
+	}
+	wantIDs := []string{theme.ListingLatest, theme.ListingNew}
+	if fmt.Sprint(ids) != fmt.Sprint(wantIDs) {
+		t.Fatalf("ids = %v, want %v — popular must not appear a second time under its own id", ids, wantIDs)
+	}
+	if got.Listings[0].ID != theme.ListingLatest {
+		t.Fatalf("first entry id = %q, want %q so paging/Search(\"\") stay unchanged", got.Listings[0].ID, theme.ListingLatest)
+	}
+	if want := theme.ListingLabel(theme.ListingPopular); got.Listings[0].Label != want {
+		t.Errorf("first entry label = %q, want %q (DefaultListing's own label)", got.Listings[0].Label, want)
+	}
+}
+
+// TestDefaultListerIgnoredWhenLatest is the other half: DefaultListing
+// returning "" or ListingLatest itself changes nothing — same as a theme that
+// does not implement DefaultLister at all.
+func TestDefaultListerIgnoredWhenLatest(t *testing.T) {
+	th := &fakeDefaultLister{
+		fakeLister:     fakeLister{listings: []theme.Listing{{ID: theme.ListingPopular, Group: theme.ListingGroupSort}}},
+		defaultListing: theme.ListingLatest,
+	}
+	svc, sourceID := newListingsService(t, th)
+	got := fetchListingsReply(t, svc, sourceID)
+
+	if got.Listings[0].Label != theme.ListingLabel(theme.ListingLatest) {
+		t.Errorf("label = %q, want the ordinary \"latest\" wording unchanged", got.Listings[0].Label)
+	}
+	found := false
+	for _, l := range got.Listings {
+		if l.ID == theme.ListingPopular {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("listings = %+v, want popular still offered on its own id when DefaultListing is latest", got.Listings)
 	}
 }

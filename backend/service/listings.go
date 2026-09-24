@@ -52,6 +52,21 @@ func fetchListings(ctx context.Context, th theme.Theme, src *theme.Source) ([]li
 	}
 
 	seen := map[string]bool{theme.ListingLatest: true}
+
+	// theme.DefaultLister: Search(q="") is not genuinely latest-updates order
+	// for this theme, but equals one of its own named listings. The "latest"
+	// entry keeps its id (paging/Search("") are unchanged) but borrows that
+	// listing's label, and the theme's own entry for that ID is dropped below
+	// (seen) so the same list is not offered twice under two names.
+	if dl, ok := th.(theme.DefaultLister); ok {
+		if id := dl.DefaultListing(); id != "" && id != theme.ListingLatest {
+			if label := theme.ListingLabel(id); label != "" {
+				result[0].Label = label
+			}
+			seen[id] = true
+		}
+	}
+
 	var sortG, statusG, genreG []listingView
 	for _, l := range named {
 		if seen[l.ID] {
