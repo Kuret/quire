@@ -33,6 +33,17 @@ func TestListingsNamesSortStatusAndActiveGenres(t *testing.T) {
 	}
 }
 
+// TestDefaultListingIsPopular pins the DefaultLister fact this file's own doc
+// comment documents: Search("") sends no sort parameter and already matches
+// sort=popular, so the browse screen's always-first entry should say
+// "Popular", not "Latest updates".
+func TestDefaultListingIsPopular(t *testing.T) {
+	th := globalcomix.NewWithClock(nil, clock)
+	if got := th.DefaultListing(); got != theme.ListingPopular {
+		t.Fatalf("DefaultListing() = %q, want %q", got, theme.ListingPopular)
+	}
+}
+
 func TestListingLatestDelegatesToEmptyQuerySearch(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /v1/search/query": {File: "search.json"},

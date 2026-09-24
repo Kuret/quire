@@ -57,6 +57,8 @@ import (
 // be exactly the false claim PLAN §2 rules out. Lister's own doc comment
 // allows the well-known ID to be omitted, and List(ListingLatest) still
 // delegates to Search("") below for API callers that ask for it directly.
+// theme.DefaultLister (below) is how the browse screen's always-first entry
+// gets the honest label "Popular" instead of "Latest updates" for it.
 //
 // # Genres are the one thing fetched, not hard-coded
 //
@@ -84,6 +86,15 @@ const (
 // value on every List(ListingCompleted) call would cost a request for
 // something not expected to change.
 const completedStatusID = "3"
+
+var _ theme.DefaultLister = (*Theme)(nil)
+
+// DefaultListing implements theme.DefaultLister: Search("") sends no sort
+// parameter and, confirmed live (see this file's doc comment), already
+// matches sort=popular — not ListingLatest's "most recently updated"
+// meaning — so the browse screen's always-first entry should say "Popular",
+// not "Latest updates".
+func (t *Theme) DefaultListing() string { return theme.ListingPopular }
 
 // Listings implements theme.Lister.
 func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
