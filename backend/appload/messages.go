@@ -73,8 +73,8 @@ const (
 	// proportion to the cost of allowing an edit.
 	MessageRenameSource MessageType = 19
 
-	// MessageSearchAll is UI→BE, JSON {query, page, pageSize}: one query put to
-	// every enabled source at once.
+	// MessageSearchAll is UI→BE, JSON {query, page, pageSize, kind}: one query
+	// put to every enabled source at once.
 	//
 	// It is a separate message rather than MessageSearch with the sourceId
 	// left out, because almost nothing about it is the same: the paging is
@@ -82,6 +82,14 @@ const (
 	// source failing is a partial answer rather than an error. Overloading
 	// MessageSearch would have meant a reply whose shape depended on a field
 	// being absent.
+	//
+	// `kind` is "" (every kind), "book" or "manga" — the combined search
+	// screen's filter, echoed by kind.go's own vocabulary. It decides which
+	// sources are ever asked (backend/service/searchall.go's
+	// newSearchAllPager), not which rows of an unfiltered reply are shown: a
+	// Books search never sends a request to a manga site, and page 1 of it is
+	// the first N book groups rather than a page a client-side filter has
+	// hollowed out.
 	MessageSearchAll MessageType = 26
 	// MessageSearchAllResults is BE→UI, JSON {query, page, pageSize,
 	// totalPages, hasMore, groups, sourceErrors}.
@@ -477,8 +485,9 @@ const (
 	MessageListPrivateSources MessageType = 80
 	MessagePrivateSources     MessageType = 81
 
-	// MessageSearchAllPrivate is UI→BE, JSON {query, page, pageSize}: the
-	// private list's own combined search. It is a distinct message rather than
+	// MessageSearchAllPrivate is UI→BE, JSON {query, page, pageSize, kind}: the
+	// private list's own combined search — `kind` is MessageSearchAll's own
+	// filter, unchanged. It is a distinct message rather than
 	// a flag on MessageSearchAll so that "which sources this touches" is
 	// decided by which message was sent, not by a field a bug could leave at
 	// its zero value — a boolean that defaults to "search everything" would

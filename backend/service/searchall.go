@@ -545,6 +545,14 @@ func (p *searchAllPager) slice(groups []searchAllGroup, page, size int) searchAl
 type searchAllKey struct {
 	query   string
 	private bool
+
+	// kind is "" (every kind), "book" or "manga" — the filter chosen on the
+	// combined search screen. It is part of the key for the same reason scope
+	// is: choosing a filter is exactly like typing a different query, a cache
+	// miss that rebuilds the source list from scratch, because the list of
+	// sources a filtered search may even ask is different from the
+	// unfiltered one (newSearchAllPager).
+	kind string
 }
 
 // searchAllPagerFor returns the pager for this query and scope, building it —
@@ -555,14 +563,14 @@ type searchAllKey struct {
 // typed is a cache nobody asked for. It shares pagerMu with the single-source
 // pager so that dropPagers retires both, which is what makes a removed or
 // re-probed source invalidate a combined listing too.
-func (s *Service) searchAllPagerFor(query string, private bool) *searchAllPager {
-	key := searchAllKey{query: query, private: private}
+func (s *Service) searchAllPagerFor(query string, private bool, kind string) *searchAllPager {
+	key := searchAllKey{query: query, private: private, kind: kind}
 	s.pagerMu.Lock()
 	defer s.pagerMu.Unlock()
 	if s.searchAllPagerCur != nil && s.searchAllQuery == key {
 		return s.searchAllPagerCur
 	}
-	p := s.newSearchAllPager(query, private)
+	p := s.newSearchAllPager(query, private, kind)
 	s.searchAllPagerCur, s.searchAllQuery = p, key
 	return p
 }
@@ -570,7 +578,8 @@ func (s *Service) searchAllPagerFor(query string, private bool) *searchAllPager 
 // newSearchAllPager snapshots the enabled sources whose Private flag matches
 // wantPrivate, in the user's order, and binds each to its theme. A source
 // whose theme is gone is recorded as a failure rather than dropped: a silently
-// absent site is indistinguishable from a site with no results for this query.
+// absent site is indistinguishable from a site with no results for this query
+// — **when kind is ""**. See below for a filtered search, which is different.
 //
 // **This is the combined search's partition point**, and it is the one that
 // matters most: a source excluded here is never bound to a theme and never
@@ -579,44 +588,89 @@ func (s *Service) searchAllPagerFor(query string, private bool) *searchAllPager 
 // it — cannot happen no matter what the reply to the frontend does or does
 // not filter. See buildSourceViews (service.go) for the enumeration's other
 // half, driven by the same theme.Source.IsPrivate.
-func (s *Service) newSearchAllPager(query string, wantPrivate bool) *searchAllPager {
+//
+// **It is also the kind filter's partition point.** kind is "", "book" or
+// "manga" — the combined search screen's filter — and a source whose
+// kindOf(theme) does not match is left out of p.sources altogether: a Books
+// search never asks a manga site anything, page 1 of it is the first N book
+// groups rather than a page hollowed out by a client-side hide, and paging
+// through it costs exactly as many rounds as there are book sources, not
+// every source in the scope.
+//
+// A source whose theme failed to bind is a different case for a filtered
+// search than for an unfiltered one. Unfiltered, its kind does not matter —
+// every source is being asked regardless — so it is kept as a recorded
+// failure exactly as before. Filtered, its kind is the very thing that failed
+// to bind: there is no honest way to say it belongs to "book" or to "manga",
+// and it was never going to be asked either way, so it is left out with no
+// failure recorded — reporting one would read as "this book source did not
+// answer", which is not a claim this code can back up.
+func (s *Service) newSearchAllPager(query string, wantPrivate bool, kind string) *searchAllPager {
 	p := &searchAllPager{}
 	for _, src := range s.store.List() {
 		if !src.IsEnabled() || src.IsPrivate() != wantPrivate {
 			continue
 		}
-		st := &searchAllSourceState{
+		th, bound, err := s.themeFor(src.ID)
+		if err != nil {
+			if kind != "" {
+				continue
+			}
+			p.sources = append(p.sources, &searchAllSourceState{
+				id:             src.ID,
+				name:           src.Name,
+				order:          len(p.sources),
+				seen:           map[string]bool{},
+				nextSourcePage: 1,
+				failure:        err.Error(),
+			})
+			continue
+		}
+		srcKind := kindOf(th)
+		if kind != "" && srcKind != kind {
+			continue
+		}
+		p.sources = append(p.sources, &searchAllSourceState{
 			id:             src.ID,
 			name:           src.Name,
 			order:          len(p.sources),
+			kind:           srcKind,
 			seen:           map[string]bool{},
 			nextSourcePage: 1,
-		}
-		th, bound, err := s.themeFor(src.ID)
-		if err != nil {
-			st.failure = err.Error()
-		} else {
-			st.kind = kindOf(th)
-			st.fetch = func(ctx context.Context, sourcePage int) ([]theme.SeriesStub, error) {
+			fetch: func(ctx context.Context, sourcePage int) ([]theme.SeriesStub, error) {
 				return th.Search(ctx, bound, query, sourcePage)
-			}
-		}
-		p.sources = append(p.sources, st)
+			},
+		})
 	}
 	return p
 }
 
+// searchAllKinds is the vocabulary a kind filter may name — the same two
+// kind.go already uses. Anything else, including a value nothing set, is
+// normalised to "" (every kind): a filter that somehow went wrong should show
+// too much rather than nothing, the same fail-open rule Kinds.js keeps on the
+// frontend's own copy of this check.
+func normaliseSearchKind(kind string) string {
+	if kind == kindBook || kind == kindManga {
+		return kind
+	}
+	return ""
+}
+
 // runSearchAll answers MessageSearchAll (private=false) and MessageSearchAllPrivate
-// (private=true): one query, every source in that scope, one grouped and
-// paged reply. See newSearchAllPager for where the scope actually excludes a
-// source's site from being asked anything at all.
-func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, page, pageSize int, private bool) {
+// (private=true): one query, every source in that scope and of that kind, one
+// grouped and paged reply. See newSearchAllPager for where the scope and the
+// kind filter actually exclude a source's site from being asked anything at
+// all — kind is not applied afterwards to the reply, it decides which sources
+// are ever fetched.
+func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, page, pageSize int, private bool, kind string) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 {
 		pageSize = defaultPageSize
 	}
+	kind = normaliseSearchKind(kind)
 	// Nothing is sent for a cancelled request. The frontend cancels when the
 	// user has moved on, so the reply would land on a screen showing something
 	// else — and the error path would turn a deliberate cancel into a banner.
@@ -624,7 +678,7 @@ func (s *Service) runSearchAll(ctx context.Context, out Sender, query string, pa
 		return
 	}
 
-	pager := s.searchAllPagerFor(query, private)
+	pager := s.searchAllPagerFor(query, private, kind)
 	// Collected here and written once per source below, rather than a write per
 	// stub: a combined search touches every enabled source and this callback
 	// runs for every row of every one of them.

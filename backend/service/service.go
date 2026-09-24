@@ -423,12 +423,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			Query    string `json:"query"`
 			Page     int    `json:"page"`
 			PageSize int    `json:"pageSize"`
+			Kind     string `json:"kind"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		s.goBackground(ctx, func(ctx context.Context) {
-			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, false)
+			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, false, req.Kind)
 		})
 		return true, nil
 
@@ -437,12 +438,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			Query    string `json:"query"`
 			Page     int    `json:"page"`
 			PageSize int    `json:"pageSize"`
+			Kind     string `json:"kind"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		s.goBackground(ctx, func(ctx context.Context) {
-			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, true)
+			s.runSearchAll(ctx, out, req.Query, req.Page, req.PageSize, true, req.Kind)
 		})
 		return true, nil
 
