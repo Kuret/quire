@@ -42,6 +42,16 @@ Item {
     signal previousRequested()
     signal nextRequested()
 
+    // Opt-in, so every screen but the one that asks for it is unchanged: when
+    // true, tapping the "Page x of y" label emits jumpRequested() instead of
+    // doing nothing. What answering that means — a panel, a keyboard, a jump
+    // to a specific chapter — is entirely the caller's (ChapterList, for a
+    // series with more pages than Previous/Next makes practical). The label's
+    // own text is untouched either way; only its tap target gains a meaning.
+    property bool jumpable: false
+
+    signal jumpRequested()
+
     height: Style.rowHeight
 
     // One page and nothing beyond it needs no control at all. The space is
@@ -120,6 +130,17 @@ Item {
         // on the colour; the mark above is what makes it findable between two
         // black buttons, which is the job the missing scrollbar left behind.
         color: Style.ink
+    }
+
+    // The label's own tap target. It only ever covers the label's own box —
+    // not the gap either side of it — so it cannot be reached by a tap meant
+    // for Previous or Next.
+    MouseArea {
+        id: labelArea
+        objectName: "pagerLabelArea"
+        anchors.fill: pagerLabel
+        enabled: bar.jumpable
+        onClicked: bar.jumpRequested()
     }
 
     Rectangle {
