@@ -1058,6 +1058,27 @@ Window {
         win.want("one row per listing: two sort, one status, two genres",
                  entries.length, 5)
 
+        // Columns follow the longest label in this source's list, one to
+        // four. The longest real genre name seen (18 characters, "double
+        // penetration") must fit whole; a label far longer than any real one
+        // must drop the count rather than clip.
+        var pickerColumnItem = win.findChild(seriesGrid, "listingPickerColumn")
+        win.want("short labels lay out in four columns", pickerColumnItem.columns, 4)
+        win.want("the listing on screen is marked",
+                 entries.filter(function (e) { return Qt.colorEqual(e.color, Style.rule) }).length, 1)
+        var shortListings = seriesGrid.listings
+        seriesGrid.applyListings(shortListings.concat([
+            {"id": "genre:dp", "label": "double penetration", "group": "genre"}]))
+        win.want("the longest real genre name fits whole in its cell",
+                 pickerColumnItem.cellWidth >= pickerColumnItem.longestLabel + pickerColumnItem.cellPadding, true)
+        seriesGrid.applyListings(shortListings.concat([
+            {"id": "genre:x", "label": "An Implausibly Long Genre Name For Testing", "group": "genre"}]))
+        win.want("a far longer label drops the column count",
+                 pickerColumnItem.columns < 4 && pickerColumnItem.columns >= 1, true)
+        win.want("and still fits whole in its cell",
+                 pickerColumnItem.cellWidth >= pickerColumnItem.longestLabel + pickerColumnItem.cellPadding, true)
+        seriesGrid.applyListings(shortListings)
+
         // Choosing "Completed" (status group) browses it and closes the
         // picker — through the same browseRequested signal Clear and the old
         // "Latest" tap already used.

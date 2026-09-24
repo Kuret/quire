@@ -642,10 +642,34 @@ Item {
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
+                // As many columns as the longest label in this source's list
+                // allows, from one to four: real genre lists top out around
+                // 18 characters ("double penetration", "Sexual violence") and
+                // most manga sites around 13 ("Psychological"), so a fixed
+                // count would either waste the panel or clip a long name.
+                FontMetrics {
+                    id: pickerMetrics
+                    font.pointSize: Style.bodySize
+                }
+
                 Column {
                     id: pickerColumn
+                    objectName: "listingPickerColumn"
                     width: pickerFlick.width
                     spacing: Style.gap
+
+                    readonly property int cellPadding: Style.gap * 2
+                    readonly property real longestLabel: {
+                        var widest = 0
+                        var groups = screen.listingGroups
+                        for (var g = 0; g < groups.length; g++)
+                            for (var e = 0; e < groups[g].entries.length; e++)
+                                widest = Math.max(widest, pickerMetrics.advanceWidth(groups[g].entries[e].label))
+                        return widest
+                    }
+                    readonly property int columns: Math.max(1, Math.min(4,
+                        Math.floor((width + Style.gap) / (longestLabel + cellPadding + Style.gap))))
+                    readonly property real cellWidth: (width - (columns - 1) * Style.gap) / columns
 
                     Repeater {
                         model: screen.listingGroups
@@ -659,36 +683,45 @@ Item {
                                 text: modelData.heading
                             }
 
-                            Repeater {
-                                model: modelData.entries
-                                delegate: Rectangle {
-                                    objectName: "listingPickerEntry"
-                                    width: pickerColumn.width
-                                    height: Style.rowHeight
-                                    color: entryArea.pressed ? Style.pressed : Style.paper
+                            Grid {
+                                columns: pickerColumn.columns
+                                columnSpacing: Style.gap
 
-                                    Text {
-                                        anchors {
-                                            left: parent.left; leftMargin: Style.gap
-                                            right: parent.right; rightMargin: Style.gap
-                                            verticalCenter: parent.verticalCenter
+                                Repeater {
+                                    model: modelData.entries
+                                    delegate: Rectangle {
+                                        objectName: "listingPickerEntry"
+                                        width: pickerColumn.cellWidth
+                                        height: Style.rowHeight
+                                        // The listing on screen now is marked, so
+                                        // the picker also answers "what am I
+                                        // looking at?".
+                                        color: entryArea.pressed ? Style.pressed
+                                               : (modelData.id === screen.currentListingId ? Style.rule : Style.paper)
+
+                                        Text {
+                                            anchors {
+                                                left: parent.left; leftMargin: Style.gap
+                                                right: parent.right; rightMargin: Style.gap
+                                                verticalCenter: parent.verticalCenter
+                                            }
+                                            elide: Text.ElideRight
+                                            text: modelData.label
+                                            font.pointSize: Style.bodySize
+                                            color: Style.ink
                                         }
-                                        elide: Text.ElideRight
-                                        text: modelData.label
-                                        font.pointSize: Style.bodySize
-                                        color: Style.ink
-                                    }
 
-                                    MouseArea {
-                                        id: entryArea
-                                        anchors.fill: parent
-                                        onClicked: screen.chooseListing(modelData.id, modelData.label)
-                                    }
+                                        MouseArea {
+                                            id: entryArea
+                                            anchors.fill: parent
+                                            onClicked: screen.chooseListing(modelData.id, modelData.label)
+                                        }
 
-                                    Rectangle {
-                                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                                        height: Style.hairline
-                                        color: Style.rule
+                                        Rectangle {
+                                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                            height: Style.hairline
+                                            color: Style.rule
+                                        }
                                     }
                                 }
                             }
