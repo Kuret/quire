@@ -308,6 +308,19 @@ type searchEntry struct {
 
 // Search implements theme.Theme.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
+	return t.searchComics(ctx, s, page, func(qs url.Values) {
+		if q = strings.TrimSpace(q); q != "" {
+			qs.Set("q", q)
+		}
+	})
+}
+
+// searchComics is the shared body of Search and every Lister.List call:
+// build the query, ask GET /api/search, and decode+filter the response into
+// stubs. The only thing that varies between "search for a title" and "browse
+// a listing" is which extra parameters go on the request — a query, an
+// order_by, a genre, a status — so that is the one thing callers supply.
+func (t *Theme) searchComics(ctx context.Context, s *theme.Source, page int, apply func(url.Values)) ([]theme.SeriesStub, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -317,14 +330,14 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	}
 
 	qs := url.Values{}
-	if q = strings.TrimSpace(q); q != "" {
-		qs.Set("q", q)
-	}
 	// Comics only. Without it the endpoint also answers with people and
 	// groups, which are not series and have no chapters.
 	qs.Set("type", "comic")
 	if page > 1 {
 		qs.Set("page", strconv.Itoa(page))
+	}
+	if apply != nil {
+		apply(qs)
 	}
 
 	path := searchPath + "?" + qs.Encode()

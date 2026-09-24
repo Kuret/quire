@@ -1,0 +1,19 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "The same payload as metadata.json, except 'genres' arrives as the",
+    "keyed-object shape shapes.go's list[T] exists for (see its own doc",
+    "comment): a PHP collection serialised once its keys stop being a",
+    "0-based run. Only one Genre-group entry here, so the object has one",
+    "key — exactly the case that first broke md_titles."
+  ],
+  "genres": {
+    "1": { "name": "Romance", "slug": "romance", "group": "Genre" }
+  },
+  "tags": [],
+  "demographics": [],
+  "created_ranges": [],
+  "comic_type": [],
+  "comic_status": []
+}

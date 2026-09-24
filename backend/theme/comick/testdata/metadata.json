@@ -1,0 +1,29 @@
+{
+  "__comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+
+    "Reproduces the shape GET /api/metadata answers (confirmed live",
+    "2026-09-24): an object carrying several facet arrays, of which only",
+    "'genres' is read. Real entries carry an id and a comic_count this theme",
+    "does not use; kept out because a field we never read is a field we",
+    "cannot be wrong about.",
+
+    "Deliberate variations exercised by the test:",
+    "  - two entries have group 'Genre' and must survive",
+    "  - one has group 'Theme' and one 'Format', and both must be dropped —",
+    "    Listings() offers only the facet the site itself calls a genre",
+    "  - the genres arrive out of alphabetical order, so the test also pins",
+    "    that Listings() sorts them rather than trusting the server's order"
+  ],
+  "genres": [
+    { "name": "Sci-fi", "slug": "sci-fi", "group": "Genre" },
+    { "name": "Romance", "slug": "romance", "group": "Genre" },
+    { "name": "Isekai", "slug": "isekai", "group": "Theme" },
+    { "name": "Oneshot", "slug": "oneshot", "group": "Format" }
+  ],
+  "tags": [],
+  "demographics": [],
+  "created_ranges": [],
+  "comic_type": [],
+  "comic_status": []
+}
