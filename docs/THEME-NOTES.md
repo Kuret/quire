@@ -1897,7 +1897,8 @@ same reason an unknown override is):
 `seriesPath`, `seriesTitle`, `seriesCover`, `seriesDescription`,
 `seriesGenres`, `seriesStatus`, `chapterItem`, `chapterLink`, `chapterTitle`,
 `chapterDate`, `pageImage`, `listingPopular`, `listingNew`, `listingRating`,
-`listingCompleted`, `genreListPath`, `genreLinkSelector`, `genrePath`.
+`listingCompleted`, `genreListPath`, `genreLinkSelector`, `genreLabelSelector`,
+`genrePath`.
 
 `searchPath` and `seriesPath` are URL templates rather than selectors:
 `{query}` (URL-escaped), `{page}`, `{id}`.
@@ -1911,6 +1912,10 @@ Genres need three keys together: `genreListPath` (the site's genre index,
 fetched once — the caller caches it), `genreLinkSelector` (each genre's
 anchor; its text is the label shown, the last path segment of its href is
 the slug used as the genre's own ID) and `genrePath` (`{genre}`, `{page}`).
+An optional fourth, `genreLabelSelector`, picks the element inside each link
+whose text is the label, for an index that also puts a count in the link:
+`<a><span>anal</span><span class="count">11</span></a>` reads as "anal11"
+without it, and `span:not(.count)` fixes it.
 Only the listings a source actually configured are offered — this is a
 closed vocabulary, not something every generic source gets by default — and
 an unconfigured or unrecognised listing ID is always an error from `List`,

@@ -154,6 +154,12 @@ const (
 	// GenrePath is a URL template for one genre's listing: {genre} (the slug
 	// GenreLinkSelector read from the href) and {page}.
 	GenrePath = "genrePath"
+	// GenreLabelSelector, optional, selects the element inside each genre
+	// link whose text is the label, for a site whose link also carries other
+	// text: a tag index that puts the post count in a second span
+	// (<a><span>anal</span><span class="count">11</span></a>) otherwise reads
+	// as "anal11". Unset, the whole link's text is the label.
+	GenreLabelSelector = "genreLabelSelector"
 )
 
 // maxGenres caps how many genres a source's genre list page can offer — "a
@@ -167,7 +173,7 @@ const maxGenres = 100
 var knownSelectors = []string{
 	BrowsePath,
 	ChapterDate, ChapterItem, ChapterLink, ChapterTitle,
-	GenreLinkSelector, GenreListPath, GenrePath,
+	GenreLabelSelector, GenreLinkSelector, GenreListPath, GenrePath,
 	ListingCompleted, ListingNew, ListingPopular, ListingRating,
 	PageImage,
 	SearchCover, SearchItem, SearchLink, SearchPath, SearchTitle,
@@ -457,6 +463,9 @@ func (t *Theme) fetchGenres(ctx context.Context, s *theme.Source) ([]theme.Listi
 			return true
 		}
 		label := theme.Text(link)
+		if ls := sel[GenreLabelSelector]; ls != "" {
+			label = theme.Text(link.Find(ls).First())
+		}
 		if label == "" {
 			label = slug
 		}

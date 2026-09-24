@@ -235,3 +235,45 @@ func TestListUnknownOrUnconfiguredListingErrors(t *testing.T) {
 		}
 	})
 }
+
+// A tag index that puts the post count in a second span beside the name read
+// "big tits154" as the label: the whole link's text. genreLabelSelector picks
+// the part that is the name.
+func TestGenreLabelSelectorReadsOnlyTheName(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{"GET /tags/": {File: "tag-index.html"}})
+	th := generic.NewWithClock(f, clock)
+
+	src := selectorSource()
+	src.Selectors[generic.GenreListPath] = "/tags/"
+	src.Selectors[generic.GenreLinkSelector] = "a.glossary-tag-link"
+	src.Selectors[generic.GenrePath] = "/tag/{genre}/page/{page}/"
+
+	labels := func() map[string]string {
+		got, err := th.Listings(context.Background(), src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, l := range got {
+			out[l.ID] = l.Label
+		}
+		return out
+	}
+
+	// Without it, the count is glued on — the bug this key exists for.
+	if got := labels()["genre:big-tits"]; got != "big tits154" {
+		t.Fatalf("without genreLabelSelector the label is %q; the fixture no longer shows the problem", got)
+	}
+
+	src.Selectors[generic.GenreLabelSelector] = "span:not(.glossary-tag-count)"
+	want := map[string]string{"genre:anal": "anal", "genre:big-tits": "big tits", "genre:bunny-girl": "bunny girl"}
+	got := labels()
+	for id, label := range want {
+		if got[id] != label {
+			t.Errorf("%s label = %q, want %q", id, got[id], label)
+		}
+	}
+	if err := generic.ValidateSelectors(src.Selectors); err != nil {
+		t.Fatalf("genreLabelSelector is not in the accepted vocabulary: %v", err)
+	}
+}
