@@ -277,6 +277,16 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 // search endpoint answers a blank query with nothing at all, confirmed live
 // against one of the family's sites, exactly the failure mode mangakakalot's
 // own Search comment describes for its family's equivalent endpoint.
+//
+// Page 1 of the home listing is fetched directly; any later page goes through
+// paginatedListing (listing.go) rather than a bare "/?page={n}", because that
+// query string is not honoured by every mirror: hentaifox's real pagination
+// is /page/{n}/ (a tag listing's is /tag/{slug}/pag/{n}/, the same divergence)
+// and "/?page=2" silently re-answers page 1 there, while nhentai.xxx does
+// honour "?page={n}". paginatedListing follows page 1's own pagination link
+// instead of guessing between the two shapes — the fix listing.go's genre
+// listing already needed for the identical problem, reused here rather than
+// duplicated.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
 	if page < 1 {
 		page = 1
@@ -286,20 +296,18 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		return nil, err
 	}
 
-	var path string
 	if q = strings.TrimSpace(q); q == "" {
-		path = fmt.Sprintf("/?page=%d", page)
-	} else {
-		path = fmt.Sprintf("/%s/?q=%s&page=%d", o.PathSegment(KeySearchPath), url.QueryEscape(q), page)
+		return t.paginatedListing(ctx, s, "/", page)
 	}
 
+	path := fmt.Sprintf("/%s/?q=%s&page=%d", o.PathSegment(KeySearchPath), url.QueryEscape(q), page)
 	doc, err := t.doc(ctx, s, path)
 	if err != nil {
 		return nil, err
 	}
-	// The listing or search page just fetched above — the page these covers
-	// are actually parsed from, resolved the same way t.doc resolved it. PLAN
-	// §7.6: truthful, per-request, never a constant.
+	// The search page just fetched above — the page these covers are actually
+	// parsed from, resolved the same way t.doc resolved it. PLAN §7.6:
+	// truthful, per-request, never a constant.
 	pageURL := t.absolutise(s, path)
 	return t.scrapeGalleries(s, doc, pageURL), nil
 }

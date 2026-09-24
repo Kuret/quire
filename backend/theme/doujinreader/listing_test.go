@@ -74,7 +74,7 @@ func TestListingsOffersNoSortOrStatusGroup(t *testing.T) {
 
 func TestListingLatestDelegatesToEmptyQuerySearch(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
-		"GET /?page=1": {File: "home.html"},
+		"GET /": {File: "home.html"},
 	})
 	th := doujinreader.NewWithClock(f, clock)
 

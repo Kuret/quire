@@ -1,0 +1,26 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site. See home.html for the note
+  on placeholders and provenance.
+
+  Home listing, page 1, hentaifox.com's own pagination shape: a path segment
+  (/page/{n}/), not a query string. Regression fixture for the bug where
+  Search("", page>1) built a bare "/?page={n}" that this shape's real site
+  silently ignores (it re-answers page 1) — see doujinreader.go's Search doc
+  comment and paginatedListing in listing.go, the fix this fixture pins.
+-->
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Example Doujin Reader</title></head>
+<body>
+  <div class="listing">
+    <div class="thumb" data-tags="1 2" data-artists="9" data-categories="1">
+      <a href="/g/42/">
+        <img class="lazy" src="data:image/gif;base64,AA==" data-src="https://images.example.invalid/005/42/thumb.jpg" alt="A Story About Nothing in Particular">
+      </a>
+    </div>
+  </div>
+  <ul class="pagination">
+    <li class='page-item disabled'><a class='page-link' href='#'>Previous</a></li>
+    <li class='page-item active'><a class='page-link' href='#'>1</a></li>
+    <li class='page-item'><a class='page-link' href='//example.invalid/page/2/'>2</a></li>
+  </ul>
+</body></html>

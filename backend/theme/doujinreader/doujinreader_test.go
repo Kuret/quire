@@ -40,7 +40,7 @@ func site() *theme.Source {
 // to the home listing instead.
 func TestSearchWithNoQueryBrowsesTheHomeListing(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
-		"GET /?page=1": {File: "home.html"},
+		"GET /": {File: "home.html"},
 	})
 	th := doujinreader.NewWithClock(f, clock)
 
@@ -50,7 +50,7 @@ func TestSearchWithNoQueryBrowsesTheHomeListing(t *testing.T) {
 	}
 	// The listing page just fetched — the exact URL, per PLAN §7.6 — is the
 	// referrer every cover in this result set must carry.
-	const browseReferrer = "https://example.invalid/?page=1"
+	const browseReferrer = "https://example.invalid/"
 	want := []theme.SeriesStub{
 		{
 			ID:            "/g/42",
@@ -74,6 +74,61 @@ func TestSearchWithNoQueryBrowsesTheHomeListing(t *testing.T) {
 		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("result %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}
+	}
+}
+
+// Regression for the bug where Search("", page>1) built a bare "/?page={n}",
+// which hentaifox.com silently ignores (it re-answers page 1's own content
+// rather than erroring or redirecting) — confirmed live against
+// hentaifox.com and nhentai.xxx during development. Page 2 must instead come
+// from whatever URL page 1's own pagination widget names (paginatedListing,
+// listing.go), exercised here with hentaifox's path-style shape (/page/2/).
+func TestSearchEmptyQueryPage2FollowsHentaifoxStylePagination(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /":        {File: "home-hentaifox-page1.html"},
+		"GET /page/2/": {File: "home-hentaifox-page2.html"},
+	})
+	th := doujinreader.NewWithClock(f, clock)
+
+	page1, err := th.Search(context.Background(), site(), "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page2, err := th.Search(context.Background(), site(), "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 1 || page1[0].ID != "/g/42" {
+		t.Fatalf("page 1 = %+v, want just /g/42", page1)
+	}
+	if len(page2) != 1 || page2[0].ID != "/g/99" {
+		t.Fatalf("page 2 = %+v, want just /g/99 (page 1's own pagination link's page) — not page 1 repeated", page2)
+	}
+}
+
+// The same regression, exercised with nhentai.xxx's own pagination shape (a
+// query string, ?page=2) — proving paginatedListing follows whichever URL
+// the widget actually names rather than assuming hentaifox's path style.
+func TestSearchEmptyQueryPage2FollowsNhentaiStylePagination(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /":        {File: "home-nhentai-page1.html"},
+		"GET /?page=2": {File: "home-nhentai-page2.html"},
+	})
+	th := doujinreader.NewWithClock(f, clock)
+
+	page1, err := th.Search(context.Background(), site(), "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page2, err := th.Search(context.Background(), site(), "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 1 || page1[0].ID != "/g/42" {
+		t.Fatalf("page 1 = %+v, want just /g/42", page1)
+	}
+	if len(page2) != 1 || page2[0].ID != "/g/77" {
+		t.Fatalf("page 2 = %+v, want just /g/77 (page 1's own pagination link's page) — not page 1 repeated", page2)
 	}
 }
 

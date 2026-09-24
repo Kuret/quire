@@ -213,7 +213,21 @@ func (t *Theme) List(ctx context.Context, s *theme.Source, listingID string, pag
 // widget does not offer (past the last page) yields an empty result, not an
 // error: that is what "no more results" looks like to a pager.
 func (t *Theme) listGenre(ctx context.Context, s *theme.Source, slug string, page int) ([]theme.SeriesStub, error) {
-	path := "/tag/" + slug + "/"
+	return t.paginatedListing(ctx, s, "/tag/"+slug+"/", page)
+}
+
+// paginatedListing fetches page 1 of the gallery listing at path and, for any
+// later page, follows *that page's own* pagination link rather than building
+// one from a guessed query shape — the same approach the home listing's
+// Search("") page>1 needs (doujinreader.go) and this file's own listGenre
+// used to duplicate: hentaifox's real pagination is /page/{n}/ on the home
+// listing and /tag/{slug}/pag/{n}/ on a tag listing, both silently ignored by
+// a bare ?page={n}, while nhentai.xxx uses ?page={n} on both. Reading page
+// 1's own '.pagination' widget for page n's real link works on either mirror
+// without knowing which one this source is. A page number the widget does
+// not offer (past the last page) is an empty result, not an error — that is
+// what "no more results" looks like to a pager.
+func (t *Theme) paginatedListing(ctx context.Context, s *theme.Source, path string, page int) ([]theme.SeriesStub, error) {
 	first, err := t.doc(ctx, s, path)
 	if err != nil {
 		return nil, err
