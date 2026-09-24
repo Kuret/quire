@@ -409,12 +409,13 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 			Query    string `json:"query"`
 			Page     int    `json:"page"`
 			PageSize int    `json:"pageSize"`
+			Listing  string `json:"listing"`
 		}
 		if err := decode(payload, &req); err != nil {
 			return true, s.sendError(out, "bad_request", err.Error())
 		}
 		s.goBackground(ctx, func(ctx context.Context) {
-			s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize)
+			s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize, req.Listing)
 		})
 		return true, nil
 
@@ -459,9 +460,11 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		// Browse is search with no query: on every theme we have, that is the
 		// site's own recent/popular listing, which is also what PLAN §7.5 stage
-		// 5 falls back to.
+		// 5 falls back to. It always names the default listing explicitly
+		// (listing "") rather than whatever the frontend last browsed, so
+		// Browse is never accidentally scoped to a listing picked earlier.
 		s.goBackground(ctx, func(ctx context.Context) {
-			s.runSearch(ctx, out, req.SourceID, "", req.Page, req.PageSize)
+			s.runSearch(ctx, out, req.SourceID, "", req.Page, req.PageSize, "")
 		})
 		return true, nil
 
@@ -1260,7 +1263,7 @@ func (s *Service) themeFor(sourceID string) (theme.Theme, *theme.Source, error) 
 // this is a fallback, not the rule.
 const defaultPageSize = 9
 
-func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query string, page, pageSize int) {
+func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query string, page, pageSize int, listing string) {
 	th, src, err := s.themeFor(sourceID)
 	if err != nil {
 		_ = s.sendError(out, "not_found", err.Error())
@@ -1273,12 +1276,36 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 		pageSize = defaultPageSize
 	}
 
+	// "" and theme.ListingLatest both mean today's Browse; normalising them to
+	// "" here is what lets Browse and a Search naming "latest" share the one
+	// cached listing rather than the pager treating them as two different
+	// browses of the same source.
+	if listing == theme.ListingLatest {
+		listing = ""
+	}
+	// A non-empty query is a text search and ignores the listing entirely —
+	// it never reaches Lister.List, exactly as MessageSearch's doc comment
+	// promises.
+	effectiveListing := listing
+	if query != "" {
+		effectiveListing = ""
+	}
+
 	// The display page the frontend asked for is served out of the cache; the
 	// pager reaches for the network only when the cache runs short (PLAN §12.1
-	// — one tap must not equal one HTTP request).
-	pager := s.pagerFor(pagerKey{sourceID: sourceID, query: query})
+	// — one tap must not equal one HTTP request). listing is part of the key
+	// (paging.go's pagerKey) precisely so switching listings never serves the
+	// listing that was cached before it.
+	pager := s.pagerFor(pagerKey{sourceID: sourceID, query: query, listing: effectiveListing})
 	res, err := pager.Page(ctx, page, pageSize, func(ctx context.Context, sourcePage int) ([]theme.SeriesStub, error) {
-		return th.Search(ctx, src, query, sourcePage)
+		if query != "" || effectiveListing == "" {
+			return th.Search(ctx, src, query, sourcePage)
+		}
+		lister, ok := th.(theme.Lister)
+		if !ok {
+			return nil, fmt.Errorf("%s has only the latest-updates listing", src.Name)
+		}
+		return lister.List(ctx, src, effectiveListing, sourcePage)
 	})
 	if err != nil && len(res.Items) == 0 {
 		_ = s.sendError(out, "search_failed", plain(err))
@@ -1313,6 +1340,7 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 		// it belongs on the message rather than repeated on every row.
 		"kind":     kindOf(th),
 		"query":    query,
+		"listing":  effectiveListing,
 		"page":     res.Page,
 		"pageSize": pageSize,
 		// 0 means "the source has not said how much there is". The frontend
