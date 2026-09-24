@@ -97,6 +97,15 @@
 // independently hosted family whose CDN choice the theme cannot know in
 // advance.
 //
+// # Browse listings (theme.Lister, see listing.go)
+//
+// This family has no site-wide Popular, New or Top-rated listing and no
+// Completed status (galleries have no publication status to begin with — see
+// Series() above). What it does have is tags, offered as genre listings:
+// listing.go's own doc comment records exactly what was tried and confirmed
+// live against hentaifox.com and nhentai.xxx, the user's own two configured
+// sources of this theme.
+//
 // Provenance: the shapes above were read from live responses to a plain,
 // unauthenticated GET during development, and confirmed across all three
 // sites before any code was written. Nothing here is transcribed from any
@@ -292,7 +301,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	// are actually parsed from, resolved the same way t.doc resolved it. PLAN
 	// §7.6: truthful, per-request, never a constant.
 	pageURL := t.absolutise(s, path)
+	return t.scrapeGalleries(s, doc, pageURL), nil
+}
 
+// scrapeGalleries reads the gallery cards out of any page this family renders
+// them on — home, search results, or a tag/taxonomy listing (see listing.go)
+// — which all share the same card shape. pageURL is the page doc was fetched
+// from, used as the cover referrer (PLAN §7.6): the truth of what was
+// actually requested, never a value assembled by hand.
+func (t *Theme) scrapeGalleries(s *theme.Source, doc *goquery.Document, pageURL string) []theme.SeriesStub {
 	seen := make(map[string]bool)
 	var out []theme.SeriesStub
 	// The one element every rendering of a gallery card carries, whatever the
@@ -315,7 +332,7 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		}
 		out = append(out, stub)
 	})
-	return out, nil
+	return out
 }
 
 // firstGalleryID returns the gallery ID of the first link inside card that

@@ -1,0 +1,60 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape of the tag index page (/tags/), hentaifox.com's own
+  skin: an anchor carrying a ".list_tag" name and a ".badge" gallery count,
+  both siblings inside the same "a.tag_btn" (see the package comment and
+  tagIndexLabel/tagCount in listing.go). nhentai.xxx's ".tag_name"/".tag_count"
+  skin is exercised separately, inline, in listing_test.go.
+
+  32 tags, ranked count descending by construction ("tag-00" highest, "tag-31"
+  lowest), so a test can assert both the descending order and the cap at
+  maxGenreListings (30): "tag-30" and "tag-31" must not appear in Listings().
+  "tag-05" repeats a second time, with a different label text, to prove a
+  slug seen twice is only offered once, keeping the first label seen.
+
+  Host is example.invalid (RFC 2606); every tag name is an invented placeholder.
+-->
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Tags - Example Doujin Reader</title></head><body>
+<div class="tags_list">
+  <a class="tag_btn" href="/tag/tag-00/"><h3 class="list_tag">Placeholder Tag 00</h3> <span class="badge">32</span></a>
+  <a class="tag_btn" href="/tag/tag-01/"><h3 class="list_tag">Placeholder Tag 01</h3> <span class="badge">31</span></a>
+  <a class="tag_btn" href="/tag/tag-02/"><h3 class="list_tag">Placeholder Tag 02</h3> <span class="badge">30</span></a>
+  <a class="tag_btn" href="/tag/tag-03/"><h3 class="list_tag">Placeholder Tag 03</h3> <span class="badge">29</span></a>
+  <a class="tag_btn" href="/tag/tag-04/"><h3 class="list_tag">Placeholder Tag 04</h3> <span class="badge">28</span></a>
+  <a class="tag_btn" href="/tag/tag-05/"><h3 class="list_tag">Placeholder Tag 05</h3> <span class="badge">27</span></a>
+  <a class="tag_btn" href="/tag/tag-06/"><h3 class="list_tag">Placeholder Tag 06</h3> <span class="badge">26</span></a>
+  <a class="tag_btn" href="/tag/tag-07/"><h3 class="list_tag">Placeholder Tag 07</h3> <span class="badge">25</span></a>
+  <a class="tag_btn" href="/tag/tag-08/"><h3 class="list_tag">Placeholder Tag 08</h3> <span class="badge">24</span></a>
+  <a class="tag_btn" href="/tag/tag-09/"><h3 class="list_tag">Placeholder Tag 09</h3> <span class="badge">23</span></a>
+  <a class="tag_btn" href="/tag/tag-10/"><h3 class="list_tag">Placeholder Tag 10</h3> <span class="badge">22</span></a>
+  <a class="tag_btn" href="/tag/tag-11/"><h3 class="list_tag">Placeholder Tag 11</h3> <span class="badge">21</span></a>
+  <a class="tag_btn" href="/tag/tag-12/"><h3 class="list_tag">Placeholder Tag 12</h3> <span class="badge">20</span></a>
+  <a class="tag_btn" href="/tag/tag-13/"><h3 class="list_tag">Placeholder Tag 13</h3> <span class="badge">19</span></a>
+  <a class="tag_btn" href="/tag/tag-14/"><h3 class="list_tag">Placeholder Tag 14</h3> <span class="badge">18</span></a>
+  <a class="tag_btn" href="/tag/tag-15/"><h3 class="list_tag">Placeholder Tag 15</h3> <span class="badge">17</span></a>
+  <a class="tag_btn" href="/tag/tag-16/"><h3 class="list_tag">Placeholder Tag 16</h3> <span class="badge">16</span></a>
+  <a class="tag_btn" href="/tag/tag-17/"><h3 class="list_tag">Placeholder Tag 17</h3> <span class="badge">15</span></a>
+  <a class="tag_btn" href="/tag/tag-18/"><h3 class="list_tag">Placeholder Tag 18</h3> <span class="badge">14</span></a>
+  <a class="tag_btn" href="/tag/tag-19/"><h3 class="list_tag">Placeholder Tag 19</h3> <span class="badge">13</span></a>
+  <a class="tag_btn" href="/tag/tag-20/"><h3 class="list_tag">Placeholder Tag 20</h3> <span class="badge">12</span></a>
+  <a class="tag_btn" href="/tag/tag-21/"><h3 class="list_tag">Placeholder Tag 21</h3> <span class="badge">11</span></a>
+  <a class="tag_btn" href="/tag/tag-22/"><h3 class="list_tag">Placeholder Tag 22</h3> <span class="badge">10</span></a>
+  <a class="tag_btn" href="/tag/tag-23/"><h3 class="list_tag">Placeholder Tag 23</h3> <span class="badge">9</span></a>
+  <a class="tag_btn" href="/tag/tag-24/"><h3 class="list_tag">Placeholder Tag 24</h3> <span class="badge">8</span></a>
+  <a class="tag_btn" href="/tag/tag-25/"><h3 class="list_tag">Placeholder Tag 25</h3> <span class="badge">7</span></a>
+  <a class="tag_btn" href="/tag/tag-26/"><h3 class="list_tag">Placeholder Tag 26</h3> <span class="badge">6</span></a>
+  <a class="tag_btn" href="/tag/tag-27/"><h3 class="list_tag">Placeholder Tag 27</h3> <span class="badge">5</span></a>
+  <a class="tag_btn" href="/tag/tag-28/"><h3 class="list_tag">Placeholder Tag 28</h3> <span class="badge">4</span></a>
+  <a class="tag_btn" href="/tag/tag-29/"><h3 class="list_tag">Placeholder Tag 29</h3> <span class="badge">3</span></a>
+  <a class="tag_btn" href="/tag/tag-30/"><h3 class="list_tag">Placeholder Tag 30</h3> <span class="badge">2</span></a>
+  <a class="tag_btn" href="/tag/tag-31/"><h3 class="list_tag">Placeholder Tag 31</h3> <span class="badge">1</span></a>
+  <a class="tag_btn" href="/tag/tag-05/"><h3 class="list_tag">Duplicate Label</h3> <span class="badge">999</span></a>
+</div>
+<ul class="pagination">
+  <li class='page-item disabled'><a class='page-link' href='#'>Previous</a></li>
+  <li class='page-item active'><a class='page-link' href='#'>1</a></li>
+  <li class='page-item'><a class='page-link' href='//example.invalid/tags/pag/2/'>2</a></li>
+</ul>
+</body></html>
