@@ -1951,6 +1951,131 @@ Window {
         win.want("clearing saved returns the row to Try/Download",
                  win.findChild(chapterList, "tryButton-c3").visible, true)
 
+        // ---- jumping to a page or a chapter (a quicker way through many
+        //      pages than Previous/Next) ------------------------------------
+
+        chapterList.showView("chapters")
+        chapterList.page = 1
+
+        // Only offered once there is somewhere else to jump to. bookChapterList
+        // has three releases and one page, so its label must refuse the tap —
+        // the same shape as every other opt-in control in this app.
+        win.want("many chapters make the pager jumpable", chapterList.totalPages > 1, true)
+        win.want("a single page is not", bookChapterList.totalPages, 1)
+
+        var chapterLabelArea = win.findChild(chapterList, "pagerLabelArea")
+        var bookLabelArea = win.findChild(bookChapterList, "pagerLabelArea")
+        win.want("a jumpable pager's label is tappable", chapterLabelArea.enabled, true)
+        // `enabled` is the assertion, not a synthesised tap: emitting
+        // clicked() bypasses `enabled` entirely (see downloadedRowArea's own
+        // comment on this in the DownloadedList section) — what makes the
+        // label inert for real input is the property.
+        win.want("a one-page pager's label is dead to touch", bookLabelArea.enabled, false)
+
+        var jumpPanel = win.findChild(chapterList, "jumpPanel")
+        win.want("the panel starts closed", chapterList.jumpOpen, false)
+        win.want("and off screen", jumpPanel.visible, false)
+
+        chapterLabelArea.clicked(null)
+        win.want("tapping the label opens it", chapterList.jumpOpen, true)
+        win.want("and it is now on screen", jumpPanel.visible, true)
+
+        // The panel that shipped without this once opened its `visible` flag
+        // and drew nothing at all, because a refused anchor left it with no
+        // geometry (build/qml-check.sh's own note on SeriesGrid's picker).
+        var jumpBox = win.findChild(chapterList, "jumpPanelBox")
+        win.want("the panel has real height", jumpBox.height > 100, true)
+        win.want("and real width", jumpBox.width > 100, true)
+
+        win.want("nothing is typed yet", chapterList.jumpInput, "")
+        win.want("Go to chapter starts dead",
+                 win.findChild(chapterList, "jumpGoToChapterArea").enabled, false)
+        win.want("Go to page starts dead too",
+                 win.findChild(chapterList, "jumpGoToPageArea").enabled, false)
+        win.want("Go to chapter is offered from the chapters view",
+                 win.findChild(chapterList, "jumpGoToChapterButton").visible, true)
+
+        win.findChild(chapterList, "jumpKey-1").clicked(null)
+        win.findChild(chapterList, "jumpKey-5").clicked(null)
+        win.findChild(chapterList, "jumpKey-0").clicked(null)
+        win.want("digits accumulate", chapterList.jumpInput, "150")
+        win.want("Go to chapter wakes up once something is typed",
+                 win.findChild(chapterList, "jumpGoToChapterArea").enabled, true)
+
+        win.findChild(chapterList, "jumpKeyDel").clicked(null)
+        win.want("backspace takes the last digit off", chapterList.jumpInput, "15")
+        win.findChild(chapterList, "jumpKey-0").clicked(null)
+        win.want("back to 150", chapterList.jumpInput, "150")
+
+        // No chapter is numbered 150, and none reads higher either (the model
+        // tops out at c54, number 54), so the last chapter in the list is the
+        // answer — beyond the end lands on the end, not nowhere.
+        win.findChild(chapterList, "jumpGoToChapterArea").clicked(null)
+        win.want("the page holding the last chapter is shown",
+                 chapterList.page, chapterList.totalPages)
+        win.want("the last chapter is marked", chapterList.highlightChapterId, "c54")
+        win.want("the panel closes on a jump", chapterList.jumpOpen, false)
+
+        // Any further page change drops the mark — even one that lands back
+        // on the same page (onPageChanged still fires from the assignment
+        // above; this one takes it off page 1 for real).
+        chapterList.page = 1
+        win.want("changing the page drops the mark", chapterList.highlightChapterId, "")
+
+        // A number nobody has: chapters run 0..54 and 5.5 matches none of
+        // them, so the first one that reads higher — chapter 6 — is used.
+        // (c0 carries number 0, which the search must skip as "unknown";
+        // reaching chapter 6 rather than 0 proves that it did.)
+        chapterList.openJump()
+        win.want("opening again clears what was typed before", chapterList.jumpInput, "")
+        win.findChild(chapterList, "jumpKey-5").clicked(null)
+        win.findChild(chapterList, "jumpKeyDot").clicked(null)
+        win.findChild(chapterList, "jumpKey-5").clicked(null)
+        win.want("a decimal can be typed", chapterList.jumpInput, "5.5")
+        win.findChild(chapterList, "jumpGoToChapterArea").clicked(null)
+        win.want("a number nobody has lands on the next one up",
+                 chapterList.highlightChapterId, "c6")
+
+        // Go to page clamps the same way Previous/Next already do (PLAN
+        // §12.1: no wrapping, a hard stop at the end).
+        chapterList.page = 1
+        chapterList.openJump()
+        win.findChild(chapterList, "jumpKey-9").clicked(null)
+        win.findChild(chapterList, "jumpKey-9").clicked(null)
+        win.findChild(chapterList, "jumpKey-9").clicked(null)
+        win.findChild(chapterList, "jumpGoToPageArea").clicked(null)
+        win.want("Go to page clamps beyond the end",
+                 chapterList.page, chapterList.totalPages)
+        win.want("a page jump marks no chapter", chapterList.highlightChapterId, "")
+
+        // First and Last need nothing typed at all.
+        chapterList.openJump()
+        win.findChild(chapterList, "jumpLastArea").clicked(null)
+        win.want("Last page jumps to the end", chapterList.page, chapterList.totalPages)
+        chapterList.openJump()
+        win.findChild(chapterList, "jumpFirstArea").clicked(null)
+        win.want("First page jumps back to page one", chapterList.page, 1)
+
+        // Back closes the panel without moving anything, and so does a tap
+        // outside it.
+        chapterList.openJump()
+        win.findChild(chapterList, "jumpKey-2").clicked(null)
+        win.findChild(chapterList, "jumpBackArea").clicked(null)
+        win.want("Back closes the panel", chapterList.jumpOpen, false)
+        win.want("having moved nothing", chapterList.page, 1)
+
+        chapterList.openJump()
+        win.findChild(chapterList, "jumpPanelScrim").clicked(null)
+        win.want("tapping outside the panel closes it too", chapterList.jumpOpen, false)
+
+        // The jumps above turned pages back and forth several times in a
+        // tight burst with no layout pass between them; settle the list back
+        // to a clean, single-page state before anything downstream counts
+        // rows against it (forceLayout is the same fix used wherever else in
+        // this file a ListView's delegate set has to be trusted immediately).
+        chapterList.page = 1
+        win.findChild(chapterList, "chapterRows").forceLayout()
+
         // ---- the reader itself: full screen, three tap zones, the overlay,
         // the honesty line and closing ---------------------------------
         //
@@ -2486,6 +2611,18 @@ Window {
                              "downloadState": "", "downloadMessage": "", "documentUuid": "",
                              "saved": false, "savedCount": 0, "chapterIdsJson": "[]"})
         chapterList.showView("chapters")
+
+        // A volume row's chapterId is only its first chapter (see the saved-
+        // delete comments just above), so "Go to chapter" is withdrawn in the
+        // volume view rather than left to jump on that alone.
+        chapterList.showView("volumes")
+        chapterList.openJump()
+        win.want("go to chapter is not offered from the volumes view",
+                 win.findChild(chapterList, "jumpGoToChapterButton").visible, false)
+        chapterList.closeJump()
+        chapterList.showView("chapters")
+        chapterList.page = 1
+        win.findChild(chapterList, "chapterRows").forceLayout()
 
         // ---- selecting several rows (PLAN §12.1) ---------------------------
         //

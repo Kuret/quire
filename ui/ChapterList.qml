@@ -111,7 +111,14 @@ Item {
     // A page turn hides the rows that were selected. The selection goes with
     // them for the same reason it goes when the mode is left: what is not on
     // screen cannot be checked before it is acted on.
-    onPageChanged: screen.clearSelection()
+    //
+    // It also drops the jump highlight (above): the mark is only ever about
+    // "the page you just landed on", so any further page change — including
+    // the jump's own — retires it.
+    onPageChanged: {
+        screen.clearSelection()
+        screen.highlightChapterId = ""
+    }
 
     function showView(which) {
         if (screen.view !== which)
@@ -225,6 +232,113 @@ Item {
     readonly property int totalPages: Paging.pageCount(screen.rowCount, screen.pageSize)
 
     onTotalPagesChanged: screen.page = Paging.clampPage(screen.page, screen.totalPages)
+
+    // ---- jumping to a page or a chapter (a quicker way through many pages) -
+    //
+    // Previous/Next (ui/PagerBar.qml) turn one page at a time, which stops
+    // being practical once a series runs to dozens of pages of chapters. This
+    // opens from the pager's own label — PagerBar's opt-in `jumpable`, set
+    // below only when there is more than one page — and offers three ways to
+    // move: type a chapter number and land on the page holding it, type a
+    // page number outright, or jump to either end.
+    property bool jumpOpen: false
+
+    // The digits (and at most one '.') typed so far, kept as a string rather
+    // than a number so a value still being typed — "12." — keeps the point
+    // the user just tapped rather than losing it to a numeric round-trip.
+    property string jumpInput: ""
+
+    readonly property bool jumpHasInput: screen.jumpInput.length > 0
+
+    // The chapter the last "Go to chapter" landed on, or "" for none. A row
+    // is marked (Style.rule, in the delegate below) only while this is set,
+    // and it is cleared by any page change — including the jump's own — or a
+    // fresh jump, so the mark never survives past the reason it was drawn.
+    property string highlightChapterId: ""
+
+    function openJump() {
+        screen.closeConfirm()
+        screen.jumpInput = ""
+        screen.jumpOpen = true
+    }
+
+    function closeJump() {
+        screen.jumpOpen = false
+        screen.jumpInput = ""
+    }
+
+    // jumpDigit appends one key's worth of text: a digit, or the single
+    // decimal point a source's chapter numbering (e.g. "12.5") can need.
+    function jumpDigit(d) {
+        if (d === "." && screen.jumpInput.indexOf(".") >= 0)
+            return
+        // A page or chapter number never needs more digits than this; the cap
+        // is what keeps a run of taps from growing the display without bound.
+        if (screen.jumpInput.length >= 8)
+            return
+        screen.jumpInput += d
+    }
+
+    function jumpBackspace() {
+        screen.jumpInput = screen.jumpInput.slice(0, -1)
+    }
+
+    function jumpToPage() {
+        var n = parseInt(screen.jumpInput, 10)
+        if (isNaN(n))
+            return
+        screen.page = Paging.clampPage(n, screen.totalPages)
+        screen.highlightChapterId = ""
+        screen.closeJump()
+    }
+
+    function jumpToFirst() {
+        screen.page = 1
+        screen.highlightChapterId = ""
+        screen.closeJump()
+    }
+
+    function jumpToLast() {
+        screen.page = screen.totalPages
+        screen.highlightChapterId = ""
+        screen.closeJump()
+    }
+
+    // jumpToChapter walks the chapter list in the row order the backend sent
+    // (PLAN §7.2 — that order is the reading order) looking for the typed
+    // number: an exact match if there is one, else the first chapter whose
+    // number reads higher, else the last chapter in the list. A chapter with
+    // no usable number — 0, or missing — is never matched against: a series
+    // that leaves some entries unnumbered (an extra, a one-shot) must not be
+    // what "12" lands on.
+    function jumpToChapter() {
+        var typed = parseFloat(screen.jumpInput)
+        if (isNaN(typed))
+            return
+        var live = screen.model
+        if (!live || live.count === 0)
+            return
+        var exactIndex = -1
+        var higherIndex = -1
+        for (var i = 0; i < live.count; ++i) {
+            var num = live.get(i).number
+            if (!(num > 0))
+                continue
+            if (Math.abs(num - typed) < 1e-9) {
+                exactIndex = i
+                break
+            }
+            if (higherIndex < 0 && num > typed)
+                higherIndex = i
+        }
+        var targetIndex = exactIndex >= 0 ? exactIndex
+                         : (higherIndex >= 0 ? higherIndex : live.count - 1)
+        var target = live.get(targetIndex)
+        screen.page = Paging.clampPage(Math.floor(targetIndex / screen.pageSize) + 1,
+                                       screen.totalPages)
+        screen.highlightChapterId = target.chapterId
+        screen.closeJump()
+    }
 
     // The chapter whose confirm strip is open, and the backend's question about
     // it. Only ever one: the strip asks a question, and two open questions is
@@ -898,6 +1012,17 @@ Item {
                     id: row
                     anchors { top: parent.top; left: parent.left; right: parent.right }
                     height: Style.rowHeight
+
+                    // Marks the chapter a "Go to chapter" jump landed on
+                    // (below). Drawn first, so everything else on the row
+                    // sits over it, and gone the moment the page changes
+                    // again (onPageChanged) or another jump replaces it.
+                    Rectangle {
+                        objectName: "chapterHighlight"
+                        anchors.fill: parent
+                        visible: model.chapterId === screen.highlightChapterId
+                        color: Style.rule
+                    }
 
                     // The box is the affordance and the answer at once: it is
                     // there only on rows that can be queued, and filled only on
@@ -1657,7 +1782,248 @@ Item {
         page: screen.page
         totalPages: screen.totalPages
         hasMore: screen.page < screen.totalPages
+        // Only worth offering once there is somewhere else to jump to. A
+        // single-page series leaves the label inert, same as every other
+        // paged screen (PagerBar's jumpable defaults to false).
+        jumpable: screen.totalPages > 1
+        onJumpRequested: screen.openJump()
         onPreviousRequested: screen.page = Paging.clampPage(screen.page - 1, screen.totalPages)
         onNextRequested: screen.page = Paging.clampPage(screen.page + 1, screen.totalPages)
+    }
+
+    // ---- the jump panel ------------------------------------------------------
+    //
+    // A full-width panel drawn over the list, the same shape as
+    // ui/SeriesGrid.qml's listing picker: anchored to its own siblings rather
+    // than to the viewport (Qt refuses an anchor to an item that is neither
+    // parent nor sibling, and a refused anchor leaves a panel with no
+    // geometry at all — the trap that picker's own comment records), and
+    // dismissed by tapping outside it, same as ui/ContextMenu.qml.
+    //
+    // The numeric pad is built here rather than in ui/Keyboard.qml: that file
+    // has only the text/url QWERTY layouts today, and every glyph on it has
+    // to exist in the fonts the device actually ships (build/qml-check.sh),
+    // which plain digits and "Del" already satisfy without touching it.
+    Item {
+        id: jumpPanel
+        objectName: "jumpPanel"
+        anchors.fill: parent
+        visible: screen.jumpOpen
+
+        MouseArea {
+            objectName: "jumpPanelScrim"
+            anchors.fill: parent
+            enabled: screen.jumpOpen
+            onClicked: screen.closeJump()
+        }
+
+        Rectangle {
+            id: jumpPanelBox
+            objectName: "jumpPanelBox"
+            anchors {
+                top: parent.top; topMargin: viewport.y
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                bottom: parent.bottom; bottomMargin: parent.height - pagerBar.y + Style.gap
+            }
+            color: Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: Style.gap
+                spacing: Style.gap
+
+                Text {
+                    objectName: "jumpDisplay"
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    text: screen.jumpInput.length > 0 ? screen.jumpInput
+                                                       : "Type a page or chapter number"
+                    font.pointSize: Style.headingSize
+                    color: screen.jumpInput.length > 0 ? Style.ink : Style.muted
+                }
+
+                Grid {
+                    id: jumpPad
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    columns: 3
+                    spacing: Style.gap / 2
+
+                    Repeater {
+                        // A plain numeric pad plus the one punctuation mark a
+                        // decimal chapter number ("12.5") needs, and a way to
+                        // take a key back. Every label is ASCII.
+                        model: ["7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "Del"]
+
+                        delegate: Rectangle {
+                            width: 140
+                            height: Style.buttonHeight
+                            color: keyArea.pressed ? Style.pressed : Style.paper
+                            border.width: 1
+                            border.color: Style.rule
+                            radius: 4
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                font.pointSize: Style.bodySize
+                                color: Style.ink
+                            }
+
+                            MouseArea {
+                                id: keyArea
+                                objectName: modelData === "Del" ? "jumpKeyDel"
+                                           : (modelData === "." ? "jumpKeyDot"
+                                                                : "jumpKey-" + modelData)
+                                anchors.fill: parent
+                                onClicked: {
+                                    if (modelData === "Del")
+                                        screen.jumpBackspace()
+                                    else
+                                        screen.jumpDigit(modelData)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Style.gap
+
+                    Rectangle {
+                        objectName: "jumpGoToChapterButton"
+                        // Chapter numbers mean nothing in the volume view —
+                        // a volume row's own chapterId is only its first
+                        // chapter — so the offer is withdrawn there rather
+                        // than left to land on the wrong thing.
+                        visible: !screen.showingVolumes
+                        width: 260
+                        height: Style.buttonHeight
+                        color: goChapterArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: screen.jumpHasInput ? Style.ink : Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Go to chapter"
+                            font.pointSize: Style.smallSize
+                            color: screen.jumpHasInput ? Style.ink : Style.rule
+                        }
+
+                        MouseArea {
+                            id: goChapterArea
+                            objectName: "jumpGoToChapterArea"
+                            anchors.fill: parent
+                            enabled: screen.jumpHasInput
+                            onClicked: screen.jumpToChapter()
+                        }
+                    }
+
+                    Rectangle {
+                        objectName: "jumpGoToPageButton"
+                        width: 220
+                        height: Style.buttonHeight
+                        color: goPageArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: screen.jumpHasInput ? Style.ink : Style.rule
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Go to page"
+                            font.pointSize: Style.smallSize
+                            color: screen.jumpHasInput ? Style.ink : Style.rule
+                        }
+
+                        MouseArea {
+                            id: goPageArea
+                            objectName: "jumpGoToPageArea"
+                            anchors.fill: parent
+                            enabled: screen.jumpHasInput
+                            onClicked: screen.jumpToPage()
+                        }
+                    }
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Style.gap
+
+                    Rectangle {
+                        width: 220
+                        height: Style.buttonHeight
+                        color: firstArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "First page"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: firstArea
+                            objectName: "jumpFirstArea"
+                            anchors.fill: parent
+                            onClicked: screen.jumpToFirst()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 220
+                        height: Style.buttonHeight
+                        color: lastArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Last page"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: lastArea
+                            objectName: "jumpLastArea"
+                            anchors.fill: parent
+                            onClicked: screen.jumpToLast()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 160
+                        height: Style.buttonHeight
+                        color: backArea.pressed ? Style.pressed : Style.paper
+                        border.width: 2
+                        border.color: Style.ink
+                        radius: 6
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Back"
+                            font.pointSize: Style.smallSize
+                            color: Style.ink
+                        }
+
+                        MouseArea {
+                            id: backArea
+                            objectName: "jumpBackArea"
+                            anchors.fill: parent
+                            onClicked: screen.closeJump()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
