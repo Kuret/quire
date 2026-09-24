@@ -184,6 +184,15 @@ Window {
     property string watchMarkSeenSeries: ""
     property int watchUnwatches: 0
 
+    // Continuing to read from the Watching screen (PLAN §12.9) — the same
+    // pair of signals ui/DownloadedList.qml's own counters cover above.
+    property int watchReads: 0
+    property string watchReadUuid: ""
+    property int watchSavedReads: 0
+    property string watchSavedReadSource: ""
+    property string watchSavedReadSeries: ""
+    property string watchSavedReadChapter: ""
+
     // What the combined search asked for. Counters throughout, because half of
     // what this screen has to get right is a request that must **not** happen:
     // an empty query fans out to every configured source, so "nothing was
@@ -653,6 +662,16 @@ Window {
         onMarkSeenRequested: {
             win.watchMarkSeens++
             win.watchMarkSeenSeries = seriesId
+        }
+        onReadRequested: {
+            win.watchReads++
+            win.watchReadUuid = documentUuid
+        }
+        onReadSavedRequested: {
+            win.watchSavedReads++
+            win.watchSavedReadSource = sourceId
+            win.watchSavedReadSeries = seriesId
+            win.watchSavedReadChapter = chapterId
         }
     }
 
@@ -5304,7 +5323,7 @@ Window {
         win.want("a held watch row offers all four",
                  win.menuActions(watchList).join(","), "open,download,seen,unwatch")
         win.want("in the screen's own words", win.menuLabels(watchList).join(","),
-                 "Open,Download new chapters,Mark as seen,Stop watching")
+                 "Browse,Download new chapters,Mark as seen,Stop watching")
         win.want("and the two about new chapters are live",
                  win.menuLive(watchList, "download") && win.menuLive(watchList, "seen"), true)
 
@@ -5657,6 +5676,63 @@ Window {
                  win.colorOf(win.findChild(lonePager, "pagerPrevious").border), Style.ink)
         win.want("both of them",
                  win.colorOf(win.findChild(lonePager, "pagerNext").border), Style.ink)
+
+        // ---- continue reading on a tap (PLAN §12.9) ------------------------
+        //
+        // A watch row's tap continues reading the same way a downloaded
+        // row's does — the same "continue" target, the same fallback to
+        // Browse (the menu's relabelled "Open") when there is nothing to
+        // continue yet. Cleared and rebuilt from empty, like every other
+        // fresh scenario in this file — nothing after this point in the
+        // Watching section holds a reference into what was here before.
+        watchList.view = "list"
+        watchedModel.clear()
+        watchedModel.append(WatchJs.row({
+            "sourceId": "src", "seriesId": "w-continue-saved", "sourceName": "Example Reader",
+            "title": "Continue Saved", "state": "ok", "status": "Up to date",
+            "continue": {"kind": "saved", "chapterId": "c7"}}))
+        watchedModel.append(WatchJs.row({
+            "sourceId": "src", "seriesId": "w-continue-library", "sourceName": "Example Reader",
+            "title": "Continue Library", "state": "ok", "status": "Up to date",
+            "continue": {"kind": "library", "documentUuid": "doc-continue"}}))
+        watchedModel.append(WatchJs.row({
+            "sourceId": "src", "seriesId": "w-continue-none", "sourceName": "Example Reader",
+            "title": "Continue None", "state": "ok", "status": "Up to date"}))
+        win.findChild(watchList, "watchRows").forceLayout()
+        var continueWRowAreas = win.findChildren(watchList, "watchRowArea", [])
+
+        win.watchSavedReads = 0
+        win.watchReads = 0
+        win.watchOpens = 0
+        continueWRowAreas[0].clicked(null)
+        win.want("a saved continue target sends OpenSaved", win.watchSavedReads, 1)
+        win.want("naming the chapter to continue at", win.watchSavedReadChapter, "c7")
+        win.want("and opens no series", win.watchOpens, 0)
+
+        win.watchReads = 0
+        win.watchOpens = 0
+        continueWRowAreas[1].clicked(null)
+        win.want("a library continue target hands off to the reader", win.watchReads, 1)
+        win.want("naming the document", win.watchReadUuid, "doc-continue")
+        win.want("and opens no series", win.watchOpens, 0)
+
+        win.watchReads = 0
+        win.watchSavedReads = 0
+        win.watchOpens = 0
+        continueWRowAreas[2].clicked(null)
+        win.want("a row with nothing to continue falls back to Browse",
+                 win.watchOpens, 1)
+        win.want("naming its own series", win.watchOpenedSeries, "w-continue-none")
+
+        // Browse is still on the menu, and still opens the series.
+        win.holdOn(continueWRowAreas[0])
+        win.want("Browse is on the watch menu",
+                 win.menuLabels(watchList).join(","),
+                 "Browse,Download new chapters,Mark as seen,Stop watching")
+        win.watchOpens = 0
+        win.tapMenu(watchList, "open")
+        win.want("and it opens the series, not the continue target", win.watchOpens, 1)
+        win.want("naming that series", win.watchOpenedSeries, "w-continue-saved")
 
         // ---- state: the new-chapters badge ---------------------------------
 

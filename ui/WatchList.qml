@@ -99,6 +99,12 @@ Item {
     signal unwatchRequested(string sourceId, string seriesId)
     signal openRequested(string sourceId, string sourceName, string seriesId, string title)
 
+    // Continuing to read a watched series (PLAN §12.9) rather than opening
+    // its results list — the same two signals ui/DownloadedList.qml raises
+    // for the same reason, wired through Main.qml the same way.
+    signal readRequested(string documentUuid)
+    signal readSavedRequested(string sourceId, string seriesId, string chapterId)
+
     // The two things the badge is for, reachable without opening the series.
     //
     // Both are answered by the backend rather than here: DownloadNewChapters
@@ -127,6 +133,29 @@ Item {
 
     function isStripped(sourceId, seriesId) {
         return screen.stripSourceId === sourceId && screen.stripSeriesId === seriesId
+    }
+
+    // continueKindOf and tapRow are ui/DownloadedList.qml's own, unchanged:
+    // "saved" and "library" continue reading, and "" (nothing to continue
+    // yet) falls back to opening the series — what a tap always did, and
+    // what the menu's Browse still does on purpose.
+    function continueKindOf(row) {
+        return row.continueKind === undefined || row.continueKind === null
+               ? "" : String(row.continueKind)
+    }
+
+    function tapRow(row) {
+        switch (screen.continueKindOf(row)) {
+        case "saved":
+            screen.readSavedRequested(row.sourceId, row.seriesId,
+                row.continueChapterId ? String(row.continueChapterId) : "")
+            return
+        case "library":
+            screen.readRequested(row.continueDocumentUuid ? String(row.continueDocumentUuid) : "")
+            return
+        default:
+            screen.openRequested(row.sourceId, row.sourceName, row.seriesId, row.title)
+        }
     }
 
     // openStrip is the existing question about dropping a watch, and the only
@@ -164,7 +193,11 @@ Item {
         // message is not an answer to "why is this greyed out".
         var hasNew = row.newChapters > 0
         return [
-            {"action": "open", "label": "Open", "enabled": true},
+            // "Browse" — opening the series' own results list, what a tap
+            // on this row used to do before tapRow started continuing
+            // reading instead. Relabelled, not duplicated: it is still the
+            // only way to reach the series' full chapter list from here.
+            {"action": "open", "label": "Browse", "enabled": true},
             {"action": "download", "label": "Download new chapters", "enabled": hasNew},
             {"action": "seen", "label": "Mark as seen", "enabled": hasNew},
             {"action": "unwatch", "label": "Stop watching", "enabled": true}
@@ -305,9 +338,14 @@ Item {
             badges: true
             onTapped: {
                 var row = screen.model.get(index)
-                // Opening the series is what clears the badge, and the backend
-                // is what clears it: this only navigates.
-                screen.openRequested(row.sourceId, row.sourceName, row.seriesId, row.title)
+                // Continues reading now (tapRow, PLAN §12.9) rather than
+                // opening the series first. The backend only clears a
+                // watch's badge once the series' own chapter list is served
+                // (seriesSeen, backend/service/watch.go) — a tap that goes
+                // straight into a saved chapter or a library document does
+                // not serve one, so it no longer clears the badge the way an
+                // "Open" tap used to. Browse (the menu) still does.
+                screen.tapRow(row)
             }
             onHeld: {
                 var at = tiles.mapToItem(screen, x, y)
@@ -440,10 +478,10 @@ Item {
                     id: rowArea
                     objectName: "watchRowArea"
                     anchors.fill: parent
-                    // Opening the series is what clears the badge, and the
-                    // backend is what clears it: this only navigates.
-                    onTapped: screen.openRequested(model.sourceId, model.sourceName,
-                                                   model.seriesId, model.title)
+                    // Continues reading (tapRow), same as the tile — see its
+                    // own comment above for what this changes about the
+                    // badge.
+                    onTapped: screen.tapRow(model)
                     // The hold used to open the strip directly. It opens the
                     // menu now — the same menu the tiles get — and "Stop
                     // watching" is what opens the strip, so the row and the

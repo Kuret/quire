@@ -108,7 +108,15 @@ function row(w) {
         // the private one. Carried on every row (rather than only decided by
         // which model it landed in) so a MessageWatchUpdate streamed mid-round
         // can be routed correctly by Main.qml's applyWatchUpdate.
-        "private": w && w.private ? true : false
+        "private": w && w.private ? true : false,
+        // What tapping this row should open (PLAN §12.9), flattened off the
+        // backend's "continue" object for the same reason every other
+        // optional role here is flattened: a ListModel role has to exist
+        // from the first append. "" means nothing to continue, and the row
+        // falls back to Browse.
+        "continueKind": w && w.continue && w.continue.kind ? w.continue.kind : "",
+        "continueChapterId": w && w.continue && w.continue.chapterId ? w.continue.chapterId : "",
+        "continueDocumentUuid": w && w.continue && w.continue.documentUuid ? w.continue.documentUuid : ""
     }
 }
 

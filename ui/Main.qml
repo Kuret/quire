@@ -1861,8 +1861,9 @@ Rectangle {
             // screen (round 2), exactly like SourceList's one instance for
             // both source lists above: same screen in every way but which
             // model and summary back it.
+            readonly property bool inPrivateMode: root.screen === "watchingPrivate"
             visible: root.screen === "watching" || root.screen === "watchingPrivate"
-            model: root.screen === "watchingPrivate" ? privateWatchedModel : watchedModel
+            model: watchListScreen.inPrivateMode ? privateWatchedModel : watchedModel
             view: root.watchingView
             phrase: root.screen === "watchingPrivate" ? root.privateWatchPhrase : root.watchPhrase
             onCheckRequested: root.send(Msg.CheckWatched, {})
@@ -1884,6 +1885,14 @@ Rectangle {
                 root.currentSourceName = sourceName
                 root.openSeries(seriesId, title)
             }
+
+            // Continuing to read a watched series (PLAN §12.9), the same
+            // handoff DownloadedList's rows use — see its own comments.
+            // Back from the reader returns to whichever of the two Watching
+            // screens the row was tapped on.
+            onReadRequested: root.openInReader(documentUuid)
+            onReadSavedRequested: root.openSaved(sourceId, seriesId, chapterId,
+                watchListScreen.inPrivateMode ? "watchingPrivate" : "watching")
         }
 
         DownloadedList {
