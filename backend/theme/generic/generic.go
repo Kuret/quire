@@ -43,6 +43,21 @@
 // about a request Quire actually made, not a fabrication. See PageReferer
 // below.
 //
+// # Browse listings (theme.Lister)
+//
+// A generic source may also declare a handful of other browse listings —
+// popular, newly added, top rated, completed — as extra URL templates
+// alongside browsePath, and genres as a genre-list page plus a link selector
+// and a per-genre URL template. Every one of them is parsed with the exact
+// same searchItem/searchLink/searchTitle/searchCover selectors Search()
+// already uses: a listing is still just a page of series stubs, and the
+// escape hatch has no reason to learn a second parsing vocabulary for it.
+//
+// Only listings the source actually configured are offered — this is a
+// closed vocabulary, not a feature every generic source gets by default —
+// and an unconfigured or unknown one is always an error from List(), never a
+// silent fall back to another listing (theme/listing.go's own rule).
+//
 // # searchPath and browsePath
 //
 // Search() is used for both a text query and a browse (empty query), and one
@@ -118,12 +133,42 @@ const (
 	ChapterDate  = "chapterDate"
 
 	PageImage = "pageImage"
+
+	// ListingPopular, ListingNew and ListingRating are URL templates, exactly
+	// like browsePath: {page} is substituted, and the page is parsed with
+	// searchItem/searchLink/searchTitle/searchCover. Each is independent —
+	// Listings() offers only the ones actually set.
+	ListingPopular   = "listingPopular"
+	ListingNew       = "listingNew"
+	ListingRating    = "listingRating"
+	ListingCompleted = "listingCompleted"
+
+	// GenreListPath is the page listing every genre, fetched once (the caller
+	// caches it — theme/listing.go's own Listings() doc comment). Genres are
+	// offered only when this and GenreLinkSelector are both set.
+	GenreListPath = "genreListPath"
+	// GenreLinkSelector selects each genre's anchor on that page: its text is
+	// the genre's label, and the last path segment of its href is the site's
+	// own slug, used as the genre's ID.
+	GenreLinkSelector = "genreLinkSelector"
+	// GenrePath is a URL template for one genre's listing: {genre} (the slug
+	// GenreLinkSelector read from the href) and {page}.
+	GenrePath = "genrePath"
 )
+
+// maxGenres caps how many genres a source's genre list page can offer — "a
+// sane number" (theme/listing.go's own words); the site's full list is fine
+// under it for anything encountered so far, and this exists only to stop a
+// mis-set selector matching the whole page from handing the browse screen an
+// unusable wall of entries.
+const maxGenres = 100
 
 // knownSelectors is the closed vocabulary above, sorted for error messages.
 var knownSelectors = []string{
 	BrowsePath,
 	ChapterDate, ChapterItem, ChapterLink, ChapterTitle,
+	GenreLinkSelector, GenreListPath, GenrePath,
+	ListingCompleted, ListingNew, ListingPopular, ListingRating,
 	PageImage,
 	SearchCover, SearchItem, SearchLink, SearchPath, SearchTitle,
 	SeriesCover, SeriesDescription, SeriesGenres, SeriesPath, SeriesStatus, SeriesTitle,
@@ -270,20 +315,29 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	if path == "" {
 		path = "/?s={query}"
 	}
+	path = strings.ReplaceAll(path, "{query}", url.QueryEscape(q))
+	return t.fetchStubs(ctx, s, path, page)
+}
+
+// fetchStubs templates {page} into path, fetches it and parses it with the
+// searchItem/searchLink/searchTitle/searchCover selectors — the one parser
+// every listing shares, whether it came from Search, a sort/status listing
+// or a genre (see the package doc comment's "Browse listings" section).
+func (t *Theme) fetchStubs(ctx context.Context, s *theme.Source, path string, page int) ([]theme.SeriesStub, error) {
+	sel := s.Selectors
 	if sel[SearchItem] == "" {
 		return nil, fmt.Errorf("%w: %s", ErrNotConfigured, SearchItem)
 	}
 	if page < 1 {
 		page = 1
 	}
-	path = strings.ReplaceAll(path, "{query}", url.QueryEscape(q))
 	path = strings.ReplaceAll(path, "{page}", strconv.Itoa(page))
 
 	doc, _, err := t.doc(ctx, s, path)
 	if err != nil {
 		return nil, err
 	}
-	// The search/browse page just fetched above — the page these covers are
+	// The listing page just fetched above — the page these covers are
 	// actually parsed from, resolved the same way t.doc resolved it. PLAN
 	// §7.6: truthful, per-request, never a constant.
 	pageURL, _ := s.Resolve(path)
@@ -317,6 +371,120 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		out = append(out, stub)
 	})
 	return out, nil
+}
+
+// Listings implements theme.Lister. Only the sort/status listings a source
+// actually configured are offered, plus genres when both genreListPath and
+// genreLinkSelector are set. A genre page that fails to fetch is not this
+// call's failure to report — the sort and status listings above are still
+// true, so it is skipped rather than turning a working browse screen into a
+// degraded one over a hiccup on a page nobody asked for yet.
+func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
+	sel := s.Selectors
+	var out []theme.Listing
+	if sel[ListingPopular] != "" {
+		out = append(out, theme.Listing{ID: theme.ListingPopular, Group: theme.ListingGroupSort})
+	}
+	if sel[ListingNew] != "" {
+		out = append(out, theme.Listing{ID: theme.ListingNew, Group: theme.ListingGroupSort})
+	}
+	if sel[ListingRating] != "" {
+		out = append(out, theme.Listing{ID: theme.ListingRating, Group: theme.ListingGroupSort})
+	}
+	if sel[ListingCompleted] != "" {
+		out = append(out, theme.Listing{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus})
+	}
+	if sel[GenreListPath] != "" && sel[GenreLinkSelector] != "" {
+		if genres, err := t.fetchGenres(ctx, s); err == nil {
+			out = append(out, genres...)
+		}
+	}
+	return out, nil
+}
+
+// List implements theme.Lister.
+func (t *Theme) List(ctx context.Context, s *theme.Source, listingID string, page int) ([]theme.SeriesStub, error) {
+	if listingID == "" || listingID == theme.ListingLatest {
+		return t.Search(ctx, s, "", page)
+	}
+	sel := s.Selectors
+	if genre, ok := theme.GenreID(listingID); ok {
+		tmpl := sel[GenrePath]
+		if tmpl == "" {
+			return nil, fmt.Errorf("%s: genre listings are not configured", ID)
+		}
+		path := strings.ReplaceAll(tmpl, "{genre}", url.QueryEscape(genre))
+		return t.fetchStubs(ctx, s, path, page)
+	}
+
+	var tmpl string
+	switch listingID {
+	case theme.ListingPopular:
+		tmpl = sel[ListingPopular]
+	case theme.ListingNew:
+		tmpl = sel[ListingNew]
+	case theme.ListingRating:
+		tmpl = sel[ListingRating]
+	case theme.ListingCompleted:
+		tmpl = sel[ListingCompleted]
+	default:
+		// theme/listing.go: an ID Listings did not name is an error, never a
+		// silent fall back to another listing.
+		return nil, fmt.Errorf("%s: unknown listing %q", ID, listingID)
+	}
+	if tmpl == "" {
+		return nil, fmt.Errorf("%s: listing %q is not configured", ID, listingID)
+	}
+	return t.fetchStubs(ctx, s, tmpl, page)
+}
+
+// fetchGenres reads the source's genre list page and turns each matched link
+// into a theme.GenreListing, capped at maxGenres.
+func (t *Theme) fetchGenres(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
+	sel := s.Selectors
+	doc, _, err := t.doc(ctx, s, sel[GenreListPath])
+	if err != nil {
+		return nil, err
+	}
+	var out []theme.Listing
+	doc.Find(sel[GenreLinkSelector]).EachWithBreak(func(_ int, link *goquery.Selection) bool {
+		href, ok := link.Attr("href")
+		if !ok {
+			return true
+		}
+		slug := genreSlug(s, href)
+		if slug == "" {
+			return true
+		}
+		label := theme.Text(link)
+		if label == "" {
+			label = slug
+		}
+		out = append(out, theme.GenreListing(slug, label))
+		return len(out) < maxGenres
+	})
+	return out, nil
+}
+
+// genreSlug turns a genre link's href into the site's own slug: the last
+// non-empty path segment of the same-site relative path relative() already
+// knows how to compute, with any query string dropped. It is what GenrePath's
+// {genre} is filled in with, so it must be the bare slug ("action") and not
+// the whole path ("/genre/action/") the site's link happened to carry.
+func genreSlug(s *theme.Source, href string) string {
+	rel := relative(s, href)
+	// The query string first: a trailing slash that belonged to the path
+	// (".../romance/?ref=nav") must not survive stripping it off, or the
+	// next step's "last segment" is the empty string after that slash
+	// rather than "romance".
+	if i := strings.Index(rel, "?"); i >= 0 {
+		rel = rel[:i]
+	}
+	rel = strings.Trim(rel, "/")
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		rel = rel[i+1:]
+	}
+	return rel
 }
 
 // Series implements theme.Theme.
