@@ -1,0 +1,53 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape of a Madara install's front page: a header navigation
+  menu linking a handful of series (under {mangaSubPath}) and a longer list of
+  genre archive links, plus one link to an "Ongoing" page and one to a tag
+  archive — decoys `discoverGenres` must not mistake for the genre family.
+
+  Why "manga-genre" as the taxonomy base rather than the plugin's own default
+  "genres": confirmed live 2026-09-24 that real installs rename this segment
+  too (mangaread.org uses "/genres/", the adult member hentaixcomic.com uses
+  "/manga-genre/") — the same per-site variation PLAN §7.3 already documents
+  for mangaSubPath. Using the *other* real spelling here, rather than
+  mangaread.org's, is deliberate: it is what proves discoverGenres finds
+  whatever segment the site actually used rather than a hardcoded "/genres/".
+
+  Why synthetic: PLAN §1.3 forbids this repository from containing source URLs
+  or anything that functions as a catalogue, and §1.4 forbids copying others'
+  expression. The markup *structure* — a WordPress nav menu of taxonomy
+  archive links — is an observable, documented property of a commercially
+  distributed plugin; the content here is invented and the host is
+  example.invalid (RFC 2606), which can never resolve.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Example Reader</title>
+  <meta name="generator" content="WordPress 6.5">
+  <link rel="stylesheet" href="https://example.invalid/wp-content/themes/madara/css/style.css">
+</head>
+<body class="home page-template-default wp-manga">
+<div class="site-header">
+  <nav class="main-navigation">
+    <ul class="menu">
+      <li><a href="https://example.invalid/manga/the-lantern-keeper/">The Lantern Keeper</a></li>
+      <li><a href="https://example.invalid/manga/salt-and-cedar/">Salt and Cedar</a></li>
+      <li><a href="https://example.invalid/ongoing/">Ongoing</a></li>
+      <li><a href="https://example.invalid/manga-genre/fantasy/">Fantasy</a></li>
+      <li><a href="https://example.invalid/manga-genre/action/">Action</a></li>
+      <li><a href="https://example.invalid/manga-genre/drama/">Drama</a></li>
+      <li><a href="https://example.invalid/manga-genre/comedy/">Comedy</a></li>
+      <li><a href="https://example.invalid/manga-tag/lantern/">Everything tagged lantern</a></li>
+    </ul>
+  </nav>
+</div>
+<div class="wrap">
+  <div class="site-content">
+    <div class="c-blog__heading style-2"><h1 class="h4">Latest Releases</h1></div>
+  </div>
+</div>
+</body>
+</html>

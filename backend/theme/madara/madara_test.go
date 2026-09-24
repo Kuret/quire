@@ -585,3 +585,189 @@ func TestChaptersAreAscending(t *testing.T) {
 		t.Error("a fully numbered list was reported as having an unknown order")
 	}
 }
+
+// --- Lister ---
+
+// Listings must offer the sort and status listings the plugin always has,
+// and the genres discovered on the home page — under whatever taxonomy base
+// this install actually uses ("manga-genre", not the plugin's own default
+// "genres"), which is the point of home.html not using the default.
+func TestListingsOffersSortStatusAndDiscoveredGenres(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /": {File: "home.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+
+	got, err := th.Listings(context.Background(), siteA())
+	if err != nil {
+		t.Fatalf("Listings: %v", err)
+	}
+	want := []theme.Listing{
+		{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+		{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		{ID: theme.ListingRating, Group: theme.ListingGroupSort},
+		{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus},
+		{ID: "genre:manga-genre/action", Label: "Action", Group: theme.ListingGroupGenre},
+		{ID: "genre:manga-genre/comedy", Label: "Comedy", Group: theme.ListingGroupGenre},
+		{ID: "genre:manga-genre/drama", Label: "Drama", Group: theme.ListingGroupGenre},
+		{ID: "genre:manga-genre/fantasy", Label: "Fantasy", Group: theme.ListingGroupGenre},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Listings() = %+v, want %+v", got, want)
+	}
+}
+
+// A home page that fails to fetch must still leave the sort and status
+// listings usable — they are a fact about the plugin, not something read off
+// this page — with genres simply omitted rather than the whole call failing.
+func TestListingsDegradesToSortAndStatusWhenTheHomePageFails(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /": {Status: 503},
+	})
+	th := madara.NewWithClock(f, clock)
+
+	got, err := th.Listings(context.Background(), siteA())
+	if err != nil {
+		t.Fatalf("Listings: %v", err)
+	}
+	want := []theme.Listing{
+		{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+		{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		{ID: theme.ListingRating, Group: theme.ListingGroupSort},
+		{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Listings() = %+v, want %+v (no genres)", got, want)
+	}
+}
+
+// A home page with too few genre-shaped links (below minGenreLinks) must not
+// be mistaken for a genre taxonomy — the "Ongoing" and tag links in the
+// fixture are exactly that kind of decoy.
+func TestListingsOffersNoGenresWhenNoneAreDiscoverable(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /": {File: "search.html"}, // no genre-shaped nav links at all
+	})
+	th := madara.NewWithClock(f, clock)
+
+	got, err := th.Listings(context.Background(), siteA())
+	if err != nil {
+		t.Fatalf("Listings: %v", err)
+	}
+	for _, l := range got {
+		if l.Group == theme.ListingGroupGenre {
+			t.Fatalf("got a genre listing %+v from a page with no discoverable genre nav", l)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d listings, want the 4 sort/status ones only: %+v", len(got), got)
+	}
+}
+
+// List(ListingLatest) must equal what Search(q="") returns today — it has to
+// delegate, not reimplement, so the two can never drift apart.
+func TestListLatestMatchesSearchWithNoQuery(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /": {File: "search.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	gotSearch, err := th.Search(context.Background(), siteA(), "", 1)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	f2 := themetest.New(t, map[string]themetest.Route{
+		"GET /": {File: "search.html"},
+	})
+	th2 := madara.NewWithClock(f2, clock)
+	gotList, err := th2.List(context.Background(), siteA(), theme.ListingLatest, 1)
+	if err != nil {
+		t.Fatalf("List(latest): %v", err)
+	}
+	if !reflect.DeepEqual(gotSearch, gotList) {
+		t.Fatalf("List(latest) = %+v, want it to equal Search(\"\") = %+v", gotList, gotSearch)
+	}
+}
+
+func TestListPopularUsesTheViewsOrder(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/?m_orderby=views": {File: "archive-page1.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	got, err := th.List(context.Background(), siteA(), theme.ListingPopular, 1)
+	if err != nil {
+		t.Fatalf("List(popular): %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d results, want 2: %+v", len(got), got)
+	}
+}
+
+func TestListNewUsesTheNewMangaOrder(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/?m_orderby=new-manga": {File: "archive-page1.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), theme.ListingNew, 1); err != nil {
+		t.Fatalf("List(new): %v", err)
+	}
+}
+
+func TestListRatingUsesTheRatingOrder(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/?m_orderby=rating": {File: "archive-page1.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), theme.ListingRating, 1); err != nil {
+		t.Fatalf("List(rating): %v", err)
+	}
+}
+
+func TestListCompletedFiltersByStatus(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/?status=end": {File: "archive-page1.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), theme.ListingCompleted, 1); err != nil {
+		t.Fatalf("List(completed): %v", err)
+	}
+}
+
+// The genre listing's ID carries the discovered taxonomy base, so List reuses
+// it directly rather than guessing "/genres/" a second time.
+func TestListGenreUsesTheDiscoveredHandle(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga-genre/action/": {File: "archive-page1.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), "genre:manga-genre/action", 1); err != nil {
+		t.Fatalf("List(genre:manga-genre/action): %v", err)
+	}
+}
+
+func TestListPaginatesSortAndGenreListings(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /manga/page/2/?m_orderby=views": {File: "archive-page2.html"},
+		"GET /manga-genre/action/page/2/":    {File: "archive-page2.html"},
+	})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), theme.ListingPopular, 2); err != nil {
+		t.Fatalf("List(popular, page 2): %v", err)
+	}
+	if _, err := th.List(context.Background(), siteA(), "genre:manga-genre/action", 2); err != nil {
+		t.Fatalf("List(genre, page 2): %v", err)
+	}
+}
+
+// A listing List was never told about is an error, never a silent fall back
+// to another one.
+func TestListRejectsAnUnknownListingID(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{})
+	th := madara.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), siteA(), "not-a-real-listing", 1); err == nil {
+		t.Fatal("want an error for an unknown listing id")
+	}
+	if _, err := th.List(context.Background(), siteA(), "genre:", 1); err == nil {
+		t.Fatal("want an error for an empty genre handle")
+	}
+}

@@ -28,6 +28,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -265,6 +267,31 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		return nil, fmt.Errorf("%s: resolve %s: %w", ID, reqPath, err)
 	}
 
+	return parseListingPage(t, s, doc, pageURL), nil
+}
+
+// parseListingPage reads the series cards off a page rendering the family's
+// "listing" markup — the WordPress search-results tabs and the CPT archive's
+// card grid share the same two shapes, so one parser reads a search results
+// page, the plain /{mangaSubPath}/ archive, an m_orderby-sorted or
+// status-filtered archive, and a genre archive alike (List uses it for the
+// latter three).
+//
+// A listing page also links to tags, genres and authors from inside the very
+// same markup this loop matches — .post-title is not unique to a series link.
+// mangaSubPath used to be trusted to say which segment is the real one, but
+// that default ("manga") is only ever right for a site that never renamed it,
+// and two real installs (toonily.com's "/serie/", allporncomic.com's
+// "/porncomic/") rename it to something a fixed default or a per-host guess
+// could never anticipate, discarding every result and making a working search
+// read as "this site has nothing" (found live, 2026-09-21).
+//
+// The fix asks the page itself rather than the config: whichever first path
+// segment the majority of candidates share *is* the site's series segment,
+// evidence found fresh on every request rather than assumed once. A tag or
+// author link mixed into the same batch is outvoted, because a real result
+// page has many more series links than decoys.
+func parseListingPage(t *Theme, s *theme.Source, doc *goquery.Document, pageURL string) []theme.SeriesStub {
 	var candidates []searchCandidate
 	// Search results render as tab items; a few skins use the same inner
 	// markup inside a plain .row, so match on the inner .post-title anchor
@@ -286,21 +313,6 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		})
 	})
 
-	// A search results page also links to tags, genres and authors from inside
-	// the very same markup this loop matches — .post-title is not unique to a
-	// series link. mangaSubPath used to be trusted to say which segment is the
-	// real one, but that default ("manga") is only ever right for a site that
-	// never renamed it, and two real installs (toonily.com's "/serie/",
-	// allporncomic.com's "/porncomic/") rename it to something a fixed default
-	// or a per-host guess could never anticipate, discarding every result and
-	// making a working search read as "this site has nothing" (found live,
-	// 2026-09-21).
-	//
-	// The fix asks the page itself rather than the config: whichever first path
-	// segment the majority of candidates share *is* the site's series segment,
-	// evidence found fresh on every request rather than assumed once. A tag or
-	// author link mixed into the same batch is outvoted, because a real result
-	// page has many more series links than decoys.
 	seg := dominantSegment(candidates)
 	var out []theme.SeriesStub
 	for _, c := range candidates {
@@ -313,7 +325,226 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		}
 		out = append(out, stub)
 	}
-	return out, nil
+	return out
+}
+
+// Sort values for the plugin's own m_orderby query parameter (its "Sort by"
+// dropdown), sent verbatim — this is the site's own vocabulary, not ours.
+// Confirmed live on 2026-09-24 against mangaread.org and the adult member
+// hentaixcomic.com: "views", "new-manga", "rating" and "trending" all answer
+// with the archive's card grid, distinct from the default ordering. "trending"
+// has no well-known Quire meaning (a hybrid of new and popular) and is not
+// offered; "latest" is what the *default* Browse already returns via Search,
+// and the Lister doc says ListingLatest may be omitted for exactly that
+// reason.
+const (
+	orderByPopular = "views"     // "most read / most viewed first" — ListingPopular's own wording
+	orderByNew     = "new-manga" // "most recently added to the site" — ListingNew's own wording
+	orderByRating  = "rating"
+)
+
+// minGenreLinks is the smallest number of distinct genre-shaped links
+// discoverGenres requires before trusting a segment is the site's genre
+// taxonomy rather than a handful of unrelated two-segment links (a single
+// "Ongoing" page link, an author archive with two authors). Both live sites
+// this theme was verified against clear this by a wide margin (45 on
+// mangaread.org); a site that does not is one whose genre navigation this
+// theme cannot find statically, and Listings simply offers none rather than
+// guessing.
+const minGenreLinks = 3
+
+// reservedListingSegments are first path segments that are never a genre
+// taxonomy on a WordPress site: core rewrite bases, and the plugin's own
+// non-series archives. Excluding them by name, rather than trusting the count
+// alone, keeps a small site's paginator ("/page/2/") or author archive from
+// outvoting a genuine but modest genre list.
+var reservedListingSegments = map[string]bool{
+	"page": true, "tag": true, "author": true, "category": true,
+	"comments": true, "feed": true, "wp-content": true, "wp-admin": true,
+	"wp-json": true, "cdn-cgi": true,
+}
+
+// pagedPath appends the plugin's WordPress-standard pagination segment to a
+// site-relative directory path (which must already end in "/"). Confirmed
+// live on 2026-09-24: /manga/page/2/?m_orderby=... and
+// /genres/action/page/2/ both return the next page's cards, distinct from
+// page 1's.
+func pagedPath(base string, page int) string {
+	if page <= 1 {
+		return base
+	}
+	return strings.TrimSuffix(base, "/") + fmt.Sprintf("/page/%d/", page)
+}
+
+// Listings implements theme.Lister.
+//
+// The sort and status listings are a fact about the plugin itself (PLAN
+// §7.3), so they are offered without a request: m_orderby and status are
+// documented query parameters of every Madara install's CPT archive,
+// confirmed live 2026-09-24 against mangaread.org and its adult member
+// hentaixcomic.com. Genres are different — the taxonomy's URL base is
+// per-site (mangaread.org uses "/genres/", hentaixcomic.com renamed it to
+// "/manga-genre/", both confirmed live) — so they are discovered from
+// whatever genre-shaped links the home page actually carries rather than
+// assumed at a fixed path. A site whose genre navigation cannot be found
+// statically (also observed live: hentaixcomic.com's is loaded behind an
+// interaction this theme does not simulate) simply gets no genre listings;
+// that is not an error; see discoverGenres.
+func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
+	o, err := t.overrides(s)
+	if err != nil {
+		return nil, err
+	}
+	listings := []theme.Listing{
+		{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+		{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		{ID: theme.ListingRating, Group: theme.ListingGroupSort},
+		{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus},
+	}
+
+	doc, err := t.doc(ctx, s, "/")
+	if err != nil {
+		// The sort and status listings above need no page fetch — they are the
+		// plugin's own query parameters, not something read off this page — so a
+		// home page that fails to load (a challenge, a timeout) still leaves a
+		// working, if genre-less, Browse rather than an empty list.
+		return listings, nil
+	}
+	listings = append(listings, discoverGenres(t, s, doc, o.PathSegment(KeyMangaSubPath))...)
+	return listings, nil
+}
+
+// discoverGenres finds the site's genre taxonomy archive links on a page —
+// the home page, in practice — without assuming a path. Every Madara install
+// links its series under {mangaSubPath}; the same page also carries a handful
+// of other two-segment link families (genres, sometimes tags or authors), and
+// the genre one is reliably the largest after the series links are excluded
+// by name. Confirmed live 2026-09-24: mangaread.org's home page carries 104
+// links under "/manga/" and 45 under "/genres/", with nothing else close.
+//
+// The discovered handle — "{segment}/{slug}" — becomes the genre listing's ID
+// via theme.GenreListing, so List can turn it back into a request path
+// without having to know the site's taxonomy base name a second time.
+func discoverGenres(t *Theme, s *theme.Source, doc *goquery.Document, seriesSubPath string) []theme.Listing {
+	type slugLabel struct{ slug, label string }
+	bySegment := map[string][]slugLabel{}
+	seen := map[string]bool{} // "segment/slug" already recorded, first label wins
+	var order []string
+
+	doc.Find("a[href]").Each(func(_ int, a *goquery.Selection) {
+		href, ok := a.Attr("href")
+		if !ok {
+			return
+		}
+		id := t.relativeID(s, href)
+		if id == "" {
+			return
+		}
+		if i := strings.IndexByte(id, '?'); i >= 0 {
+			id = id[:i]
+		}
+		trimmed := strings.Trim(id, "/")
+		segs := strings.Split(trimmed, "/")
+		if len(segs) != 2 || segs[0] == "" || segs[1] == "" {
+			return
+		}
+		seg, slug := segs[0], segs[1]
+		if seg == seriesSubPath || reservedListingSegments[seg] {
+			return
+		}
+		if _, err := strconv.Atoi(slug); err == nil {
+			// A numeric second segment under an unrecognised first one is
+			// almost always a paginator this site named differently, not a
+			// genre slug.
+			return
+		}
+		key := seg + "/" + slug
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		if _, ok := bySegment[seg]; !ok {
+			order = append(order, seg)
+		}
+		label := theme.Text(a)
+		if label == "" {
+			label = slug
+		}
+		bySegment[seg] = append(bySegment[seg], slugLabel{slug: slug, label: label})
+	})
+
+	best, bestN := "", 0
+	for _, seg := range order {
+		if n := len(bySegment[seg]); n > bestN {
+			best, bestN = seg, n
+		}
+	}
+	if best == "" || bestN < minGenreLinks {
+		return nil
+	}
+	entries := bySegment[best]
+	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
+	out := make([]theme.Listing, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, theme.GenreListing(best+"/"+e.slug, e.label))
+	}
+	return out
+}
+
+// List implements theme.Lister.
+//
+// ListingLatest delegates to Search with an empty query — today's Browse,
+// unchanged. Every other sort or status listing is the same CPT archive
+// Search's own results share their markup with, read through
+// parseListingPage; a genre listing reuses the handle Listings discovered,
+// with no second guess at the site's taxonomy base.
+func (t *Theme) List(ctx context.Context, s *theme.Source, listingID string, page int) ([]theme.SeriesStub, error) {
+	if listingID == "" || listingID == theme.ListingLatest {
+		return t.Search(ctx, s, "", page)
+	}
+	o, err := t.overrides(s)
+	if err != nil {
+		return nil, err
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	var base, query string
+	switch {
+	case listingID == theme.ListingPopular:
+		base = "/" + o.PathSegment(KeyMangaSubPath) + "/"
+		query = "m_orderby=" + orderByPopular
+	case listingID == theme.ListingNew:
+		base = "/" + o.PathSegment(KeyMangaSubPath) + "/"
+		query = "m_orderby=" + orderByNew
+	case listingID == theme.ListingRating:
+		base = "/" + o.PathSegment(KeyMangaSubPath) + "/"
+		query = "m_orderby=" + orderByRating
+	case listingID == theme.ListingCompleted:
+		base = "/" + o.PathSegment(KeyMangaSubPath) + "/"
+		query = "status=end"
+	default:
+		handle, ok := theme.GenreID(listingID)
+		if !ok || strings.Trim(handle, "/") == "" {
+			return nil, fmt.Errorf("%s: unknown listing %q", ID, listingID)
+		}
+		base = "/" + strings.Trim(handle, "/") + "/"
+	}
+
+	reqPath := pagedPath(base, page)
+	if query != "" {
+		reqPath += "?" + query
+	}
+	doc, err := t.doc(ctx, s, reqPath)
+	if err != nil {
+		return nil, err
+	}
+	pageURL, err := s.Resolve(reqPath)
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolve %s: %w", ID, reqPath, err)
+	}
+	return parseListingPage(t, s, doc, pageURL), nil
 }
 
 // Series implements theme.Theme.
