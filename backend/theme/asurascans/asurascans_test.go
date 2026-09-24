@@ -321,6 +321,18 @@ func TestListingsOffersSortStatusAndGenres(t *testing.T) {
 	}
 }
 
+// DefaultListing must name ListingPopular: KeyBrowseSort defaults to
+// "popular" (see TestListLatestMatchesSearchWithNoQuery's own fixture, which
+// already asks for sort=popular), so Search("") — absent a source override —
+// is the same request as ListingPopular, not ListingLatest's "most recently
+// updated" meaning.
+func TestDefaultListingIsPopular(t *testing.T) {
+	th := asurascans.NewWithClock(nil, clock)
+	if got := th.DefaultListing(); got != theme.ListingPopular {
+		t.Fatalf("DefaultListing() = %q, want %q", got, theme.ListingPopular)
+	}
+}
+
 // List(ListingLatest) must equal what Search(q="") returns today: today's
 // Browse. It has to delegate rather than reimplement, so a source's
 // browseSort override is honoured identically either way.

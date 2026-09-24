@@ -294,15 +294,25 @@ func seriesStubs(res seriesListResponse) []theme.SeriesStub {
 	return out
 }
 
+var _ theme.DefaultLister = (*Theme)(nil)
+
+// DefaultListing implements theme.DefaultLister: KeyBrowseSort defaults to
+// "popular" (see spec above), so — absent a source override — Search("") is
+// the same request as ListingPopular, not ListingLatest's "most recently
+// updated" meaning. (A source that has overridden KeyBrowseSort to "update"
+// gets a genuinely latest-updates Search(""); theme.DefaultLister has no
+// source-specific hook for that, so this names the theme's own shipped
+// default.)
+func (t *Theme) DefaultListing() string { return theme.ListingPopular }
+
 // Listings implements theme.Lister.
 //
 // The site's own browse-filter script (see the package comment) sends five
 // sort values, of which three have a well-known Quire meaning: "popular",
 // "newest" and "rating". "name" (alphabetical) and "update" have no
-// well-known counterpart and are not offered as their own listing — "update"
-// is what the *default* Browse already uses when browseSort is left at its
-// default, and the Lister doc says ListingLatest may be omitted for exactly
-// that reason.
+// well-known counterpart and are not offered as their own listing.
+// DefaultListing above is how the browse screen's always-first entry gets
+// the honest label "Popular" instead of "Latest updates" for this site.
 //
 // The site also filters its listing by status; only "completed" has a
 // well-known ID (ListingCompleted covers "finished series only", the one
