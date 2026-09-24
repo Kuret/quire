@@ -11,6 +11,17 @@ import (
 	"github.com/rickl/quire/backend/theme/themetest"
 )
 
+// TestDefaultListingIsNew pins this file's own doc comment: Search("") sends
+// no order_by and lands on the API's default, order_by=created_at — the same
+// ordering as ListingNew, not ListingLatest's "most recently updated"
+// meaning.
+func TestDefaultListingIsNew(t *testing.T) {
+	th := comick.NewWithClock(nil, clock)
+	if got := th.DefaultListing(); got != theme.ListingNew {
+		t.Fatalf("DefaultListing() = %q, want %q", got, theme.ListingNew)
+	}
+}
+
 func TestListings(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /api/metadata": jsonRoute("metadata.json"),

@@ -83,6 +83,14 @@ type metadataResponse struct {
 }
 
 var _ theme.Lister = (*Theme)(nil)
+var _ theme.DefaultLister = (*Theme)(nil)
+
+// DefaultListing implements theme.DefaultLister: Search("") sends no order_by
+// at all and lands on the API's own default, order_by=created_at — the same
+// ordering as ListingNew, not ListingLatest's "most recently updated"
+// meaning (see this file's doc comment) — so the browse screen's
+// always-first entry should say "Newly added", not "Latest updates".
+func (t *Theme) DefaultListing() string { return theme.ListingNew }
 
 // Listings implements theme.Lister.
 func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
