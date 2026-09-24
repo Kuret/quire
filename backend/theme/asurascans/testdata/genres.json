@@ -1,0 +1,7 @@
+{
+  "_comment": "Synthetic fixture reproducing the shape of /api/genres, the list the site's own browse-filter UI is built from.",
+  "data": [
+    {"id": 1, "name": "Action", "slug": "action"},
+    {"id": 2, "name": "Fantasy", "slug": "fantasy"}
+  ]
+}

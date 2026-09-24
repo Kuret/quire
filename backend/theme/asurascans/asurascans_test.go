@@ -294,6 +294,137 @@ func TestEveryCallIsDiscovery(t *testing.T) {
 	}
 }
 
+// --- Lister ---
+
+// Listings must offer the sort and status listings this site actually
+// serves, then the genres straight from /api/genres.
+func TestListingsOffersSortStatusAndGenres(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/genres": {File: "genres.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+
+	got, err := th.Listings(context.Background(), site())
+	if err != nil {
+		t.Fatalf("Listings: %v", err)
+	}
+	want := []theme.Listing{
+		{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+		{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		{ID: theme.ListingRating, Group: theme.ListingGroupSort},
+		{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus},
+		{ID: "genre:action", Label: "Action", Group: theme.ListingGroupGenre},
+		{ID: "genre:fantasy", Label: "Fantasy", Group: theme.ListingGroupGenre},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Listings() = %+v, want %+v", got, want)
+	}
+}
+
+// List(ListingLatest) must equal what Search(q="") returns today: today's
+// Browse. It has to delegate rather than reimplement, so a source's
+// browseSort override is honoured identically either way.
+func TestListLatestMatchesSearchWithNoQuery(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=popular": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+
+	gotSearch, err := th.Search(context.Background(), site(), "", 1)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	f2 := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=popular": {File: "browse.json"},
+	})
+	th2 := asurascans.NewWithClock(f2, clock)
+	gotList, err := th2.List(context.Background(), site(), theme.ListingLatest, 1)
+	if err != nil {
+		t.Fatalf("List(latest): %v", err)
+	}
+	if !reflect.DeepEqual(gotSearch, gotList) {
+		t.Fatalf("List(latest) = %+v, want it to equal Search(\"\") = %+v", gotList, gotSearch)
+	}
+}
+
+func TestListPopularUsesThePopularSort(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=popular": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	got, err := th.List(context.Background(), site(), theme.ListingPopular, 1)
+	if err != nil {
+		t.Fatalf("List(popular): %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "Example Series Two" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestListNewUsesTheNewestSort(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=newest": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), theme.ListingNew, 1); err != nil {
+		t.Fatalf("List(new): %v", err)
+	}
+}
+
+func TestListRatingUsesTheRatingSort(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=rating": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), theme.ListingRating, 1); err != nil {
+		t.Fatalf("List(rating): %v", err)
+	}
+}
+
+func TestListCompletedFiltersByStatus(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=0&order=desc&sort=update&status=completed": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), theme.ListingCompleted, 1); err != nil {
+		t.Fatalf("List(completed): %v", err)
+	}
+}
+
+func TestListGenreFiltersByGenreSlug(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?genre=action&limit=20&offset=0&order=desc&sort=update": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), "genre:action", 1); err != nil {
+		t.Fatalf("List(genre:action): %v", err)
+	}
+}
+
+// A listing List never named is an error, never a silent fallback to
+// another one.
+func TestListRejectsAnUnknownListingID(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), "genre:", 1); err == nil {
+		t.Fatal("want an error for an empty genre id")
+	}
+	if _, err := th.List(context.Background(), site(), "not-a-real-listing", 1); err == nil {
+		t.Fatal("want an error for an unknown listing id")
+	}
+}
+
+func TestListPagesWithOffset(t *testing.T) {
+	f := themetest.New(t, map[string]themetest.Route{
+		"GET /api/series?limit=20&offset=20&order=desc&sort=popular": {File: "browse.json"},
+	})
+	th := asurascans.NewWithClock(f, clock)
+	if _, err := th.List(context.Background(), site(), theme.ListingPopular, 2); err != nil {
+		t.Fatalf("List page 2: %v", err)
+	}
+}
+
 func TestOverridesRejectAnUnknownKey(t *testing.T) {
 	th := asurascans.New(nil)
 	if err := th.ValidateOverrides(map[string]any{"nope": true}); err == nil {

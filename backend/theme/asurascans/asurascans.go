@@ -263,7 +263,14 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	if err := t.apiGet(ctx, s, "/api/series", v, &res); err != nil {
 		return nil, err
 	}
+	return seriesStubs(res), nil
+}
 
+// seriesStubs maps a /api/series response's entries onto the stubs the theme
+// hands back. Search and List's listing pages read the same envelope, so this
+// is the one place that decides which entries are worth keeping (a slug- or
+// title-less entry is not a series this theme can resolve later).
+func seriesStubs(res seriesListResponse) []theme.SeriesStub {
 	out := make([]theme.SeriesStub, 0, len(res.Data))
 	for _, e := range res.Data {
 		if e.Slug == "" || e.Title == "" {
@@ -275,7 +282,97 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 			CoverURL: e.Cover,
 		})
 	}
-	return out, nil
+	return out
+}
+
+// Listings implements theme.Lister.
+//
+// The site's own browse-filter script (see the package comment) sends five
+// sort values, of which three have a well-known Quire meaning: "popular",
+// "newest" and "rating". "name" (alphabetical) and "update" have no
+// well-known counterpart and are not offered as their own listing — "update"
+// is what the *default* Browse already uses when browseSort is left at its
+// default, and the Lister doc says ListingLatest may be omitted for exactly
+// that reason.
+//
+// The site also filters its listing by status; only "completed" has a
+// well-known ID (ListingCompleted covers "finished series only", the one
+// status filter Quire's browse screen offers).
+//
+// Genres come from the API's own /api/genres, the same list the site's own
+// filter UI is built from — fetched fresh here because the caller (the
+// service layer) caches the answer per source for 24h.
+func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {
+	listings := []theme.Listing{
+		{ID: theme.ListingPopular, Group: theme.ListingGroupSort},
+		{ID: theme.ListingNew, Group: theme.ListingGroupSort},
+		{ID: theme.ListingRating, Group: theme.ListingGroupSort},
+		{ID: theme.ListingCompleted, Group: theme.ListingGroupStatus},
+	}
+
+	var res genreListResponse
+	if err := t.apiGet(ctx, s, "/api/genres", nil, &res); err != nil {
+		return nil, err
+	}
+	for _, g := range res.Data {
+		name := strings.TrimSpace(g.Name)
+		slug := strings.TrimSpace(g.Slug)
+		if name == "" || slug == "" {
+			continue
+		}
+		listings = append(listings, theme.GenreListing(slug, name))
+	}
+	return listings, nil
+}
+
+// List implements theme.Lister.
+//
+// ListingLatest delegates to Search with an empty query, which is what today's
+// Browse already does ("List(ListingLatest) must equal what Search(q="")
+// returns today"). Every other listing goes to the same /api/series endpoint
+// Search uses, with an explicit sort or status/genre filter instead of the
+// source's configured browseSort — a named listing's meaning does not depend
+// on a source's override.
+func (t *Theme) List(ctx context.Context, s *theme.Source, listingID string, page int) ([]theme.SeriesStub, error) {
+	if listingID == "" || listingID == theme.ListingLatest {
+		return t.Search(ctx, s, "", page)
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	v := url.Values{}
+	switch {
+	case listingID == theme.ListingPopular:
+		v.Set("sort", "popular")
+		v.Set("order", "desc")
+	case listingID == theme.ListingNew:
+		v.Set("sort", "newest")
+		v.Set("order", "desc")
+	case listingID == theme.ListingRating:
+		v.Set("sort", "rating")
+		v.Set("order", "desc")
+	case listingID == theme.ListingCompleted:
+		v.Set("status", "completed")
+		v.Set("sort", "update")
+		v.Set("order", "desc")
+	default:
+		genre, ok := theme.GenreID(listingID)
+		if !ok || genre == "" {
+			return nil, fmt.Errorf("%s: unknown listing %q", ID, listingID)
+		}
+		v.Set("genre", genre)
+		v.Set("sort", "update")
+		v.Set("order", "desc")
+	}
+	v.Set("limit", strconv.Itoa(searchLimit))
+	v.Set("offset", strconv.Itoa((page-1)*searchLimit))
+
+	var res seriesListResponse
+	if err := t.apiGet(ctx, s, "/api/series", v, &res); err != nil {
+		return nil, err
+	}
+	return seriesStubs(res), nil
 }
 
 // Series implements theme.Theme.

@@ -45,6 +45,18 @@ type seriesListResponse struct {
 	Data []seriesEntry `json:"data"`
 }
 
+// genreEntry is one entry of /api/genres — the same list the site's own
+// browse-filter UI is built from.
+type genreEntry struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+// genreListResponse is what /api/genres answers.
+type genreListResponse struct {
+	Data []genreEntry `json:"data"`
+}
+
 // seriesDetailResponse is what /api/series/{slug} answers. The site's own
 // recommendation rail rides along as "recommended_series"; Series() has no
 // use for it and it is left unmapped.
