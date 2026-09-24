@@ -3449,6 +3449,34 @@ the full message shapes.
 (`build/mupdf.sh`, `THIRD_PARTY.md`) — a licensing choice the user made
 explicitly, not a default this document assumes for future dependencies.
 
+> **Round 2, 2026-09-24: the combined search's Books/Manga filter moved to the
+> backend.** Books mixing into the combined search (above) shipped with a
+> filter on `ui/SearchAll.qml` that only ever hid rows on the page already
+> fetched — `Grouping.fill`'s `kind` argument dropped groups of the wrong kind
+> out of the model after the backend had merged and paged them. That meant a
+> Books search on a page with no books showed nothing, even when book sources
+> had results elsewhere in the listing: the filter narrowed what was *shown*,
+> never what was *asked for*. `MessageSearchAll`/`MessageSearchAllPrivate` now
+> carry a `kind` field — `""`, `"book"` or `"manga"`, kind.go's own vocabulary
+> — and `newSearchAllPager` (`backend/service/searchall.go`) binds only the
+> sources whose `kindOf(theme)` matches *before* ever fetching: a Books search
+> never sends a request to a manga site, page 1 of it is the first N book
+> groups, and the pager's cache key includes the kind so switching the filter
+> is exactly like typing a different query. A source whose theme cannot be
+> bound has an unknowable kind, so a filtered search leaves it out entirely
+> rather than reporting it as a failure it was never going to be asked to
+> answer. On the frontend, choosing a filter (`SearchAll.qml`'s `showKind`)
+> re-runs the current query from page 1 with that kind; the client-side hide
+> is gone along with `hiddenCount`, `refilterRequested` and the "N results
+> hidden" wording — `Kinds.filterLine`/`emptyLine` just name the filter that
+> is on. A fresh screen still starts at "All" (`reset()`); typing a new query
+> on the same screen keeps whichever filter was already chosen. The same
+> round also closed a second bug in the merge itself: a source returning
+> several editions of one title under that title (Shelfmark does) had
+> contributed one match per edition, so a group could list one source several
+> times over — `group()`'s `dedupeBySource` now keeps only that source's
+> best-ranked (lowest rank) match within a group.
+
 ### 12.9 Continue reading from Downloaded and Watching — 2026-09-24
 
 **Why.** A tap on the Downloaded overview or the Watching list (§12.5,
