@@ -103,6 +103,16 @@ func (s *Service) openSaved(ctx context.Context, out Sender, req savedRequest) e
 
 	position := clampPosition(rec.Position, len(paths))
 
+	// LastReadAt marks this as a real read, not a Try session (which has no
+	// record to mark). It is what lets the continue-reading rule (PLAN
+	// §12.9) tell "opened and finished" from "never opened" without a
+	// network round trip.
+	rec.LastReadAt = s.now()
+	if err := s.shelfStore.Put(rec); err != nil {
+		s.log.Warn("could not remember when a saved chapter was opened",
+			"source", req.SourceID, "series", req.SeriesID, "chapter", req.ChapterID, "err", err)
+	}
+
 	// private and inLibrary are what let the reader overlay decide "Send to
 	// library" correctly wherever it was opened from — including from the
 	// Downloaded screen, which carries no ChapterList of its own to ask

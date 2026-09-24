@@ -58,6 +58,7 @@ func (s *Service) savePosition(req savePositionRequest) error {
 			rec.PositionFraction = fraction
 			rec.PositionSnippet = snippet
 			rec.PositionLayout = hash
+			rec.LastReadAt = s.now()
 			if err := s.shelfStore.Put(rec); err != nil {
 				s.log.Warn("could not remember a book's reading position", "err", err)
 			}
@@ -66,6 +67,7 @@ func (s *Service) savePosition(req savePositionRequest) error {
 	}
 
 	rec.Position = clampPosition(req.Position, len(rec.Pages))
+	rec.LastReadAt = s.now()
 	if err := s.shelfStore.Put(rec); err != nil {
 		s.log.Warn("could not remember a saved chapter's reading position",
 			"source", req.SourceID, "series", req.SeriesID, "chapter", req.ChapterID, "err", err)

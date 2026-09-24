@@ -122,6 +122,15 @@ type Record struct {
 	PositionFraction float64 `json:"positionFraction,omitempty"`
 	PositionSnippet  string  `json:"positionSnippet,omitempty"`
 	PositionLayout   string  `json:"positionLayout,omitempty"`
+
+	// LastReadAt is when this chapter (or book) was last opened for real
+	// reading — OpenSaved answering SavedOpened/BookOpened, and every
+	// SavePosition or CloseBook against it afterwards. It is never set for a
+	// Try session, which has no shelf record to set it on. It is what lets
+	// the service work out where to continue a series without a network
+	// round trip (PLAN §12.9): the most recently read record, or — once it
+	// is finished — whichever saved record comes after it.
+	LastReadAt time.Time `json:"lastReadAt,omitempty"`
 }
 
 // IsBook reports whether r is a book record rather than a chapter of page

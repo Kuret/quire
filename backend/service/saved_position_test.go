@@ -43,3 +43,28 @@ func TestSavePositionIsRememberedAndClamped(t *testing.T) {
 		return got.Position == pageCount-1
 	})
 }
+
+// SavePosition marks the chapter as read, exactly as OpenSaved does — the
+// continue-reading rule (PLAN §12.9) needs it set by either.
+func TestSavePositionRemembersWhenItWasRead(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := saveOne(t, h, rec)
+
+	key := shelf.Key{Source: "example-reader", Series: seriesID, Chapter: chapterID}
+	before, ok := h.shelfStore.Get(key)
+	if !ok {
+		t.Fatal("chapter was not saved")
+	}
+	if !before.LastReadAt.IsZero() {
+		t.Fatal("lastReadAt is already set before any position was saved")
+	}
+
+	handle(t, h.svc, rec, appload.MessageSavePosition,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","chapterId":"`+chapterID+`","position":1}`)
+	waitFor(t, func() bool {
+		got, _ := h.shelfStore.Get(key)
+		return !got.LastReadAt.IsZero()
+	})
+}

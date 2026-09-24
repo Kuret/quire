@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/service"
 	"github.com/rickl/quire/backend/shelf"
+	"github.com/rickl/quire/backend/tryreader"
 )
 
 // waitFor polls cond, the way recorder.wait polls for a frame, for state that
@@ -79,6 +81,66 @@ func TestOpenSavedReturnsEveryPagePathUpFront(t *testing.T) {
 
 func filepathIsAbs(p string) bool {
 	return len(p) > 0 && p[0] == '/'
+}
+
+// OpenSaved marks the chapter as read — the continue-reading rule (PLAN
+// §12.9) tells "opened and finished" from "never opened" off this field, and
+// it must be set by the read itself, not only by a later SavePosition.
+func TestOpenSavedRemembersWhenItWasRead(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := saveOne(t, h, rec)
+
+	key := shelf.Key{Source: "example-reader", Series: seriesID, Chapter: chapterID}
+	before, ok := h.shelfStore.Get(key)
+	if !ok {
+		t.Fatal("chapter was not saved")
+	}
+	if !before.LastReadAt.IsZero() {
+		t.Fatal("lastReadAt is already set before the chapter was ever opened")
+	}
+
+	handle(t, h.svc, rec, appload.MessageOpenSaved,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","chapterId":"`+chapterID+`"}`)
+	rec.wait(t, appload.MessageSavedOpened)
+
+	after, ok := h.shelfStore.Get(key)
+	if !ok {
+		t.Fatal("the record disappeared")
+	}
+	if after.LastReadAt.IsZero() {
+		t.Error("lastReadAt was not set by OpenSaved")
+	}
+}
+
+// Try never remembers a position, and it must never touch a shelf record's
+// lastReadAt either — a Try session has no saved chapter of its own, but a
+// Try preview of a series that also has *saved* chapters must not mark any
+// of them read just because the series was glanced at.
+func TestTryNeverSetsLastReadAt(t *testing.T) {
+	tryDir := t.TempDir()
+	h := buildDownloadHarness(t, downloadRoutes(t), func(o *service.Options) {
+		o.TryCache = tryreader.New(tryDir, o.Fetcher)
+	})
+	addSource(t, h.store)
+	rec := &recorder{}
+	seriesID, chapterID := saveOne(t, h, rec)
+
+	key := shelf.Key{Source: "example-reader", Series: seriesID, Chapter: chapterID}
+
+	tryRec := &recorder{}
+	handle(t, h.svc, tryRec, appload.MessageTryChapter,
+		`{"sourceId":"example-reader","seriesId":"`+seriesID+`","chapterId":"`+chapterID+`"}`)
+	tryRec.wait(t, appload.MessageTryReady)
+
+	got, ok := h.shelfStore.Get(key)
+	if !ok {
+		t.Fatal("the saved record disappeared")
+	}
+	if !got.LastReadAt.IsZero() {
+		t.Error("Try set lastReadAt on the saved record for the same chapter")
+	}
 }
 
 // SavedOpened's private carries the source's own privacy, not whatever a

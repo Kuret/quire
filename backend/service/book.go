@@ -174,6 +174,14 @@ func (s *Service) openSavedBook(ctx context.Context, out Sender, req savedReques
 	}
 	inLibrary := s.chapterInLibrary(req.SourceID, req.SeriesID, req.ChapterID)
 
+	// LastReadAt marks this as a real read, exactly as openSaved does for a
+	// chapter of pages — see that function's own comment.
+	rec.LastReadAt = s.now()
+	if err := s.shelfStore.Put(rec); err != nil {
+		s.log.Warn("could not remember when a saved book was opened",
+			"source", req.SourceID, "series", req.SeriesID, "chapter", req.ChapterID, "err", err)
+	}
+
 	s.sendBookStatus(out, key, "Opening the book…")
 	s.goBackground(ctx, func(ctx context.Context) {
 		s.endCurrentBookSession()
@@ -366,6 +374,7 @@ func (s *Service) closeBook(ctx context.Context, req closeBookRequest) error {
 				rec.PositionFraction = fraction
 				rec.PositionSnippet = snippet
 				rec.PositionLayout = hash
+				rec.LastReadAt = s.now()
 				if err := s.shelfStore.Put(rec); err != nil {
 					s.log.Warn("could not remember a book's reading position", "err", err)
 				}
