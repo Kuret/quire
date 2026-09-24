@@ -16,6 +16,10 @@
 
   The rows are a manga-list-1-list, the same family as the home page's.
 
+  The GENRES block reproduces the directory's own filter bar (verified live
+  on fanfox.net and mangahere.cc on 2026-09-24): one link per genre, plus an
+  "All" entry that clears the filter and is not itself a genre.
+
   Why synthetic: see testdata/home.html. Host is example.invalid (RFC 2606).
 -->
 <!DOCTYPE html>
@@ -25,6 +29,17 @@
   <title>Comic Directory - Example Comics</title>
 </head>
 <body>
+
+<div class="update-bar-filter-list">
+  <div class="container">
+    <p class="update-bar-filter-list-title">GENRES</p>
+    <ul>
+      <li><a class="active" href="/directory/">All</a></li>
+      <li><a href="/directory/action/" title="Action">Action</a></li>
+      <li><a href="/directory/slice-of-life/" title="Slice of Life">Slice of Life</a></li>
+    </ul>
+  </div>
+</div>
 
 <div class="manga-list-1">
   <ul class="manga-list-1-list line">

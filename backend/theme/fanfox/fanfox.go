@@ -26,6 +26,17 @@
 //     the images. Pages() reports that as what it is rather than as an empty
 //     chapter, because an empty chapter reads as "nothing to download".
 //
+// # Browse listings (theme.Lister, see listing.go)
+//
+// The directory offers a "News" sort (newly added series — distinct from
+// what today's default Browse reads, which is popularity), a "Rating" sort,
+// a "Completed" status filter, and one path segment per genre, all
+// documented and provenance-dated in listing.go. Not offered: the
+// alphabetical order (no well-known ID for it), the "New Updated" status
+// filter (the same page as today's default Browse under a different label),
+// and the /ranking/ page (its non-weekly tabs load by a script call this
+// theme does not make).
+//
 // # Provenance
 //
 // Written from HTML observed live on 2026-09-16, and from endpoint shapes read
@@ -300,6 +311,15 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		return nil, fmt.Errorf("%s: resolve %s: %w", ID, path, err)
 	}
 
+	return t.scrapeStubs(s, doc, pageURL), nil
+}
+
+// scrapeStubs reads the series rows out of any of this site's listing pages —
+// home, search results, or the directory — which all share the same numbered
+// list markup. pageURL is the page doc was fetched from, used as the cover
+// referrer (PLAN §7.6): the truth of what was actually requested, never a
+// value assembled by hand.
+func (t *Theme) scrapeStubs(s *theme.Source, doc *goquery.Document, pageURL string) []theme.SeriesStub {
 	var out []theme.SeriesStub
 	seen := make(map[string]bool)
 	doc.Find(".manga-list-1-list li, .manga-list-2-list li, .manga-list-4-list li").Each(func(_ int, li *goquery.Selection) {
@@ -332,7 +352,7 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		}
 		out = append(out, stub)
 	})
-	return out, nil
+	return out
 }
 
 // Series implements theme.Theme.
