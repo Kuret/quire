@@ -997,12 +997,16 @@ Item {
                                 // would be the screen inventing a fact about a
                                 // thing that has none, so a book's row says
                                 // nothing here until a download does.
-                                text: model.downloadMessage.length > 0 && model.downloadState !== "confirm"
+                                // Each role read through `|| ""`: a row that
+                                // arrives without one (a model entry built by a
+                                // path that sets only some roles) is an empty
+                                // field, not a TypeError that blanks the line.
+                                text: (model.downloadMessage || "").length > 0 && model.downloadState !== "confirm"
                                       ? model.downloadMessage
                                       : (screen.isBook
                                          ? ""
-                                         : (model.published.length > 0 ? model.published : "Date unknown") +
-                                           (model.scanlator.length > 0 ? " · " + model.scanlator : ""))
+                                         : ((model.published || "").length > 0 ? model.published : "Date unknown") +
+                                           ((model.scanlator || "").length > 0 ? " · " + model.scanlator : ""))
                                 font.pointSize: Style.smallSize
                                 color: Style.muted
                             }
