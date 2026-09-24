@@ -36,6 +36,16 @@
 // (see normaliseAPIHost) rewrites every request to the API host regardless
 // of which one a source names.
 //
+// # Browse listings (theme.Lister, see listing.go)
+//
+// The one search endpoint doubles as every browse listing: a popularity and a
+// newly-added sort, a finished-only status filter, and one filter per genre
+// (fetched live from the site's own bootstrap data, not hard-coded). No
+// rating-order listing exists — GlobalComix has no sort id for one — and no
+// second "latest" listing duplicates what today's default Browse already
+// reads. listing.go's own doc comment records exactly which query parameters
+// were tried, which of them do nothing, and why.
+//
 // # The client header and the reading-grant cookie
 //
 // Every request this theme sends needs a header naming the client
@@ -278,6 +288,15 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 // exactly what the site's own "Explore" page sends — so PLAN §12.1's "search
 // with an empty query is browse" costs nothing extra to support here.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
+	return t.searchSeries(ctx, s, q, page, nil)
+}
+
+// searchSeries is Search's body, generalised over the extra query parameters
+// listing.go's Lister methods filter or sort by — the one search endpoint this
+// theme has doubles as every browse listing (see listing.go's package-level
+// doc comment for which parameters were confirmed live and which were tried
+// and found to do nothing).
+func (t *Theme) searchSeries(ctx context.Context, s *theme.Source, q string, page int, extra url.Values) ([]theme.SeriesStub, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -288,6 +307,11 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	v.Set("context", "series")
 	v.Set("p", strconv.Itoa(page))
 	v.Set("perpage", strconv.Itoa(searchPerPage))
+	for k, vals := range extra {
+		for _, val := range vals {
+			v.Add(k, val)
+		}
+	}
 
 	res, err := getJSON[searchResults](ctx, t, t.f, s, t.endpoint(s, "/v1/search/query", v))
 	if err != nil {

@@ -128,6 +128,26 @@ type readerCDNAccess struct {
 	PageCount   int    `json:"page_count"`
 }
 
+// appInit is /v1/app/init's payload — the client's own bootstrap lookup
+// tables. Only comic_genres is read; the rest (currencies, countries, the
+// vast majority of the response) is declared nowhere because nothing here
+// uses it. See listing.go for why this call exists: it is the one place the
+// site publishes its genre catalogue as data rather than markup.
+type appInit struct {
+	ComicGenres []comicGenre `json:"comic_genres"`
+}
+
+// comicGenre is one entry of appInit.ComicGenres. ID is what comic_genre_id
+// filters the search endpoint by (see listing.go); Slug exists on the live
+// response too but is not used — the numeric ID is the one confirmed to
+// actually filter results, and carrying a second, unverified identifier
+// alongside it would invite using the wrong one.
+type comicGenre struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	IsActive int    `json:"is_active"`
+}
+
 // readResult is /v1/readV3/{releaseKey}'s payload — the one Pages() reads.
 type readResult struct {
 	Key             string            `json:"key"`
