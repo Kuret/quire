@@ -1972,6 +1972,18 @@ Window {
         // label inert for real input is the property.
         win.want("a one-page pager's label is dead to touch", bookLabelArea.enabled, false)
 
+        // The target spans the bar's full height and the whole gap between
+        // the buttons: sized to the label's one line of text, taps on the
+        // device missed it more often than they landed.
+        var chapterPagerBar = win.findChild(chapterList, "chapterPager")
+        win.want("the label's target is the pager's full height",
+                 chapterLabelArea.height, chapterPagerBar.height)
+        win.want("and much wider than its text",
+                 chapterLabelArea.width > win.findChild(chapterPagerBar, "pagerLabel").contentWidth * 1.5, true)
+        win.want("and looks like a button", win.findChild(chapterPagerBar, "pagerLabelButton").visible, true)
+        win.want("but not where it cannot be pressed",
+                 win.findChild(win.findChild(bookChapterList, "chapterPager"), "pagerLabelButton").visible, false)
+
         var jumpPanel = win.findChild(chapterList, "jumpPanel")
         win.want("the panel starts closed", chapterList.jumpOpen, false)
         win.want("and off screen", jumpPanel.visible, false)

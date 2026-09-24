@@ -132,13 +132,38 @@ Item {
         color: Style.ink
     }
 
-    // The label's own tap target. It only ever covers the label's own box —
-    // not the gap either side of it — so it cannot be reached by a tap meant
-    // for Previous or Next.
+    // The label's own tap target, kept a gap clear of Previous and Next so a
+    // tap meant for either cannot land here.
+    //
+    // The target is the whole gap between the two buttons at their full
+    // height, not the label's own bounds: those are only as tall as one line
+    // of text, and on the device a tap on "Page 3 of 33" missed more often
+    // than it landed. The outline says it is a button, the same way the ones
+    // beside it do.
+    Rectangle {
+        objectName: "pagerLabelButton"
+        anchors {
+            left: previousButton.right; leftMargin: Style.gap
+            right: nextButton.left; rightMargin: Style.gap
+            verticalCenter: parent.verticalCenter
+        }
+        height: Style.buttonHeight
+        visible: bar.jumpable
+        z: -1
+        color: labelArea.pressed ? Style.pressed : Style.paper
+        border.width: 2
+        border.color: Style.rule
+        radius: 6
+    }
+
     MouseArea {
         id: labelArea
         objectName: "pagerLabelArea"
-        anchors.fill: pagerLabel
+        anchors {
+            left: previousButton.right; leftMargin: Style.gap
+            right: nextButton.left; rightMargin: Style.gap
+            top: parent.top; bottom: parent.bottom
+        }
         enabled: bar.jumpable
         onClicked: bar.jumpRequested()
     }
