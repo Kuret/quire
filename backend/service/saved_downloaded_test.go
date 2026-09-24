@@ -8,13 +8,22 @@ import (
 )
 
 type savedDownloadedRow struct {
-	SourceID             string `json:"sourceId"`
-	SeriesID             string `json:"seriesId"`
-	Title                string `json:"title"`
-	Detail               string `json:"detail"`
-	SavedCount           int    `json:"savedCount"`
-	LatestSavedChapterID string `json:"latestSavedChapterId"`
-	LatestUUID           string `json:"latestUuid"`
+	SourceID             string         `json:"sourceId"`
+	SeriesID             string         `json:"seriesId"`
+	Title                string         `json:"title"`
+	Detail               string         `json:"detail"`
+	SavedCount           int            `json:"savedCount"`
+	LatestSavedChapterID string         `json:"latestSavedChapterId"`
+	LatestUUID           string         `json:"latestUuid"`
+	Continue             continueTarget `json:"continue"`
+}
+
+// continueTarget mirrors service.continueTarget's JSON shape for a
+// service_test-package test to decode into.
+type continueTarget struct {
+	Kind         string `json:"kind"`
+	ChapterID    string `json:"chapterId"`
+	DocumentUUID string `json:"documentUuid"`
 }
 
 func fetchDownloaded(t *testing.T, h *downloadHarness) []savedDownloadedRow {

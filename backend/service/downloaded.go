@@ -62,6 +62,12 @@ type downloadedRow struct {
 	// for a "read latest" affordance that opens it with OpenSaved. Empty when
 	// nothing is saved.
 	LatestSavedChapterID string `json:"latestSavedChapterId,omitempty"`
+
+	// Continue is what tapping this row should open (PLAN §12.9) — computed
+	// with no network involved from the records already grouped into this
+	// row. Kind "" means there is nothing to read yet, so a tap falls back
+	// to browsing the series, exactly as every tap used to.
+	Continue continueTarget `json:"continue"`
 }
 
 // RemovedSourceNote is what a row says when the source it came from is gone.
@@ -212,6 +218,7 @@ func (s *Service) downloadedRows(private bool) []downloadedRow {
 			// first.
 			row.LatestSavedChapterID = savedRecs[0].Chapter
 		}
+		row.Continue = computeContinue(savedRecs, row.LatestUUID)
 		if src, ok := s.store.Get(k.source); ok {
 			row.SourceName, row.Openable = src.Name, true
 		} else {

@@ -8,8 +8,30 @@ package service
 import (
 	"sort"
 
+	"github.com/rickl/quire/backend/library"
 	"github.com/rickl/quire/backend/shelf"
 )
+
+// continueFor works out one series' continueTarget straight from the shelf
+// and library stores — for a caller that, unlike downloadedRows, has not
+// already grouped that series' records in hand (watchView's viewOf).
+func (s *Service) continueFor(sourceID, seriesID string) continueTarget {
+	var savedRecs []shelf.Record
+	if s.shelfStore != nil {
+		savedRecs = s.shelfStore.ForSeries(sourceID, seriesID)
+	}
+	var latest string
+	if s.libStore != nil {
+		var recs []library.Record
+		for _, rec := range s.libStore.List() {
+			if rec.Source == sourceID && rec.Series == seriesID && rec.DocumentUUID != "" {
+				recs = append(recs, rec)
+			}
+		}
+		latest = latestUUID(recs)
+	}
+	return computeContinue(savedRecs, latest)
+}
 
 // The three kinds a continueTarget can be. continueKindNone ("") means there
 // is nothing to read yet — the row falls back to browsing the series, the

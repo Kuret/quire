@@ -78,6 +78,12 @@ type watchView struct {
 	// ordinary Watching screen or the private one — without either side
 	// having to look the source up again.
 	Private bool `json:"private"`
+
+	// Continue is what tapping this row should open (PLAN §12.9) — the same
+	// computation and the same shape as downloadedRow's own, so a tap does
+	// the same thing whichever of the two screens it lands on. Kind "" means
+	// nothing to read yet, so the row falls back to browsing the series.
+	Continue continueTarget `json:"continue"`
 }
 
 const (
@@ -136,6 +142,7 @@ func (s *Service) viewOf(w *state.Watch, override string) watchView {
 		v.SourceName = src.Name
 		v.Private = src.IsPrivate()
 	}
+	v.Continue = s.continueFor(w.SourceID, w.SeriesID)
 	if !w.CheckedAt.IsZero() {
 		v.CheckedAt = w.CheckedAt.UTC().Format(time.RFC3339)
 	}

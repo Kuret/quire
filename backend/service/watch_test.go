@@ -256,8 +256,9 @@ type watchRow struct {
 	State       string `json:"state"`
 	Status      string `json:"status"`
 	Detail      string `json:"detail"`
-	CheckedAt   string `json:"checkedAt"`
-	Private     bool   `json:"private"`
+	CheckedAt   string         `json:"checkedAt"`
+	Private     bool           `json:"private"`
+	Continue    continueTarget `json:"continue"`
 }
 
 // settled waits for a watch update that is not the "checking" placeholder.
