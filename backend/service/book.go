@@ -70,21 +70,30 @@ func (r closeBookRequest) key() bookKey { return bookKey{r.SourceID, r.SeriesID,
 
 // bookOpened is MessageBookOpened's payload.
 type bookOpened struct {
-	SourceID    string                  `json:"sourceId"`
-	SeriesID    string                  `json:"seriesId"`
-	ChapterID   string                  `json:"chapterId"`
-	Title       string                  `json:"title"`
-	Mode        string                  `json:"mode"`
-	FixedLayout bool                    `json:"fixedLayout"`
-	PageCount   int                     `json:"pageCount"`
-	Page        int                     `json:"page"`
-	Toc         []bookrender.TocEntry   `json:"toc"`
-	Settings    state.ReaderSettings    `json:"settings"`
-	FontChoices []bookrender.FontChoice `json:"fontChoices"`
-	SizeMin     int                     `json:"sizeMin"`
-	SizeMax     int                     `json:"sizeMax"`
-	Private     bool                    `json:"private"`
-	InLibrary   bool                    `json:"inLibrary"`
+	SourceID       string                     `json:"sourceId"`
+	SeriesID       string                     `json:"seriesId"`
+	ChapterID      string                     `json:"chapterId"`
+	Title          string                     `json:"title"`
+	Mode           string                     `json:"mode"`
+	FixedLayout    bool                       `json:"fixedLayout"`
+	PageCount      int                        `json:"pageCount"`
+	Page           int                        `json:"page"`
+	Toc            []bookrender.TocEntry      `json:"toc"`
+	Settings       state.ReaderSettings       `json:"settings"`
+	SettingsNote   string                     `json:"settingsNote"`
+	SettingsFields []bookrender.SettingsField `json:"settingsFields"`
+	Private        bool                       `json:"private"`
+	InLibrary      bool                       `json:"inLibrary"`
+}
+
+// settingsPanelFields is the "Aa" panel's whole description for a session:
+// empty for a fixed-layout book (PDF/XPS/CBZ), which has no layout controls
+// for it to describe — the panel stays hidden, exactly as it always has.
+func settingsPanelFields(fixedLayout bool) []bookrender.SettingsField {
+	if fixedLayout {
+		return nil
+	}
+	return bookrender.SettingsFields()
 }
 
 // bookStatus is MessageBookStatus's payload.
@@ -209,9 +218,9 @@ func (s *Service) openSavedBook(ctx context.Context, out Sender, req savedReques
 			SourceID: req.SourceID, SeriesID: req.SeriesID, ChapterID: req.ChapterID,
 			Title: title, Mode: bookModeSaved, FixedLayout: sess.FixedLayout(),
 			PageCount: sess.PageCount(), Page: page, Toc: sess.TOC(),
-			Settings: settings, FontChoices: bookrender.FontChoices(),
-			SizeMin: state.ReaderSizeMin, SizeMax: state.ReaderSizeMax,
-			Private: private, InLibrary: inLibrary,
+			Settings: settings, SettingsNote: bookrender.SettingsNote,
+			SettingsFields: settingsPanelFields(sess.FixedLayout()),
+			Private:        private, InLibrary: inLibrary,
 		})
 	})
 	return nil
@@ -286,9 +295,9 @@ func (s *Service) startTryBook(ctx context.Context, out Sender, req tryRequest, 
 		SourceID: req.SourceID, SeriesID: req.SeriesID, ChapterID: req.ChapterID,
 		Title: title, Mode: bookModeTry, FixedLayout: sess.FixedLayout(),
 		PageCount: sess.PageCount(), Page: 0, Toc: sess.TOC(),
-		Settings: settings, FontChoices: bookrender.FontChoices(),
-		SizeMin: state.ReaderSizeMin, SizeMax: state.ReaderSizeMax,
-		Private: src.IsPrivate(), InLibrary: s.chapterInLibrary(req.SourceID, req.SeriesID, req.ChapterID),
+		Settings: settings, SettingsNote: bookrender.SettingsNote,
+		SettingsFields: settingsPanelFields(sess.FixedLayout()),
+		Private:        src.IsPrivate(), InLibrary: s.chapterInLibrary(req.SourceID, req.SeriesID, req.ChapterID),
 	})
 }
 
@@ -350,6 +359,7 @@ func (s *Service) setReaderSettings(ctx context.Context, out Sender, req setRead
 		_ = send(out, appload.MessageBookRelaid, map[string]any{
 			"sourceId": req.SourceID, "seriesId": req.SeriesID, "chapterId": req.ChapterID,
 			"pageCount": pageCount, "page": page, "toc": toc, "settings": req.Settings,
+			"settingsNote": bookrender.SettingsNote, "settingsFields": bookrender.SettingsFields(),
 		})
 	})
 	return nil

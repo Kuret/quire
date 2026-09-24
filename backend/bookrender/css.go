@@ -56,20 +56,102 @@ func EmForSize(size int) float64 {
 	return sizeEm[size]
 }
 
-// FontChoice is one entry of BookOpened's fontChoices: an id SetReaderSettings
-// accepts, and the label the backend composes for it (PLAN §2 — the UI shows
-// only what it is given, never invents a label of its own).
-type FontChoice struct {
+// SettingsChoice is one button of a SettingsField's choices: an id
+// SetReaderSettings accepts, and the label the backend composes for it
+// (PLAN §2 — the UI shows only what it is given, never invents a label of
+// its own).
+type SettingsChoice struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
 
-// FontChoices is the backend's own list, in display order.
-func FontChoices() []FontChoice {
-	return []FontChoice{
-		{ID: FontBook, Label: "The book's own"},
+// SettingsStep is one rung of the size field's stepper: the 1..9 step
+// SetReaderSettings accepts, and the point size it maps to, spelled out as a
+// label so the panel never has to compose "N pt" itself.
+type SettingsStep struct {
+	ID    int    `json:"id"`
+	Label string `json:"label"`
+}
+
+// SettingsField is one row of the "Aa" panel: a key SetReaderSettings's
+// payload uses, the backend's own label and one-sentence explanation of what
+// it does (PLAN §2), and either Choices (font, margins, spacing, align) or
+// Steps (size) — never both. QML renders this generically; it invents no
+// wording of its own.
+type SettingsField struct {
+	Key     string           `json:"key"`
+	Label   string           `json:"label"`
+	Help    string           `json:"help"`
+	Choices []SettingsChoice `json:"choices,omitempty"`
+	Steps   []SettingsStep   `json:"steps,omitempty"`
+}
+
+// SettingsNote is shown under the "Aa" panel's own top bar: these settings
+// are global, not per-book (books-contract.md §B), and the panel says so
+// once rather than leaving that to be discovered by surprise.
+const SettingsNote = "These apply to every book you read in Quire."
+
+// fontChoices is the backend's own list, in display order.
+func fontChoices() []SettingsChoice {
+	return []SettingsChoice{
+		{ID: FontBook, Label: "The book’s own"},
 		{ID: FontGaramond, Label: "EB Garamond"},
 		{ID: FontNoto, Label: "Noto Sans"},
+	}
+}
+
+// sizeSteps turns sizeEm into the labels the "Text size" field shows,
+// deriving them from the very table EmForSize uses rather than keeping a
+// second copy that could drift from it.
+func sizeSteps() []SettingsStep {
+	steps := make([]SettingsStep, 0, SizeMax-SizeMin+1)
+	for id := SizeMin; id <= SizeMax; id++ {
+		steps = append(steps, SettingsStep{ID: id, Label: fmt.Sprintf("%d pt", int(sizeEm[id]))})
+	}
+	return steps
+}
+
+// SettingsFields is the "Aa" panel's whole description, in display order —
+// what BookOpened and BookRelaid carry so the panel needs to invent nothing
+// (PLAN §2, books-contract.md §B).
+func SettingsFields() []SettingsField {
+	return []SettingsField{
+		{
+			Key: "font", Label: "Font",
+			Help:    "The typeface the text is set in. The book’s own keeps the fonts it was published with.",
+			Choices: fontChoices(),
+		},
+		{
+			Key: "size", Label: "Text size",
+			Help:  "How large the text is. Bigger text means fewer words per page.",
+			Steps: sizeSteps(),
+		},
+		{
+			Key: "margins", Label: "Page margins",
+			Help: "The blank space between the text and the edges of the screen.",
+			Choices: []SettingsChoice{
+				{ID: MarginsNarrow, Label: "Narrow"},
+				{ID: MarginsNormal, Label: "Normal"},
+				{ID: MarginsWide, Label: "Wide"},
+			},
+		},
+		{
+			Key: "spacing", Label: "Line spacing",
+			Help: "The space between lines of text. The book’s own keeps the spacing it was published with.",
+			Choices: []SettingsChoice{
+				{ID: SpacingBook, Label: "The book’s own"},
+				{ID: SpacingNormal, Label: "Normal"},
+				{ID: SpacingRelaxed, Label: "Relaxed"},
+			},
+		},
+		{
+			Key: "align", Label: "Alignment",
+			Help: "Quire doesn’t hyphenate, so justified text can leave wide gaps between words. Left-aligned avoids them.",
+			Choices: []SettingsChoice{
+				{ID: AlignBook, Label: "The book’s own"},
+				{ID: AlignLeft, Label: "Left-aligned"},
+			},
+		},
 	}
 }
 

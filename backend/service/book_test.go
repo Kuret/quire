@@ -3,8 +3,10 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -86,15 +88,15 @@ func TestOpenSavedBookAnswersBookOpened(t *testing.T) {
 		`{"sourceId":"example-reader","seriesId":"series-1","chapterId":"vol-1"}`)
 
 	var got struct {
-		SourceID    string `json:"sourceId"`
-		ChapterID   string `json:"chapterId"`
-		Title       string `json:"title"`
-		Mode        string `json:"mode"`
-		FixedLayout bool   `json:"fixedLayout"`
-		PageCount   int    `json:"pageCount"`
-		Page        int    `json:"page"`
-		SizeMin     int    `json:"sizeMin"`
-		SizeMax     int    `json:"sizeMax"`
+		SourceID       string                     `json:"sourceId"`
+		ChapterID      string                     `json:"chapterId"`
+		Title          string                     `json:"title"`
+		Mode           string                     `json:"mode"`
+		FixedLayout    bool                       `json:"fixedLayout"`
+		PageCount      int                        `json:"pageCount"`
+		Page           int                        `json:"page"`
+		SettingsNote   string                     `json:"settingsNote"`
+		SettingsFields []bookrender.SettingsField `json:"settingsFields"`
 	}
 	if err := json.Unmarshal(rc.wait(t, appload.MessageBookOpened), &got); err != nil {
 		t.Fatal(err)
@@ -108,9 +110,37 @@ func TestOpenSavedBookAnswersBookOpened(t *testing.T) {
 	if got.PageCount != 12 {
 		t.Errorf("pageCount = %d, want 12", got.PageCount)
 	}
-	if got.SizeMin != state.ReaderSizeMin || got.SizeMax != state.ReaderSizeMax {
-		t.Errorf("size range = %d..%d, want %d..%d", got.SizeMin, got.SizeMax, state.ReaderSizeMin, state.ReaderSizeMax)
+	if got.SettingsNote != bookrender.SettingsNote {
+		t.Errorf("settingsNote = %q, want %q", got.SettingsNote, bookrender.SettingsNote)
 	}
+	if !reflect.DeepEqual(got.SettingsFields, bookrender.SettingsFields()) {
+		t.Errorf("settingsFields = %+v, want the backend's own %+v", got.SettingsFields, bookrender.SettingsFields())
+	}
+
+	// Every field names a size step by its point size, taken straight from
+	// bookrender's own em table (EmForSize) rather than a second copy that
+	// could drift from it.
+	sizeField := findSettingsField(t, got.SettingsFields, "size")
+	if len(sizeField.Steps) != state.ReaderSizeMax-state.ReaderSizeMin+1 {
+		t.Fatalf("size steps = %d, want %d", len(sizeField.Steps), state.ReaderSizeMax-state.ReaderSizeMin+1)
+	}
+	for _, step := range sizeField.Steps {
+		want := fmt.Sprintf("%d pt", int(bookrender.EmForSize(step.ID)))
+		if step.Label != want {
+			t.Errorf("size step %d label = %q, want %q (from EmForSize)", step.ID, step.Label, want)
+		}
+	}
+}
+
+func findSettingsField(t *testing.T, fields []bookrender.SettingsField, key string) bookrender.SettingsField {
+	t.Helper()
+	for _, f := range fields {
+		if f.Key == key {
+			return f
+		}
+	}
+	t.Fatalf("no settings field named %q among %+v", key, fields)
+	return bookrender.SettingsField{}
 }
 
 func TestBookPageRequestServesAPage(t *testing.T) {
@@ -180,14 +210,22 @@ func TestSetReaderSettingsRelaysAndPersists(t *testing.T) {
 			`"settings":{"font":"garamond","size":7,"margins":"wide","spacing":"relaxed","align":"left"}}`)
 
 	var relaid struct {
-		PageCount int `json:"pageCount"`
-		Page      int `json:"page"`
+		PageCount      int                        `json:"pageCount"`
+		Page           int                        `json:"page"`
+		SettingsNote   string                     `json:"settingsNote"`
+		SettingsFields []bookrender.SettingsField `json:"settingsFields"`
 	}
 	if err := json.Unmarshal(rc.wait(t, appload.MessageBookRelaid), &relaid); err != nil {
 		t.Fatal(err)
 	}
 	if relaid.PageCount != 12 {
 		t.Errorf("pageCount = %d, want 12", relaid.PageCount)
+	}
+	if relaid.SettingsNote != bookrender.SettingsNote {
+		t.Errorf("settingsNote = %q, want %q", relaid.SettingsNote, bookrender.SettingsNote)
+	}
+	if !reflect.DeepEqual(relaid.SettingsFields, bookrender.SettingsFields()) {
+		t.Errorf("settingsFields = %+v, want the backend's own %+v", relaid.SettingsFields, bookrender.SettingsFields())
 	}
 
 	got := h.store.Settings().Reader()

@@ -593,12 +593,14 @@ const (
 	// MessageBookOpened is BE→UI, JSON {sourceId, seriesId, chapterId,
 	// title, mode: "saved"|"try", fixedLayout, pageCount, page,
 	// toc:[{title,page,level}], settings:{font,size,margins,spacing,align},
-	// fontChoices:[{id,label}], sizeMin, sizeMax, private, inLibrary}: the
-	// book is open and its current page is ready. fixedLayout (PDF/XPS/CBZ)
-	// tells the overlay to hide the layout controls the settings panel
-	// otherwise shows. settings and fontChoices are the whole of what the
-	// "Aa" panel needs to draw — the labels are the backend's own, per
-	// PLAN §2, never invented in QML.
+	// settingsNote, settingsFields:[{key,label,help,choices?:[{id,label}],
+	// steps?:[{id,label}]}], private, inLibrary}: the book is open and its
+	// current page is ready. fixedLayout (PDF/XPS/CBZ) tells the overlay to
+	// hide the layout controls the settings panel otherwise shows, and
+	// settingsFields is empty for such a book, having nothing to describe.
+	// settings, settingsNote and settingsFields are the whole of what the
+	// "Aa" panel needs to draw — every label and sentence is the backend's
+	// own, per PLAN §2, never invented in QML.
 	MessageBookOpened MessageType = 96
 
 	// MessageBookPageRequest is UI→BE, JSON {sourceId, seriesId, chapterId,
@@ -618,9 +620,12 @@ const (
 	// (books-contract.md §B, Reader sessions) — it is not itself a save of
 	// the reading position, which MessageSavePosition still owns.
 	// MessageBookRelaid is BE→UI, JSON {sourceId, seriesId, chapterId,
-	// pageCount, page, toc, settings}: the new layout, in place of whatever
-	// page count and table of contents the reader had before — every cached
-	// page path from the old layout is stale and must be dropped.
+	// pageCount, page, toc, settings, settingsNote, settingsFields}: the new
+	// layout, in place of whatever page count and table of contents the
+	// reader had before — every cached page path from the old layout is
+	// stale and must be dropped. settingsNote and settingsFields are the
+	// same shape MessageBookOpened carries, sent again so the panel never
+	// has to remember them across a relayout.
 	MessageSetReaderSettings MessageType = 99
 	MessageBookRelaid        MessageType = 100
 
