@@ -435,6 +435,33 @@ func TestEveryStubSeenRecordsItsCoverReferrer(t *testing.T) {
 	}
 }
 
+// A source that returns several editions of the same title under that title
+// — Shelfmark, for one — must contribute at most one match to the group: its
+// own best-ranked (lowest rank) result, not one row per edition all leading
+// to the same source.
+func TestAGroupKeepsOnlyOneMatchPerSource(t *testing.T) {
+	svc, th, out := newSearchAllService(t, "shelfmark")
+	th.pages["shelfmark"] = [][]theme.SeriesStub{{
+		{ID: "sm-1", Title: "Dune"},
+		{ID: "sm-2", Title: "Dune"},
+		{ID: "sm-3", Title: "Dune"},
+	}}
+
+	svc.runSearchAll(context.Background(), out, "dune", 1, 10, false)
+	reply := decodeReply(t, out.only(t, appload.MessageSearchAllResults))
+
+	if len(reply.Groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(reply.Groups))
+	}
+	g := reply.Groups[0]
+	if len(g.Matches) != 1 {
+		t.Fatalf("the group names the source %d times, want 1: %+v", len(g.Matches), g.Matches)
+	}
+	if g.Matches[0].SeriesID != "sm-1" {
+		t.Errorf("kept series id %q, want the best-ranked (first) one %q", g.Matches[0].SeriesID, "sm-1")
+	}
+}
+
 // --- ordering --------------------------------------------------------------
 
 // The order is a promise: the same results in the same store produce the same

@@ -349,7 +349,7 @@ func (p *searchAllPager) group() []searchAllGroup {
 
 	groups := make([]searchAllGroup, 0, len(keys))
 	for _, key := range keys {
-		matches := byKey[key].matches
+		matches := dedupeBySource(byKey[key].matches)
 
 		// Best = the lowest rank, and between equal ranks the source the user
 		// put first. It decides the group's title, its cover and its place in
@@ -424,6 +424,31 @@ func (p *searchAllPager) group() []searchAllGroup {
 		return a.Key < b.Key
 	})
 	return groups
+}
+
+// dedupeBySource keeps at most one match per source within a group: the
+// source's own best-ranked (lowest rank) result.
+//
+// A source that returns several editions of the same title under that title
+// — Shelfmark, for one — would otherwise put that one source in the group's
+// match list several times, all leading to the same place: the group would
+// name "Shelfmark" two or three times over with nothing to tell them apart,
+// which is not a list of sources that have this series, it is the same
+// source counted more than once.
+func dedupeBySource(matches []searchAllMatch) []searchAllMatch {
+	best := map[string]int{}
+	for i, m := range matches {
+		if bi, ok := best[m.SourceID]; !ok || m.rank < matches[bi].rank {
+			best[m.SourceID] = i
+		}
+	}
+	out := make([]searchAllMatch, 0, len(best))
+	for i, m := range matches {
+		if best[m.SourceID] == i {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // agreedKind is the kind every match in a group shares, or "" when they differ.
