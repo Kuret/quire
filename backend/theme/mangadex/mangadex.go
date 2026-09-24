@@ -260,6 +260,19 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 // they named. robots.txt allows /manga, and would be honoured here if it did
 // not.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
+	return t.searchManga(ctx, s, page, func(v url.Values) {
+		if q = strings.TrimSpace(q); q != "" {
+			v.Set("title", q)
+		}
+	})
+}
+
+// searchManga is the shared body of Search and every Lister.List call: build
+// the query, ask GET /manga, and decode the collection into stubs. The only
+// thing that varies between "search for a title" and "browse a listing" is
+// which extra parameters go on the request — a title, an order, a status, an
+// includedTags[] — so that is the one thing callers supply.
+func (t *Theme) searchManga(ctx context.Context, s *theme.Source, page int, apply func(url.Values)) ([]theme.SeriesStub, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -271,9 +284,6 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	}
 
 	v := url.Values{}
-	if q = strings.TrimSpace(q); q != "" {
-		v.Set("title", q)
-	}
 	v.Set("limit", strconv.Itoa(searchLimit))
 	v.Set("offset", strconv.Itoa(offset))
 	// Without this the cover is a bare UUID relationship and every result
@@ -285,6 +295,9 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 		// have *any* chapter in the user's language, so a search does not
 		// offer them a series they will find empty when they open it.
 		v.Add("availableTranslatedLanguage[]", lang)
+	}
+	if apply != nil {
+		apply(v)
 	}
 
 	var col collection

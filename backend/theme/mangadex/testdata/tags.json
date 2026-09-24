@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "SYNTHETIC FIXTURE — not a recording of any site.",
+    "",
+    "Reproduces the shape GET /manga/tag returns (confirmed live 2026-09-24):",
+    "the same collection envelope as every other endpoint, one entity per tag,",
+    "attributes carrying a language-keyed name and a group. The real API",
+    "answers 77 tags across four groups (genre, theme, format, content); this",
+    "fixture keeps one of each plus a second genre, which is enough to prove",
+    "Listings() keeps only group=='genre' and sorts what it keeps by name."
+  ],
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "aaaaaaaa-0000-4000-8000-000000000001",
+      "type": "tag",
+      "attributes": { "name": { "en": "Sci-Fi" }, "group": "genre" }
+    },
+    {
+      "id": "aaaaaaaa-0000-4000-8000-000000000002",
+      "type": "tag",
+      "attributes": { "name": { "en": "Comedy" }, "group": "genre" }
+    },
+    {
+      "id": "aaaaaaaa-0000-4000-8000-000000000003",
+      "type": "tag",
+      "attributes": { "name": { "en": "Reincarnation" }, "group": "theme" }
+    },
+    {
+      "id": "aaaaaaaa-0000-4000-8000-000000000004",
+      "type": "tag",
+      "attributes": { "name": { "en": "Oneshot" }, "group": "format" }
+    },
+    {
+      "id": "aaaaaaaa-0000-4000-8000-000000000005",
+      "type": "tag",
+      "attributes": { "name": { "en": "Gore" }, "group": "content" }
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 5
+}
