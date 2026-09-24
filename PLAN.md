@@ -3651,3 +3651,18 @@ over one bad page nobody had asked for yet.
 to a theme" for what to check before claiming a listing, and each theme's own
 package comment for which listings its site offers and which it lacks (and
 why).
+
+### 12.11 Jumping through a long chapter list — 2026-09-25
+
+A series with hundreds of chapters is dozens of pages at the chapter list's
+row height, and Previous/Next one page at a time was the only way through
+(the user met one of 33 pages). The chapter list already holds every chapter,
+so jumping costs no request.
+
+Tapping "Page x of y" opens a jump panel when there is more than one page
+(PagerBar's `jumpable`, off everywhere else). A number pad (digits, ".",
+Del) feeds **Go to chapter** — the page holding that chapter number, or the
+next higher one, or the last chapter, with the row marked until the page
+changes — and **Go to page**, plus **First page** and **Last page**. The
+volume view offers the page options only, because a volume row names only its
+first chapter.
