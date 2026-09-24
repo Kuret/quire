@@ -292,3 +292,48 @@ func TestConcurrentRequestsForOnePageFetchItOnce(t *testing.T) {
 		t.Fatalf("page 0 was fetched %d times concurrently, want 1", hits)
 	}
 }
+
+// Ending a session while a prefetch is still fetching must leave nothing
+// behind. The prefetch used to run detached, so it could write its page into
+// the directory End had just removed — a Try that left a trace, and a flaky
+// TempDir cleanup in the service tests.
+func TestEndWaitsOutAPrefetchAndLeavesNoTrace(t *testing.T) {
+	f := newCountingFetcher(pageJPEG(t))
+	f.delay = 200 * time.Millisecond
+	root := t.TempDir()
+	cache := tryreader.New(root, f)
+	sess := cache.NewSession(stubTheme{}, testSource(),
+		[]string{"https://example.invalid/1.jpg", "https://example.invalid/2.jpg"}, fetch.Referrer{})
+
+	sess.Prefetch(context.Background(), 1)
+	deadline := time.Now().Add(2 * time.Second)
+	for f.hitsFor("https://example.invalid/2.jpg") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the prefetch never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := sess.End(); err != nil {
+		t.Fatal(err)
+	}
+	// Give a detached writer every chance to land.
+	time.Sleep(400 * time.Millisecond)
+	var left []string
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err == nil && p != root {
+			left = append(left, p)
+		}
+		return nil
+	})
+	if len(left) > 0 {
+		t.Fatalf("End left %d path(s) behind: %v", len(left), left)
+	}
+
+	// And a prefetch asked for after End starts nothing.
+	sess.Prefetch(context.Background(), 0)
+	time.Sleep(50 * time.Millisecond)
+	if hits := f.hitsFor("https://example.invalid/1.jpg"); hits != 0 {
+		t.Fatalf("a prefetch after End fetched page 0 %d time(s)", hits)
+	}
+}

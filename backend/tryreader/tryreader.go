@@ -92,7 +92,10 @@ func (c *Cache) Dir() string { return c.dir }
 // the same truthful, theme-supplied Referer the download queue uses
 // (theme.PageRefererFor).
 func (c *Cache) NewSession(th theme.Theme, src *theme.Source, pageURLs []string, referer fetch.Referrer) *Session {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
+		ctx:      ctx,
+		cancel:   cancel,
 		cache:    c,
 		id:       randomID(),
 		th:       th,
@@ -122,6 +125,14 @@ type Session struct {
 	// for the same reason: without it, one page would be fetched twice.
 	mu       sync.Mutex
 	inflight map[int]chan struct{}
+
+	// ctx is cancelled by End, and prefetches counts the ones still running.
+	// Together they are what lets End promise no trace: without them a
+	// prefetch still fetching when the reader closed wrote its page into the
+	// directory End had just removed, and the file outlived the session.
+	ctx        context.Context
+	cancel     context.CancelFunc
+	prefetches sync.WaitGroup
 }
 
 // PageCount is how many pages this chapter is known to have so far. It can
@@ -284,8 +295,20 @@ func (s *Session) Prefetch(ctx context.Context, index int) {
 	// before the prefetch finishes, and a page turn a moment later should
 	// find work already under way rather than a fetch that was cancelled the
 	// instant the handler that started it returned.
+	//
+	// It runs under the session's own context instead, so End can stop it.
+	// The check and the Add happen under mu, which End also takes to
+	// cancel, so no prefetch can start after End has begun waiting.
+	s.mu.Lock()
+	if s.ctx.Err() != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.prefetches.Add(1)
+	s.mu.Unlock()
 	go func() {
-		_, _ = s.Page(context.WithoutCancel(ctx), index)
+		defer s.prefetches.Done()
+		_, _ = s.Page(s.ctx, index)
 	}()
 }
 
@@ -294,6 +317,12 @@ func (s *Session) Prefetch(ctx context.Context, index int) {
 // is nothing else — no reading position, no record, no library entry — for
 // it to also have to undo.
 func (s *Session) End() error {
+	// Stop any prefetch and wait for it before removing the directory, so a
+	// page still being fetched cannot land after the removal.
+	s.mu.Lock()
+	s.cancel()
+	s.mu.Unlock()
+	s.prefetches.Wait()
 	return os.RemoveAll(s.dir())
 }
 
