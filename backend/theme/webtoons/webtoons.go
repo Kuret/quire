@@ -286,13 +286,22 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	}
 
 	reqPath := path + "?" + qs.Encode()
+	return t.cardList(ctx, s, reqPath)
+}
+
+// cardList GETs a page built from the site's own card grid — search results,
+// a genre listing, the completed-series listing — and parses it. Every one of
+// these pages shares the ".webtoon_list" markup Search's own fixture already
+// pins, so this is also what List (theme.Lister) fetches for every listing
+// but the delegated ListingLatest.
+func (t *Theme) cardList(ctx context.Context, s *theme.Source, reqPath string) ([]theme.SeriesStub, error) {
 	doc, err := t.doc(ctx, s, reqPath)
 	if err != nil {
 		return nil, err
 	}
-	// The search page just fetched above — the page these covers are
-	// actually parsed from, resolved the same way t.doc resolved it. PLAN
-	// §7.6: truthful, per-request, never a constant.
+	// The page just fetched above — the page these covers are actually parsed
+	// from, resolved the same way t.doc resolved it. PLAN §7.6: truthful,
+	// per-request, never a constant.
 	pageURL := t.absolute(s, reqPath)
 
 	var out []theme.SeriesStub

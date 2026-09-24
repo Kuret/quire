@@ -1,0 +1,32 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the genre tab bar on GET /{lang}/genres (confirmed live
+  2026-09-24): each tab is an <a class="snb_tab"> whose href names the slug
+  and carries a sortOrder query string Listings() ignores, and whose text is
+  the site's own name for the genre, written in the site's own upper case.
+
+  Deliberate variations exercised by the test:
+    - "slice_of_life" is written "SLICE OF LIFE" with an embedded space,
+      unlike its slug — proving the label is read from the text node and not
+      derived from the slug
+    - the same tab appears twice (the scrollable tab strip repeats the
+      selected entry in the live markup) and must be de-duplicated
+
+  Why synthetic: see home.html. Host is example.invalid (RFC 2606).
+-->
+
+<ul aria-label="genres" class="snb _snbTab">
+	<li class="snb_item _snbTabItem is_selected">
+		<a href="https://www.example.invalid/en/genres/drama?sortOrder=MANA" class="snb_tab _snb_tab_a" data-genre="DRAMA" aria-current="page">
+			DRAMA</a>
+	</li>
+	<li class="snb_item _snbTabItem">
+		<a href="https://www.example.invalid/en/genres/slice_of_life?sortOrder=MANA" class="snb_tab _snb_tab_a" data-genre="SLICE_OF_LIFE" aria-current="false">
+			SLICE OF LIFE</a>
+	</li>
+	<li class="snb_item _snbTabItem">
+		<a href="https://www.example.invalid/en/genres/drama?sortOrder=MANA" class="snb_tab _snb_tab_a" data-genre="DRAMA" aria-current="page">
+			DRAMA</a>
+	</li>
+</ul>
