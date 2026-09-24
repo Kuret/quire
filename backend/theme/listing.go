@@ -36,6 +36,25 @@ type Lister interface {
 	List(ctx context.Context, s *Source, listingID string, page int) ([]SeriesStub, error)
 }
 
+// DefaultLister is implemented by a theme whose Search(q="") — today's
+// default Browse — is not genuinely latest-updates order, but happens to
+// equal one of its own named Listings (PLAN §2: a theme does not get to call
+// its popular page "Latest updates").
+//
+// It is a side interface, like Lister itself: most themes' Search("") really
+// is latest-updates order and have no need of this. DefaultListing names the
+// well-known ID (ListingPopular, ListingNew, ...) that Search(q="") is
+// equivalent to. The caller (backend/service/listings.go) keeps that entry's
+// id "latest" — so paging and Search("") are unchanged — but gives it that
+// listing's label, and drops the theme's own entry for that ID so it is not
+// offered twice under two names.
+type DefaultLister interface {
+	// DefaultListing is the well-known listing ID that Search(q="") is
+	// equivalent to. Returning ListingLatest or "" is the same as not
+	// implementing this interface at all.
+	DefaultListing() string
+}
+
 // Listing is one way to browse a source.
 type Listing struct {
 	// ID is ListingLatest and friends for a sort or status listing, or
