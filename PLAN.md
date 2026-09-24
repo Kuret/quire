@@ -2972,9 +2972,10 @@ entry."**
 Downloads and the watched list are different sets, and until this existed a
 download nobody was watching could only be found by remembering where it came
 from. The screen lists every series with at least one volume on the tablet,
-newest first, and each row opens that series' chapter list through the same
-route the grid and the watched list use — one series screen, one message, one
-Back behaviour.
+newest first. *(Superseded 2026-09-24, §12.9: a tap now continues reading
+where the series left off rather than opening its chapter list — the menu's
+Browse is what still opens it, through the same route the grid and the
+watched list use — one series screen, one message, one Back behaviour.)*
 
 **A row is one (source, series) pair, always, and always names its source.** The
 user's reason is navigational — *"make sure to separate by source if multiple
@@ -3447,3 +3448,68 @@ the full message shapes.
 **MuPDF is AGPL-3.0-or-later**, bundled unmodified as a separate executable
 (`build/mupdf.sh`, `THIRD_PARTY.md`) — a licensing choice the user made
 explicitly, not a default this document assumes for future dependencies.
+
+### 12.9 Continue reading from Downloaded and Watching — 2026-09-24
+
+**Why.** A tap on the Downloaded overview or the Watching list (§12.5,
+§12.2) opened the series' own results list — a real fetch from the source,
+and on a slow one, a wait for something the row already answers on its own:
+what to read next. Search results and source browsing are unaffected; both
+are genuinely about finding something, and neither carries a chapter or a
+document to jump straight into.
+
+**The rule, computed with no network call (`backend/service/continue.go`,
+`computeContinue`).** For each row's (source, series) pair, from its saved
+`backend/shelf` records and its newest reMarkable library document (the
+same one "Read latest" already opens):
+
+1. If any saved record has been opened for real (`shelf.Record.LastReadAt`,
+   below) take the most recently opened one. If it is finished — a chapter
+   by its last page shown, a book by the fraction read through it, since a
+   book's own page numbering changes with the reader's settings — and
+   there is a *next* saved record (ordering: `Number` ascending, then
+   `SavedAt`, then the chapter id), continue there, from its own stored
+   position. Otherwise continue at the record itself.
+2. Else, if there are any saved records at all, continue at the first one
+   in that same ordering — nothing has been read yet, so start at the
+   start.
+3. Else, if the series has a library document, continue there.
+4. Else there is nothing to read, and the row says so with an empty kind.
+
+**`shelf.Record` gains `LastReadAt`**, set whenever a saved chapter or book
+is actually opened (`OpenSaved` answering `SavedOpened`/`BookOpened`) and on
+every `SavePosition` or `CloseBook` against it — never for a Try session,
+which has no shelf record to set it on.
+
+**The wire contract adds one object, no new message types.** Both
+`MessageDownloadedList`'s rows and `MessageWatchList`'s/
+`MessageWatchUpdate`'s rows gain `continue: {kind, chapterId,
+documentUuid}`, `kind` one of `"saved"`, `"library"` or `""`.
+
+**UI.** A tap on a row (either screen, either layout, ordinary or private)
+reads `continue.kind`: `"saved"` sends `OpenSaved` for the named chapter —
+the same handoff Read latest already used — `"library"` hands off to the
+reader with the document uuid, and `""` falls back to opening the series,
+exactly what every tap did before this. The long-press menu's entry that
+already opened the series (`"Open"` on both screens) is relabelled
+**"Browse"** rather than duplicated, and is the only remaining way to reach
+a series' results list deliberately from either screen. "Read latest" is
+kept as a separate menu entry rather than folded into Browse or removed:
+it names the newest *saved* chapter regardless of reading progress, which
+in general differs from what continue-reading computes (the next unread
+chapter, or the same one resumed mid-way) — the two answer different
+questions and are not "two ways to do the one thing" language elsewhere in
+this document warns against collapsing. `WatchList.qml` gained the same
+`readRequested`/`readSavedRequested` signals `DownloadedList.qml` already
+had, wired through `Main.qml` the same way; back from the reader returns to
+whichever of the four screens (Downloaded/Watching, ordinary/private) the
+row was actually on.
+
+**Known gap, left open.** The backend only clears a watched series' new-chapter
+badge when the series' own chapter list is served (`seriesSeen`,
+`backend/service/watch.go`) — which used to happen on every tap, because
+every tap opened the series. A tap that now continues reading directly does
+not serve one, so a badge that an ordinary tap used to clear can survive it;
+Browse still clears it. Whether continuing to read should *also* count as
+having seen the series is a product decision for the main thread, not
+settled here.
