@@ -1,0 +1,43 @@
+<!--
+  SYNTHETIC FIXTURE — not a recording of any site.
+
+  Reproduces the shape of GET /search's advanced-search tag picker (confirmed
+  live 2026-09-24): each tag is a visible checkbox plus a *hidden* sibling
+  input whose id ends "-value" and whose value attribute is the tag's own
+  display name — the exact string the fragment endpoint's included_tag
+  parameter wants back. Listings() reads only the hidden inputs, which is
+  what makes "id ends with -value" the selector rather than the checkbox's own
+  id (a slugified, not-quite-matching form the query parameter rejects).
+
+  Deliberate variations exercised by the test:
+    - "Gender Bender" has an embedded space, which must survive as one genre
+      id/label and not become two
+    - the same tag name appears twice (a markup quirk of the mobile and
+      desktop pickers sharing one page), and must be de-duplicated
+
+  Why synthetic: see home.html. Host is example.invalid (RFC 2606).
+-->
+
+<fieldset class="fieldset text-base mt-2">
+	<label class="fieldset-label">
+		<input type="checkbox" form="advanced-search-form" class="checkbox" id="tag-Action" value="0">
+		<input type="hidden" form="advanced-search-form" id="tag-Action-value" value="Action">
+		<span class="ml-2 cursor-pointer">Action</span>
+	</label>
+</fieldset>
+
+<fieldset class="fieldset text-base mt-2">
+	<label class="fieldset-label">
+		<input type="checkbox" form="advanced-search-form" class="checkbox" id="tag-Gender-Bender" value="0">
+		<input type="hidden" form="advanced-search-form" id="tag-Gender-Bender-value" value="Gender Bender">
+		<span class="ml-2 cursor-pointer">Gender Bender</span>
+	</label>
+</fieldset>
+
+<fieldset class="fieldset text-base mt-2">
+	<label class="fieldset-label">
+		<input type="checkbox" form="advanced-search-form" class="checkbox" id="tag-Action-mobile" value="0">
+		<input type="hidden" form="advanced-search-form" id="tag-Action-mobile-value" value="Action">
+		<span class="ml-2 cursor-pointer">Action</span>
+	</label>
+</fieldset>

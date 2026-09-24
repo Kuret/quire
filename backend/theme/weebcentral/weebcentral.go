@@ -316,9 +316,6 @@ func (t *Theme) Fingerprint(p *probe.Page) int {
 // fragment is a fraction of the bytes, which on this device is the difference
 // that matters.
 func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int) ([]theme.SeriesStub, error) {
-	if page < 1 {
-		page = 1
-	}
 	o, err := spec.Resolve(s.Overrides)
 	if err != nil {
 		return nil, fmt.Errorf("%s: source %q: %w", ID, s.ID, err)
@@ -327,14 +324,28 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	q = strings.TrimSpace(q)
 
 	// Relevance ordering is right for a query and meaningless without one.
-	sort := "Best Match"
+	sortOrder := "Best Match"
 	if q == "" {
-		sort = o.String(KeyBrowseSort)
+		sortOrder = o.String(KeyBrowseSort)
+	}
+
+	return t.searchFragment(ctx, s, o, page, sortOrder, q, "", "")
+}
+
+// searchFragment is the shared body of Search and every Lister.List call:
+// build the query, fetch the /search/data fragment, and parse its rows. The
+// only things that vary between "search for a title" and "browse a listing"
+// are the sort order, the text (always "" for a listing), the status filter
+// and the genre tag — so those are the parameters that vary and everything
+// else (paging, the adult-content override, the row layout) is common.
+func (t *Theme) searchFragment(ctx context.Context, s *theme.Source, o theme.Overrides, page int, sortOrder, text, status, tag string) ([]theme.SeriesStub, error) {
+	if page < 1 {
+		page = 1
 	}
 
 	qs := url.Values{}
-	qs.Set("text", q)
-	qs.Set("sort", sort)
+	qs.Set("text", text)
+	qs.Set("sort", sortOrder)
 	qs.Set("order", "Descending")
 	if !o.Bool(KeyIncludeAdultContent) {
 		qs.Set("adult", "False")
@@ -344,6 +355,12 @@ func (t *Theme) Search(ctx context.Context, s *theme.Source, q string, page int)
 	// The row layout. The compact one omits the title element entirely, so
 	// this is not cosmetic: without it the rows come back unnamed.
 	qs.Set("display_mode", "Full Display")
+	if status != "" {
+		qs.Set("included_status", status)
+	}
+	if tag != "" {
+		qs.Set("included_tag", tag)
+	}
 
 	reqPath := searchPath + "?" + qs.Encode()
 	doc, err := t.doc(ctx, s, reqPath)
