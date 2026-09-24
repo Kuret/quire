@@ -136,4 +136,23 @@ if ! echo "$mainout" | grep -q '^qml: MAIN HARNESS OK'; then
     status=1
 fi
 
+# ---- runtime errors the harnesses print but never assert on -----------------
+#
+# A harness passes on its own assertions, and QML reports some breakage only as
+# a line on stderr: an anchor Qt refuses leaves the item with no geometry, so a
+# panel that "opens" (its visible flag flips, which the harness checks) draws
+# nothing at all on the device. That shipped once — SeriesGrid's Browse picker
+# anchored to its parent's siblings — with this script green, because the
+# warning sat in $out unread. These are the lines that mean a screen is broken,
+# not merely untidy; binding-loop warnings are left out on purpose until the
+# existing ones are dealt with.
+runtime_errors="$(printf '%s\n%s\n' "$out" "$mainout" \
+    | grep -E "Cannot anchor to|TypeError:|ReferenceError:|Unable to assign" \
+    | sort -u || true)"
+if [[ -n "$runtime_errors" ]]; then
+    echo "--- QML reported runtime errors while the harnesses ran"
+    echo "$runtime_errors"
+    status=1
+fi
+
 exit $status
