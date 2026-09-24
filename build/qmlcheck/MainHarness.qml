@@ -1994,8 +1994,10 @@ Window {
             "pageCount": 40, "page": 0, "toc": [],
             "settings": {"font": "book", "size": 4, "margins": "normal",
                          "spacing": "book", "align": "book"},
-            "fontChoices": [{"id": "book", "label": "The book's own"}],
-            "sizeMin": 1, "sizeMax": 9, "private": false, "inLibrary": false})
+            "settingsNote": "These apply to every book you read in Quire.",
+            "settingsFields": [{"key": "font", "label": "Font", "help": "The typeface.",
+                                 "choices": [{"id": "book", "label": "The book's own"}]}],
+            "private": false, "inLibrary": false})
         win.want("BookOpened moves the screen to book, whichever question it answered",
                  win.app.screen, "book")
         win.want("and the reader knows which kind of session it is",
@@ -2057,7 +2059,7 @@ Window {
             "pageCount": 300, "page": 12, "toc": [],
             "settings": {"font": "book", "size": 4, "margins": "normal",
                          "spacing": "book", "align": "book"},
-            "fontChoices": [], "sizeMin": 1, "sizeMax": 9,
+            "settingsNote": "", "settingsFields": [],
             "private": false, "inLibrary": false})
         win.want("OpenSaved on a book answers BookOpened, not SavedOpened",
                  win.app.screen, "book")

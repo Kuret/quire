@@ -2070,6 +2070,41 @@ Window {
         // Driven the same way as try/saved above — directly, through the
         // reader's own API — since this is the same screen and the same tap
         // zones, just a third mode of it.
+        //
+        // bookSettingsFields mirrors the shape backend/bookrender.SettingsFields
+        // sends — key, label, help, and either choices or steps — since this
+        // harness drives the reader's own message handlers directly rather
+        // than a real backend.
+        var bookSettingsFields = [
+            {"key": "font", "label": "Font",
+             "help": "The typeface the text is set in.",
+             "choices": [{"id": "book", "label": "The book's own"},
+                         {"id": "garamond", "label": "EB Garamond"},
+                         {"id": "noto", "label": "Noto Sans"}]},
+            {"key": "size", "label": "Text size",
+             "help": "How large the text is.",
+             "steps": [{"id": 1, "label": "9 pt"}, {"id": 2, "label": "10 pt"},
+                       {"id": 3, "label": "11 pt"}, {"id": 4, "label": "12 pt"},
+                       {"id": 5, "label": "13 pt"}, {"id": 6, "label": "14 pt"},
+                       {"id": 7, "label": "16 pt"}, {"id": 8, "label": "18 pt"},
+                       {"id": 9, "label": "20 pt"}]},
+            {"key": "margins", "label": "Page margins",
+             "help": "The blank space between the text and the edges of the screen.",
+             "choices": [{"id": "narrow", "label": "Narrow"},
+                         {"id": "normal", "label": "Normal"},
+                         {"id": "wide", "label": "Wide"}]},
+            {"key": "spacing", "label": "Line spacing",
+             "help": "The space between lines of text.",
+             "choices": [{"id": "book", "label": "The book's own"},
+                         {"id": "normal", "label": "Normal"},
+                         {"id": "relaxed", "label": "Relaxed"}]},
+            {"key": "align", "label": "Alignment",
+             "help": "Left-aligned avoids ragged word gaps.",
+             "choices": [{"id": "book", "label": "The book's own"},
+                         {"id": "left", "label": "Left-aligned"}]}
+        ]
+        var bookSettingsNote = "These apply to every book you read in Quire."
+
         win.tryPageWants = []
         tryReader.openBook({
             "sourceId": "src", "seriesId": "series", "chapterId": "b1",
@@ -2079,10 +2114,8 @@ Window {
                     {"title": "Part Two", "page": 10, "level": 0}],
             "settings": {"font": "book", "size": 4, "margins": "normal",
                          "spacing": "book", "align": "book"},
-            "fontChoices": [{"id": "book", "label": "The book's own"},
-                            {"id": "garamond", "label": "EB Garamond"},
-                            {"id": "noto", "label": "Noto Sans"}],
-            "sizeMin": 1, "sizeMax": 9})
+            "settingsNote": bookSettingsNote,
+            "settingsFields": bookSettingsFields})
         win.want("opening a book sets the reader's mode", tryReader.mode, "book")
         win.want("carrying which kind of session it is", tryReader.bookMode, "try")
         win.want("asking for the page on screen, the same way Try's page 0 is",
@@ -2132,11 +2165,20 @@ Window {
         bookMiddleZone.clicked(null)
         win.findChild(tryReader, "tryAaArea").clicked(null)
         win.want("Aa opens the settings panel", tryReader.settingsVisible, true)
+        win.want("the panel's own note is the backend's sentence",
+                 win.findChild(tryReader, "trySettingsNote").text, bookSettingsNote)
         win.want("offering the backend's own font choices",
                  win.findChild(tryReader, "trySettingsFont-garamond") !== null, true)
         win.want("labelled the backend's way, not this file's",
                  win.wordsOn(win.findChild(tryReader, "trySettingsFont-garamond")),
                  "EB Garamond")
+        win.want("every field's own label renders",
+                 win.findChild(tryReader, "trySettingsFieldLabel-margins").text, "Page margins")
+        win.want("and its help sentence too",
+                 win.findChild(tryReader, "trySettingsFieldHelp-margins").text,
+                 "The blank space between the text and the edges of the screen.")
+        win.want("the size field's current step is labelled by the backend, not composed here",
+                 win.findChild(tryReader, "trySettingsSizeLabel").text, "12 pt")
 
         win.settingsChangeAsks = []
         // The MouseArea inside the font button carries no name of its own
@@ -2181,14 +2223,21 @@ Window {
         tryReader.relaid({"sourceId": "src", "seriesId": "series", "chapterId": "b1",
                           "pageCount": 24, "page": 3,
                           "toc": [{"title": "Part One", "page": 0, "level": 0}],
-                          "settings": {"font": "garamond", "size": 4, "margins": "wide",
-                                       "spacing": "book", "align": "book"}})
+                          "settings": {"font": "garamond", "size": 6, "margins": "wide",
+                                       "spacing": "book", "align": "book"},
+                          "settingsNote": bookSettingsNote,
+                          "settingsFields": bookSettingsFields})
         win.want("BookRelaid moves to the page it names", tryReader.index, 3)
         win.want("with the new count", tryReader.pageCount, 24)
         win.want("and asks for that page fresh, the cache having been dropped",
                  win.tryPageWants.join(","), "3")
         win.want("nothing left showing from before the relayout",
                  win.findChild(tryReader, "tryPageImage").visible, false)
+
+        tryReader.settingsVisible = true
+        win.want("the current size label updates after BookRelaid",
+                 win.findChild(tryReader, "trySettingsSizeLabel").text, "14 pt")
+        tryReader.settingsVisible = false
 
         // Fixed-layout books (PDF/XPS/CBZ) have nothing the Aa panel would
         // control, so the button that opens it is not offered at all —
@@ -2199,7 +2248,7 @@ Window {
             "pageCount": 5, "page": 0, "toc": [],
             "settings": {"font": "book", "size": 4, "margins": "normal",
                          "spacing": "book", "align": "book"},
-            "fontChoices": [], "sizeMin": 1, "sizeMax": 9})
+            "settingsNote": "", "settingsFields": []})
         bookMiddleZone.clicked(null)
         win.want("a fixed-layout book hides Aa entirely",
                  win.findChild(tryReader, "tryAaButton").visible, false)

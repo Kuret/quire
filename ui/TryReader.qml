@@ -131,12 +131,52 @@ Item {
     // effect, straight off BookOpened/BookRelaid, never invented here.
     property var settings: ({})
 
-    // [{id, label}] — the backend's own labels for the font choices
-    // (PLAN §2: every user-facing sentence, including this one, is composed
-    // there).
-    property var fontChoices: []
-    property int sizeMin: 1
-    property int sizeMax: 9
+    // The "Aa" panel's own sentence and rows, straight off BookOpened /
+    // BookRelaid (PLAN §2: every user-facing sentence, and every field's
+    // label and help text, is composed there — this file only lays them
+    // out). settingsFields is
+    // [{key,label,help,choices?:[{id,label}],steps?:[{id,label}]}], in
+    // display order; empty for a fixed-layout book, which has nothing here
+    // to describe.
+    property string settingsNote: ""
+    property var settingsFields: []
+
+    // fieldByKey returns the settingsFields entry named key, or null if none
+    // arrived under that name (a fixed-layout book, or a stale reader that
+    // has not yet received one) — callers treat null the same as "nothing to
+    // draw here" rather than crashing on a missing field.
+    function fieldByKey(key) {
+        var fields = screen.settingsFields
+        for (var i = 0; i < fields.length; ++i)
+            if (fields[i].key === key)
+                return fields[i]
+        return null
+    }
+
+    // capitalizedKey turns a field's wire key ("font", "margins", "spacing",
+    // "align") into the prefix its choice buttons' objectNames already used
+    // ("Font", "Margins", ...), so a harness written against those names
+    // keeps working unchanged.
+    function capitalizedKey(key) {
+        return key.length > 0 ? key.charAt(0).toUpperCase() + key.slice(1) : key
+    }
+
+    // The size field's steps, and the label for whichever one is current —
+    // looked up rather than composed here, per PLAN §2.
+    readonly property var sizeSteps: {
+        var f = screen.fieldByKey("size")
+        return f && f.steps ? f.steps : []
+    }
+    readonly property int sizeMin: screen.sizeSteps.length > 0 ? screen.sizeSteps[0].id : 1
+    readonly property int sizeMax: screen.sizeSteps.length > 0 ? screen.sizeSteps[screen.sizeSteps.length - 1].id : 1
+    readonly property string currentSizeLabel: {
+        var steps = screen.sizeSteps
+        var size = screen.settings.size
+        for (var i = 0; i < steps.length; ++i)
+            if (steps[i].id === size)
+                return steps[i].label
+        return ""
+    }
 
     // Which of the overlay's two book-only panels is open, if either. Both
     // close the reader's ordinary overlay dismiss area from doing anything
@@ -339,9 +379,8 @@ Item {
         screen.note = ""
         screen.toc = payload.toc ? payload.toc : []
         screen.settings = payload.settings ? payload.settings : {}
-        screen.fontChoices = payload.fontChoices ? payload.fontChoices : []
-        screen.sizeMin = payload.sizeMin ? payload.sizeMin : 1
-        screen.sizeMax = payload.sizeMax ? payload.sizeMax : 9
+        screen.settingsNote = payload.settingsNote ? payload.settingsNote : ""
+        screen.settingsFields = payload.settingsFields ? payload.settingsFields : []
         screen.chapterInLibrary = !!payload.inLibrary
         screen.sourcePrivate = !!payload.private
         screen.overlayVisible = false
@@ -368,6 +407,10 @@ Item {
         screen.pageCount = payload.pageCount ? payload.pageCount : 0
         screen.toc = payload.toc ? payload.toc : []
         screen.settings = payload.settings ? payload.settings : {}
+        if (payload.settingsNote)
+            screen.settingsNote = payload.settingsNote
+        if (payload.settingsFields)
+            screen.settingsFields = payload.settingsFields
         screen.note = ""
         screen.pagePaths = ({})
         screen.requested = ({})
@@ -1033,6 +1076,11 @@ Item {
     // every control here fires the moment it is tapped — there is no save
     // step, the same as every other switch in ui/. Fixed-layout books never
     // show this panel at all (see the Aa button above).
+    //
+    // Every field's label, help sentence and choices come straight off
+    // BookOpened/BookRelaid's settingsFields (PLAN §2) — this file lays out
+    // a generic Repeater over them rather than composing any wording of its
+    // own, so a field added on the backend needs no matching change here.
     Item {
         id: settingsPanel
         objectName: "trySettingsPanel"
@@ -1077,205 +1125,179 @@ Item {
                     verticalCenter: parent.verticalCenter
                 }
                 horizontalAlignment: Text.AlignHCenter
-                text: "Aa"
+                text: "Text settings"
                 font.pointSize: Style.headingSize
                 color: Style.ink
             }
         }
 
-        Column {
-            id: settingsColumn
+        // The backend's own sentence about what this panel is for
+        // (books-contract.md §B: the settings are global, not per-book).
+        Text {
+            id: settingsNoteLabel
+            objectName: "trySettingsNote"
             anchors {
                 top: settingsPanelTop.bottom; topMargin: Style.gap
                 left: parent.left; leftMargin: Style.margin
                 right: parent.right; rightMargin: Style.margin
             }
-            spacing: Style.gap
+            text: screen.settingsNote
+            font.pointSize: Style.smallSize
+            color: Style.muted
+            wrapMode: Text.WordWrap
+        }
 
-            // Font, straight off the backend's own choices and labels
-            // (PLAN §2) — never a font name invented here.
-            Row {
-                objectName: "trySettingsFontRow"
-                spacing: Style.gap
+        // Scrollable, unlike every other panel in ui/ (PLAN §12.1 is about
+        // paging and animation, not about a panel that can simply be taller
+        // than the screen) — five fields plus their help sentences do not
+        // reliably fit a small viewport.
+        Flickable {
+            id: settingsScroll
+            objectName: "trySettingsScroll"
+            anchors {
+                top: settingsNoteLabel.bottom; topMargin: Style.gap
+                left: parent.left; right: parent.right; bottom: parent.bottom
+            }
+            clip: true
+            contentWidth: width
+            contentHeight: settingsColumn.height + Style.gap
+            boundsBehavior: Flickable.StopAtBounds
+
+            Column {
+                id: settingsColumn
+                x: Style.margin
+                y: 0
+                width: parent.width - Style.margin * 2
+                spacing: Style.gap * 1.5
 
                 Repeater {
-                    model: screen.fontChoices
+                    model: screen.settingsFields
 
-                    Rectangle {
-                        objectName: "trySettingsFont-" + modelData.id
-                        width: 220
-                        height: Style.buttonHeight
-                        color: fontArea.pressed ? Style.pressed
-                               : (screen.settings.font === modelData.id ? Style.rule : Style.paper)
-                        border.width: 2
-                        border.color: Style.ink
-                        radius: 6
+                    delegate: Column {
+                        id: fieldColumn
+                        property var field: modelData
+                        width: settingsColumn.width
+                        spacing: Style.gap / 2
 
                         Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.pointSize: Style.smallSize
+                            objectName: "trySettingsFieldLabel-" + fieldColumn.field.key
+                            text: fieldColumn.field.label
+                            font.pointSize: Style.bodySize
                             color: Style.ink
                         }
 
-                        MouseArea {
-                            id: fontArea
-                            anchors.fill: parent
-                            onClicked: screen.changeSetting("font", modelData.id)
-                        }
-                    }
-                }
-            }
-
-            // Size, as steps rather than a raw point size — the backend maps
-            // the step to an em size (PLAN's own table); this reader only
-            // ever sends the step.
-            Row {
-                objectName: "trySettingsSizeRow"
-                spacing: Style.gap
-
-                Rectangle {
-                    id: sizeDownButton
-                    objectName: "trySettingsSizeDown"
-                    // Disabled at the bound, not merely inert — the same
-                    // dead-as-well-as-hidden rule every other control in ui/
-                    // follows (ChapterList.qml's watchButton, for one), so a
-                    // check of this element alone says whether the control
-                    // really works.
-                    enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) > screen.sizeMin
-                    width: 80
-                    height: Style.buttonHeight
-                    color: sizeDownArea.pressed ? Style.pressed : Style.paper
-                    border.width: 2
-                    border.color: enabled ? Style.ink : Style.rule
-                    radius: 6
-                    Text { anchors.centerIn: parent; text: "-"; font.pointSize: Style.bodySize; color: Style.ink }
-                    MouseArea {
-                        id: sizeDownArea
-                        objectName: "trySettingsSizeDownArea"
-                        anchors.fill: parent
-                        enabled: sizeDownButton.enabled
-                        onClicked: screen.changeSetting("size", screen.settings.size - 1)
-                    }
-                }
-
-                Rectangle {
-                    id: sizeUpButton
-                    objectName: "trySettingsSizeUp"
-                    enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) < screen.sizeMax
-                    width: 80
-                    height: Style.buttonHeight
-                    color: sizeUpArea.pressed ? Style.pressed : Style.paper
-                    border.width: 2
-                    border.color: enabled ? Style.ink : Style.rule
-                    radius: 6
-                    Text { anchors.centerIn: parent; text: "+"; font.pointSize: Style.bodySize; color: Style.ink }
-                    MouseArea {
-                        id: sizeUpArea
-                        objectName: "trySettingsSizeUpArea"
-                        anchors.fill: parent
-                        enabled: sizeUpButton.enabled
-                        onClicked: screen.changeSetting("size", screen.settings.size + 1)
-                    }
-                }
-            }
-
-            // Margins, spacing and alignment — each a row of the backend's
-            // own values (schema/settings.schema.json), this file's own
-            // short labels on top of them (PLAN §2).
-            Row {
-                objectName: "trySettingsMarginsRow"
-                spacing: Style.gap
-
-                Repeater {
-                    model: [{"key": "narrow", "label": "Narrow"},
-                            {"key": "normal", "label": "Normal"},
-                            {"key": "wide", "label": "Wide"}]
-
-                    Rectangle {
-                        objectName: "trySettingsMargins-" + modelData.key
-                        width: 140
-                        height: Style.buttonHeight
-                        color: marginsArea.pressed ? Style.pressed
-                               : (screen.settings.margins === modelData.key ? Style.rule : Style.paper)
-                        border.width: 2
-                        border.color: Style.ink
-                        radius: 6
                         Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
+                            objectName: "trySettingsFieldHelp-" + fieldColumn.field.key
+                            text: fieldColumn.field.help
                             font.pointSize: Style.smallSize
-                            color: Style.ink
+                            color: Style.muted
+                            width: fieldColumn.width
+                            wrapMode: Text.WordWrap
                         }
-                        MouseArea {
-                            id: marginsArea
-                            anchors.fill: parent
-                            onClicked: screen.changeSetting("margins", modelData.key)
+
+                        // The size field's stepper: "-", the current step's
+                        // own label (never composed here), "+".
+                        Row {
+                            objectName: "trySettingsSizeRow"
+                            visible: !!(fieldColumn.field.steps && fieldColumn.field.steps.length > 0)
+                            spacing: Style.gap
+
+                            Rectangle {
+                                id: sizeDownButton
+                                objectName: "trySettingsSizeDown"
+                                // Disabled at the bound, not merely inert —
+                                // the same dead-as-well-as-hidden rule every
+                                // other control in ui/ follows
+                                // (ChapterList.qml's watchButton, for one),
+                                // so a check of this element alone says
+                                // whether the control really works.
+                                enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) > screen.sizeMin
+                                width: 80
+                                height: Style.buttonHeight
+                                color: sizeDownArea.pressed ? Style.pressed : Style.paper
+                                border.width: 2
+                                border.color: enabled ? Style.ink : Style.rule
+                                radius: 6
+                                Text { anchors.centerIn: parent; text: "-"; font.pointSize: Style.bodySize; color: Style.ink }
+                                MouseArea {
+                                    id: sizeDownArea
+                                    objectName: "trySettingsSizeDownArea"
+                                    anchors.fill: parent
+                                    enabled: sizeDownButton.enabled
+                                    onClicked: screen.changeSetting("size", screen.settings.size - 1)
+                                }
+                            }
+
+                            Text {
+                                objectName: "trySettingsSizeLabel"
+                                text: screen.currentSizeLabel
+                                font.pointSize: Style.bodySize
+                                color: Style.ink
+                                width: 100
+                                height: Style.buttonHeight
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            Rectangle {
+                                id: sizeUpButton
+                                objectName: "trySettingsSizeUp"
+                                enabled: (screen.settings.size ? screen.settings.size : screen.sizeMin) < screen.sizeMax
+                                width: 80
+                                height: Style.buttonHeight
+                                color: sizeUpArea.pressed ? Style.pressed : Style.paper
+                                border.width: 2
+                                border.color: enabled ? Style.ink : Style.rule
+                                radius: 6
+                                Text { anchors.centerIn: parent; text: "+"; font.pointSize: Style.bodySize; color: Style.ink }
+                                MouseArea {
+                                    id: sizeUpArea
+                                    objectName: "trySettingsSizeUpArea"
+                                    anchors.fill: parent
+                                    enabled: sizeUpButton.enabled
+                                    onClicked: screen.changeSetting("size", screen.settings.size + 1)
+                                }
+                            }
                         }
-                    }
-                }
-            }
 
-            Row {
-                objectName: "trySettingsSpacingRow"
-                spacing: Style.gap
+                        // Every other field: a wrapping row of the backend's
+                        // own choices (font, margins, spacing, align) —
+                        // sized to their own label, with a floor so a short
+                        // one ("Wide") still reads as a real button.
+                        Flow {
+                            objectName: "trySettingsChoices-" + fieldColumn.field.key
+                            visible: !(fieldColumn.field.steps && fieldColumn.field.steps.length > 0)
+                            width: fieldColumn.width
+                            spacing: Style.gap
 
-                Repeater {
-                    model: [{"key": "book", "label": "Book"},
-                            {"key": "normal", "label": "Normal"},
-                            {"key": "relaxed", "label": "Relaxed"}]
+                            Repeater {
+                                model: fieldColumn.field.choices ? fieldColumn.field.choices : []
 
-                    Rectangle {
-                        objectName: "trySettingsSpacing-" + modelData.key
-                        width: 140
-                        height: Style.buttonHeight
-                        color: spacingArea.pressed ? Style.pressed
-                               : (screen.settings.spacing === modelData.key ? Style.rule : Style.paper)
-                        border.width: 2
-                        border.color: Style.ink
-                        radius: 6
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.pointSize: Style.smallSize
-                            color: Style.ink
-                        }
-                        MouseArea {
-                            id: spacingArea
-                            anchors.fill: parent
-                            onClicked: screen.changeSetting("spacing", modelData.key)
-                        }
-                    }
-                }
-            }
+                                Rectangle {
+                                    objectName: "trySettings" + screen.capitalizedKey(fieldColumn.field.key) + "-" + modelData.id
+                                    width: Math.max(140, choiceLabel.implicitWidth + Style.gap * 2)
+                                    height: Style.buttonHeight
+                                    color: choiceArea.pressed ? Style.pressed
+                                           : (screen.settings[fieldColumn.field.key] === modelData.id ? Style.rule : Style.paper)
+                                    border.width: 2
+                                    border.color: Style.ink
+                                    radius: 6
 
-            Row {
-                objectName: "trySettingsAlignRow"
-                spacing: Style.gap
+                                    Text {
+                                        id: choiceLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        font.pointSize: Style.smallSize
+                                        color: Style.ink
+                                    }
 
-                Repeater {
-                    model: [{"key": "book", "label": "Book"},
-                            {"key": "left", "label": "Left"}]
-
-                    Rectangle {
-                        objectName: "trySettingsAlign-" + modelData.key
-                        width: 140
-                        height: Style.buttonHeight
-                        color: alignArea.pressed ? Style.pressed
-                               : (screen.settings.align === modelData.key ? Style.rule : Style.paper)
-                        border.width: 2
-                        border.color: Style.ink
-                        radius: 6
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.pointSize: Style.smallSize
-                            color: Style.ink
-                        }
-                        MouseArea {
-                            id: alignArea
-                            anchors.fill: parent
-                            onClicked: screen.changeSetting("align", modelData.key)
+                                    MouseArea {
+                                        id: choiceArea
+                                        anchors.fill: parent
+                                        onClicked: screen.changeSetting(fieldColumn.field.key, modelData.id)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
