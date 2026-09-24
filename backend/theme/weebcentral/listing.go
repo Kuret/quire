@@ -50,6 +50,15 @@ const (
 )
 
 var _ theme.Lister = (*Theme)(nil)
+var _ theme.DefaultLister = (*Theme)(nil)
+
+// DefaultListing implements theme.DefaultLister: Search("")'s default sort is
+// KeyBrowseSort, whose own default is "Popularity" — not ListingLatest's
+// "most recently updated" meaning — so the browse screen's always-first entry
+// should say "Popular", not "Latest updates". (If the user has overridden
+// KeyBrowseSort away from "Popularity", this still names the site's own
+// default; theme.DefaultLister has no source-specific hook for that.)
+func (t *Theme) DefaultListing() string { return theme.ListingPopular }
 
 // Listings implements theme.Lister.
 func (t *Theme) Listings(ctx context.Context, s *theme.Source) ([]theme.Listing, error) {

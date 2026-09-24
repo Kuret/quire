@@ -49,6 +49,16 @@ func TestListings(t *testing.T) {
 	}
 }
 
+// TestDefaultListingIsPopular pins this file's own doc comment: Search("")'s
+// sort defaults to "Popularity" — the same ordering as ListingPopular, not
+// ListingLatest's "most recently updated" meaning.
+func TestDefaultListingIsPopular(t *testing.T) {
+	th := weebcentral.NewWithClock(nil, clock)
+	if got := th.DefaultListing(); got != theme.ListingPopular {
+		t.Fatalf("DefaultListing() = %q, want %q", got, theme.ListingPopular)
+	}
+}
+
 func TestListPopularSendsSort(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /search/data": {File: "search.html"},
