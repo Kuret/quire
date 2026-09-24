@@ -22,6 +22,21 @@
 // family into two themes (see docs/THEME-NOTES.md); we keep one theme and an
 // `ajaxStyle` override, because the two differ in exactly one endpoint and
 // splitting them would double the fingerprinting surface for no gain.
+//
+// # Listings
+//
+// This theme implements theme.Lister. Popular (m_orderby=views), Newly added
+// (m_orderby=new-manga), Top rated (m_orderby=rating) and Completed
+// (status=end) are offered unconditionally: they are the plugin's own CPT
+// archive query parameters, a fact about the software rather than about any
+// one install, confirmed live 2026-09-24 against mangaread.org and the adult
+// family member hentaixcomic.com. Genres are offered only when discoverGenres
+// can find the site's own genre-taxonomy links on its home page — the
+// taxonomy's URL base is renamed per site (observed "/genres/" and
+// "/manga-genre/" on the two sites above) and is not assumed. A site whose
+// genre navigation is not statically discoverable (also observed: it can sit
+// behind an interaction this theme does not simulate) gets the sort and
+// status listings with no genres, which is not an error.
 package madara
 
 import (
