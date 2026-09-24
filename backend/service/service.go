@@ -1417,8 +1417,56 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 		_ = s.sendError(out, "not_found", err.Error())
 		return
 	}
+	kind := kindOf(th)
+	private := src.IsPrivate()
+
+	// PLAN §12.12: answer instantly from what is already known, before
+	// touching the network at all. sentPayload, once non-nil, is what a later
+	// network failure falls back to updating rather than erroring over —
+	// see the failure branches below.
+	var sentPayload map[string]any
+	var sentFromCacheFetchedAt time.Time
+	sentFromCache := false
+
+	// Both branches are gated on the cache existing at all — a nil
+	// SeriesCache disables the whole of PLAN §12.12, the same way a nil
+	// ShelfStore or TryCache disables the feature it backs, and a series
+	// detail request behaves exactly as it did before this existed.
+	if s.seriesCache != nil {
+		if entry, ok := s.seriesCache.Get(sourceID, seriesID); ok {
+			sentFromCacheFetchedAt = entry.FetchedAt
+			sentFromCache = true
+			sentPayload = s.buildSeriesDetailPayload(sourceID, kind, entry.Series, entry.Chapters,
+				private, true, entry.FetchedAt, cachedNote(s.now().Sub(entry.FetchedAt)))
+			_ = send(out, appload.MessageSeriesDetailResult, sentPayload)
+			s.seriesCache.Touch(sourceID, seriesID, s.now())
+		} else if synthSeries, synthChapters, ok := s.synthesizeSeriesDetail(sourceID, seriesID); ok {
+			sentPayload = s.buildSeriesDetailPayload(sourceID, kind, synthSeries, synthChapters,
+				private, true, time.Time{}, synthesisedNote)
+			_ = send(out, appload.MessageSeriesDetailResult, sentPayload)
+		}
+	}
+
+	// sendFailureUpdate is what a network failure resolves to once something
+	// was already shown above: not an error banner, but the same reply again
+	// with its note changed to say the fetch did not land. Nothing else about
+	// it changes — the chapter list on screen stays exactly as informative as
+	// it was a moment ago.
+	sendFailureUpdate := func() {
+		note := synthesisedFailureNote(src.Name)
+		if sentFromCache {
+			note = cachedFailureNote(src.Name, s.now().Sub(sentFromCacheFetchedAt))
+		}
+		sentPayload["note"] = note
+		_ = send(out, appload.MessageSeriesDetailResult, sentPayload)
+	}
+
 	series, err := th.Series(ctx, src, seriesID)
 	if err != nil {
+		if sentPayload != nil {
+			sendFailureUpdate()
+			return
+		}
 		_ = s.sendError(out, "series_failed", plain(err))
 		return
 	}
@@ -1426,49 +1474,28 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 	s.rememberCoverURLs(sourceID, []state.CoverRef{{SeriesID: seriesID, URL: series.CoverURL}})
 	chapters, err := th.Chapters(ctx, src, seriesID)
 	if err != nil {
+		if sentPayload != nil {
+			sendFailureUpdate()
+			return
+		}
 		_ = s.sendError(out, "chapters_failed", plain(err))
 		return
 	}
 
-	// Chapter rows are trimmed to what the list shows. A long series can carry
-	// hundreds of them and the socket's real ceiling is a few hundred KB
-	// (PLAN §3.1), so this is not a micro-optimisation.
-	type chapterRow struct {
-		ID        string  `json:"id"`
-		Title     string  `json:"title"`
-		Number    float64 `json:"number"`
-		Published string  `json:"published,omitempty"`
-		Scanlator string  `json:"scanlator,omitempty"`
-
-		// DocumentUUID is set when this chapter's volume is already on the
-		// tablet. It is what turns the row's button from "Download" into
-		// "Read" (PLAN §6 M6) — without it, a volume downloaded last week is
-		// indistinguishable from one never fetched.
-		DocumentUUID string `json:"documentUuid,omitempty"`
-		VolumeLabel  string `json:"volumeLabel,omitempty"`
-
-		// Saved is true when this chapter is saved in Quire — independently
-		// of DocumentUUID, since a chapter can be both saved and in the
-		// library at once, each an independent copy (see download.go's
-		// runDownload). It is what turns the row into [Delete] [Read] rather
-		// than [Try] [Download] on the chapter list.
-		Saved bool `json:"saved"`
-	}
-	stored := s.storedVolumes(sourceID, seriesID, series.Title, chapters)
-	saved := s.storedSaved(sourceID, seriesID)
-
-	rows := make([]chapterRow, 0, len(chapters))
-	for _, c := range chapters {
-		r := chapterRow{ID: c.ID, Title: c.Title, Number: c.Number, Scanlator: c.Scanlator,
-			Saved: saved[c.ID]}
-		if !c.Published.IsZero() {
-			r.Published = c.Published.UTC().Format("2006-01-02")
+	// The fetch succeeded: this is now the freshest answer, cache it and send
+	// it — cached:false, no note, exactly today's reply shape plus those two
+	// omitted fields.
+	if s.seriesCache != nil {
+		now := s.now()
+		if err := s.seriesCache.Put(seriescache.Entry{
+			SourceID: sourceID, SeriesID: seriesID,
+			Series: *series, Chapters: chapters,
+			FetchedAt: now, OpenedAt: now,
+		}, s.seriesCacheProtect()); err != nil {
+			s.log.Warn("could not update the series cache", "source", sourceID, "series", seriesID, "err", err)
 		}
-		if rec, ok := stored[c.ID]; ok {
-			r.DocumentUUID, r.VolumeLabel = rec.DocumentUUID, rec.Volume
-		}
-		rows = append(rows, r)
 	}
+
 	// The series page resolved and yielded no chapters at all: that is a parse
 	// that no longer matches the page, not a series with nothing in it.
 	if len(chapters) == 0 {
@@ -1479,21 +1506,8 @@ func (s *Service) runSeriesDetail(ctx context.Context, out Sender, sourceID, ser
 	// 2026-09-16). An empty list means the screen offers chapters and nothing
 	// else: the affordance is decided here, from the data, because an empty tab
 	// is a worse answer than no tab and the frontend has no way to tell.
-	_ = send(out, appload.MessageSeriesDetailResult, map[string]any{
-		"sourceId": sourceID,
-		// What this series' chapters are (see kind.go) — in particular, "book"
-		// says a source has no page images at all, which is what tells the
-		// chapter list to hide Try: there is nothing there to preview.
-		"kind":     kindOf(th),
-		"series":   series,
-		"chapters": rows,
-		"volumes":  volumeRows(series.Title, chapters, stored, saved),
-		// Private says whether this source's chapters may ever go to the
-		// reMarkable library, so the reader overlay and the chapter row can
-		// hide "Send to library" without a round trip to find out — see
-		// PrivateSourceLibraryRefusal.
-		"private": src.IsPrivate(),
-	})
+	_ = send(out, appload.MessageSeriesDetailResult,
+		s.buildSeriesDetailPayload(sourceID, kind, *series, chapters, private, false, time.Time{}, ""))
 
 	// PLAN §12.2. Serving the chapter list is the one moment Quire can honestly
 	// say the user has looked at the series, so it is where "new" is cleared —
