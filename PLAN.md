@@ -3477,6 +3477,22 @@ explicitly, not a default this document assumes for future dependencies.
 > times over — `group()`'s `dedupeBySource` now keeps only that source's
 > best-ranked (lowest rank) match within a group.
 
+> **Round 3, 2026-09-24: the "Aa" panel got labels and help text.** It used to
+> show bare values — Narrow/Normal/Wide, Book/Normal/Relaxed, Book/Left — with
+> no field name or explanation, which §2's own rule was already meant to rule
+> out. `BookOpened`/`BookRelaid` now carry `settingsNote` (one sentence: these
+> settings are global) and `settingsFields`, an ordered
+> `[{key,label,help,choices?:[{id,label}],steps?:[{id,label}]}]` describing
+> every row — font, text size (steps 1–9 labelled "9 pt".."20 pt", derived
+> from the same em table `EmForSize` uses, `bookrender.SettingsFields()`),
+> page margins, line spacing and alignment. `ui/TryReader.qml` dropped its
+> hard-coded rows for a `Repeater` over `settingsFields`, rendering whichever
+> label, help sentence and choices (or size stepper) the backend sent; the
+> plain `fontChoices`/`sizeMin`/`sizeMax` fields are gone, having no other
+> reader. The panel is titled "Text settings" (the overlay's own "Aa" button
+> is unchanged) and scrolls in a `Flickable`, since five fields and their help
+> sentences do not reliably fit a small viewport.
+
 ### 12.9 Continue reading from Downloaded and Watching — 2026-09-24
 
 **Why.** A tap on the Downloaded overview or the Watching list (§12.5,
