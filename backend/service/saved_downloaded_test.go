@@ -2,9 +2,13 @@ package service_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rickl/quire/backend/appload"
+	"github.com/rickl/quire/backend/library"
+	"github.com/rickl/quire/backend/shelf"
 )
 
 type savedDownloadedRow struct {
@@ -195,5 +199,48 @@ func TestDownloadedListCarriesAStorageSentence(t *testing.T) {
 	if private.Storage != ordinary.Storage {
 		t.Errorf("storage sentence differs by mode: ordinary %q, private %q",
 			ordinary.Storage, private.Storage)
+	}
+}
+
+// The overview is ordered by each series' latest activity across both stores.
+// It used to list every series with a library record first and every
+// saved-only series after them, so a book just downloaded into Quire — or just
+// read — sank to the last page behind older library downloads.
+func TestDownloadedOverviewPutsTheMostRecentActivityFirst(t *testing.T) {
+	h := buildDownloadHarness(t, downloadRoutes(t))
+	addSource(t, h.store)
+	now := time.Now()
+
+	// An old library download, and one from yesterday.
+	for _, r := range []library.Record{
+		{Key: library.Key{Source: "example-reader", Series: "old-lib", Volume: "1"},
+			DocumentUUID: "u-old", SeriesTitle: "Old Library", StoredAt: now.Add(-72 * time.Hour)},
+		{Key: library.Key{Source: "example-reader", Series: "yesterday-lib", Volume: "1"},
+			DocumentUUID: "u-yday", SeriesTitle: "Yesterday Library", StoredAt: now.Add(-24 * time.Hour)},
+	} {
+		if err := h.libStore.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A book saved in Quire an hour ago, and a chapter saved last week but
+	// read a minute ago.
+	for _, r := range []shelf.Record{
+		{Key: shelf.Key{Source: "example-reader", Series: "fresh-book", Chapter: "c1"},
+			SeriesTitle: "Fresh Book", Kind: "book", SavedAt: now.Add(-time.Hour)},
+		{Key: shelf.Key{Source: "example-reader", Series: "just-read", Chapter: "c1"},
+			SeriesTitle: "Just Read", SavedAt: now.Add(-7 * 24 * time.Hour), LastReadAt: now.Add(-time.Minute)},
+	} {
+		if err := h.shelfStore.Put(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got []string
+	for _, row := range fetchDownloaded(t, h) {
+		got = append(got, row.SeriesID)
+	}
+	want := []string{"just-read", "fresh-book", "yesterday-lib", "old-lib"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("order %v, want %v", got, want)
 	}
 }

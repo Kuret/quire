@@ -2,7 +2,9 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/rickl/quire/backend/appload"
 	"github.com/rickl/quire/backend/library"
@@ -110,9 +112,9 @@ type listDownloadedRequest struct {
 // library is one nobody can predict, and a source label that appears only
 // sometimes is one nobody can rely on.
 //
-// Newest first, because the store already sorts records by StoredAt descending
-// and what the user did last is what they are most likely looking for. A series
-// sorts by its newest record.
+// Most recent first, because what the user did last is what they are most
+// likely looking for. A series sorts by its latest activity across both stores:
+// a library upload, a chapter saved in Quire, or a saved chapter read.
 func (s *Service) sendDownloaded(out Sender, private bool) error {
 	rows := s.downloadedRows(private)
 	msg := map[string]any{"series": rows, "private": private, "storage": s.storageStatus().Message}
@@ -185,6 +187,32 @@ func (s *Service) downloadedRows(private bool) []downloadedRow {
 			savedGroup[k] = append(savedGroup[k], rec)
 		}
 	}
+
+	// Most recent activity first, across both stores: the newest library
+	// upload, save or read of anything in the series. Taking the order in
+	// which keys were first seen put every series with a library record ahead
+	// of every series that only had saved chapters, so what the user had just
+	// downloaded into Quire or just read sank to the last page.
+	latest := func(k key) time.Time {
+		var t time.Time
+		for _, r := range libGroup[k] {
+			if r.StoredAt.After(t) {
+				t = r.StoredAt
+			}
+		}
+		for _, r := range savedGroup[k] {
+			if r.SavedAt.After(t) {
+				t = r.SavedAt
+			}
+			if r.LastReadAt.After(t) {
+				t = r.LastReadAt
+			}
+		}
+		return t
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return latest(order[i]).After(latest(order[j]))
+	})
 
 	rows := make([]downloadedRow, 0, len(order))
 	for _, k := range order {
