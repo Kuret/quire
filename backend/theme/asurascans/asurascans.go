@@ -45,6 +45,15 @@
 // which is what makes Search also serve as PLAN §7.5's "Browse is a search
 // with an empty query" case, with no separate listing method to write.
 //
+// # Listings
+//
+// This theme implements theme.Lister, and offers everything the site's own
+// browse-filter API supports: Popular, Newly added and Top rated (the API's
+// own "popular"/"newest"/"rating" sort values), Completed (its "completed"
+// status filter) and every genre from /api/genres — all confirmed live
+// 2026-09-24. Nothing is withheld: the API has no listing this theme declines
+// to surface.
+//
 // # Provenance
 //
 // Written from HTTP responses and JavaScript observed live on 2026-09-21/22,
