@@ -169,6 +169,13 @@ type Service struct {
 	searchAllQuery    searchAllKey
 	searchAllPagerCur *searchAllPager
 
+	// listings caches each source's answer to MessageListListings for 24
+	// hours (see listings.go). It is its own cache rather than living beside
+	// pager: a pager holds one listing's rows and is thrown away on the next
+	// one, while the menu of listings a source offers is worth remembering
+	// across a whole session of browsing back and forth between them.
+	listings *listingsCache
+
 	// coverMu guards the cover batch in flight. The frontend sends the set of
 	// tiles now on screen; the previous set is cancelled, because a page turn
 	// makes those requests work nobody will see (PLAN §12.1).
@@ -250,16 +257,17 @@ type tryKey struct {
 // New builds a Service.
 func New(opts Options) *Service {
 	s := &Service{
-		store:   opts.Store,
-		reg:     opts.Registry,
-		fetch:   opts.Fetcher,
-		covers:  opts.Covers,
-		log:     opts.Log,
-		now:     opts.Now,
-		guard:   opts.ProbeGuard,
-		drafts:  map[string]*theme.Source{},
-		bg:      newBackground(),
-		pending: newPendingHosts(),
+		store:    opts.Store,
+		reg:      opts.Registry,
+		fetch:    opts.Fetcher,
+		covers:   opts.Covers,
+		log:      opts.Log,
+		now:      opts.Now,
+		guard:    opts.ProbeGuard,
+		drafts:   map[string]*theme.Source{},
+		bg:       newBackground(),
+		pending:  newPendingHosts(),
+		listings: newListingsCache(),
 
 		library:         opts.Library,
 		libStore:        opts.LibraryStore,
@@ -389,6 +397,7 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		// The cached listing belonged to a source that no longer exists.
 		s.dropPagers()
+		s.listings.forget(req.SourceID)
 		// The store drops this source's watched series with it (PLAN §12.2),
 		// so the list on screen has to be told, or it keeps drawing rows for a
 		// source that is gone.
@@ -416,6 +425,18 @@ func (s *Service) Handle(ctx context.Context, out Sender, msgType int32, payload
 		}
 		s.goBackground(ctx, func(ctx context.Context) {
 			s.runSearch(ctx, out, req.SourceID, req.Query, req.Page, req.PageSize, req.Listing)
+		})
+		return true, nil
+
+	case appload.MessageListListings:
+		var req struct {
+			SourceID string `json:"sourceId"`
+		}
+		if err := decode(payload, &req); err != nil {
+			return true, s.sendError(out, "bad_request", err.Error())
+		}
+		s.goBackground(ctx, func(ctx context.Context) {
+			s.runListListings(ctx, out, req.SourceID)
 		})
 		return true, nil
 
@@ -1348,6 +1369,23 @@ func (s *Service) runSearch(ctx context.Context, out Sender, sourceID, query str
 		"totalPages": res.TotalPages,
 		"hasMore":    res.HasMore,
 		"series":     rows,
+	})
+}
+
+// runListListings answers MessageListListings. See listings.go for the cache
+// and degrade behaviour; this is only the plumbing to a source's theme.
+func (s *Service) runListListings(ctx context.Context, out Sender, sourceID string) {
+	th, src, err := s.themeFor(sourceID)
+	if err != nil {
+		_ = s.sendError(out, "not_found", err.Error())
+		return
+	}
+	listings := s.listings.listingsFor(ctx, sourceID, th, src, s.now, func(err error) {
+		s.log.Warn("could not fetch listings", "source", sourceID, "err", err)
+	})
+	_ = send(out, appload.MessageListings, map[string]any{
+		"sourceId": sourceID,
+		"listings": listings,
 	})
 }
 
