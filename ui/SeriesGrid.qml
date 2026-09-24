@@ -81,6 +81,71 @@ Item {
     property bool hasMore: false
     property int pendingPage: 0
 
+    // ---- browse listings ---------------------------------------------------
+    //
+    // Which listing is showing besides a text search: theme.ListingLatest by
+    // default (every visit starts there), or one the picker below chose. Both
+    // the id and its label come from the backend (Msg.Listings) — never
+    // invented here, per PLAN §2 — so currentListingLabel starts empty and the
+    // browse button just says "Browse" until the first Msg.Listings answers
+    // and fills in "Latest updates" for it.
+    property string currentListingId: "latest"
+    property string currentListingLabel: ""
+
+    // The full menu Msg.Listings sent for this source, [{id, label, group}].
+    property var listings: []
+
+    // Whether the picker panel is open. It is this screen's own state — like
+    // the long-press menu — because nothing outside the grid needs to know.
+    property bool pickerOpen: false
+
+    // listings, grouped and ordered sort/status/genre, for the picker's three
+    // headings. A group nobody offered stays an empty array rather than being
+    // left out of the list — the Repeater below hides an empty section by its
+    // own entries.length, not by this shape changing.
+    readonly property var listingGroups: {
+        var sortG = [], statusG = [], genreG = []
+        for (var i = 0; i < screen.listings.length; ++i) {
+            var l = screen.listings[i]
+            if (l.group === "sort") sortG.push(l)
+            else if (l.group === "status") statusG.push(l)
+            else if (l.group === "genre") genreG.push(l)
+        }
+        return [
+            {"heading": "Sort", "entries": sortG},
+            {"heading": "Status", "entries": statusG},
+            {"heading": "Genres", "entries": genreG}
+        ]
+    }
+
+    // applyListings stores a fresh Msg.Listings answer, and — only while
+    // still showing the default listing nothing has changed away from yet —
+    // fills in currentListingLabel from it, so the very first draw of the
+    // button says "Browse" and the one right after Listings lands says
+    // "Browse: Latest updates" in the backend's own words.
+    function applyListings(list) {
+        screen.listings = list ? list : []
+        for (var i = 0; i < screen.listings.length; ++i) {
+            if (screen.listings[i].id === screen.currentListingId) {
+                screen.currentListingLabel = screen.listings[i].label
+                break
+            }
+        }
+    }
+
+    // chooseListing is the picker's one action: close it, switch to the
+    // listing picked, and browse its first page — through browseRequested,
+    // the same signal the Clear button and the old "Latest" tap already used,
+    // so Main.qml has exactly one place that composes the request.
+    function chooseListing(id, label) {
+        screen.pickerOpen = false
+        screen.currentListingId = id
+        screen.currentListingLabel = label
+        screen.query = ""
+        screen.searching = false
+        screen.browseRequested()
+    }
+
     // How many items fit, whole rows only, in whichever layout is showing. The
     // page size is sent to the backend with every request, so switching layout
     // changes what a page *is* — which is why onPageSizeChanged below refetches
@@ -185,6 +250,13 @@ Item {
         screen.totalPages = 0
         screen.hasMore = false
         screen.pendingPage = 0
+        // Default listing per visit: latest. The label is filled in again
+        // once the fresh Msg.Listings this source's opening asks for answers
+        // (Main.qml's openSource) — until then the button just says "Browse".
+        screen.currentListingId = "latest"
+        screen.currentListingLabel = ""
+        screen.listings = []
+        screen.pickerOpen = false
     }
 
     // The geometry changed — a resized emulator window, never the panel — so
@@ -280,15 +352,36 @@ Item {
                 // Deliberately *not* dismissInput: the user is about to type.
                 // `searching` is set rather than left alone, because Clear is
                 // reachable from a bar that was only tapped once and the
-                // keyboard may never have been up. The results on screen stay
-                // until a new search runs — `reset()` is what empties them,
-                // and it is called on a real change of source.
+                // keyboard may never have been up.
                 screen.searching = true
+                // Clearing steps back out of the search, to whichever listing
+                // was chosen before it — Browse's own default or one picked
+                // from the panel below — so, unlike a bare Clear on a filter,
+                // this re-fetches rather than leaving the old search's rows on
+                // screen under a keyboard with nothing left typed into it.
+                screen.busy = true
+                screen.pendingPage = 1
+                screen.browseRequested()
             }
+        }
+
+        // "Browse: <label>" once Msg.Listings has named the current listing,
+        // "Browse" alone before that or when the full wording will not fit —
+        // measured against measureLabel's real font metrics rather than a
+        // guessed character count, so it is exactly the same rule on any
+        // label. A tap opens the picker; it no longer browses by itself,
+        // since a single tap and a listing choice are now two different
+        // things.
+        Text {
+            id: measureLabel
+            visible: false
+            text: screen.currentListingLabel.length > 0 ? "Browse: " + screen.currentListingLabel : "Browse"
+            font.pointSize: Style.smallSize
         }
 
         Rectangle {
             id: browseButton
+            objectName: "browseButton"
             anchors { right: parent.right; rightMargin: Style.margin; verticalCenter: parent.verticalCenter }
             width: 180
             height: Style.buttonHeight
@@ -298,20 +391,18 @@ Item {
             radius: 6
 
             Text {
+                objectName: "browseButtonLabel"
                 anchors.centerIn: parent
-                text: "Latest"
+                text: measureLabel.contentWidth <= (browseButton.width - Style.gap) ? measureLabel.text : "Browse"
                 font.pointSize: Style.smallSize
                 color: Style.ink
             }
 
             MouseArea {
                 id: browseArea
+                objectName: "browseButtonArea"
                 anchors.fill: parent
-                onClicked: {
-                    screen.query = ""
-                    screen.searching = false
-                    screen.browseRequested()
-                }
+                onClicked: screen.pickerOpen = !screen.pickerOpen
             }
         }
 
@@ -493,6 +584,112 @@ Item {
         pendingPage: screen.pendingPage
         onPreviousRequested: screen.turnTo(screen.page - 1)
         onNextRequested: screen.turnTo(screen.page + 1)
+    }
+
+    // ---- the listing picker -------------------------------------------------
+    //
+    // A full-width panel, not a small anchored menu like ContextMenu: it is
+    // reached from a fixed button rather than a press point, and a source's
+    // genres can run to dozens of entries the picker has to show *something*
+    // for. It scrolls in a Flickable rather than paging, the one exception to
+    // PLAN §12.1 the "Aa" reader-settings panel already set the precedent
+    // for (PLAN §12.8 round 3): this is a menu of short lines, not a listing
+    // of results, and capping it at a screenful would just hide genres near
+    // the end of the site's own list.
+    Item {
+        id: listingPicker
+        objectName: "listingPicker"
+        anchors.fill: parent
+        visible: screen.pickerOpen
+
+        // Tap anywhere outside the panel to close it without choosing
+        // anything — the same dismiss ContextMenu uses.
+        MouseArea {
+            objectName: "listingPickerScrim"
+            anchors.fill: parent
+            enabled: screen.pickerOpen
+            onClicked: screen.pickerOpen = false
+        }
+
+        Rectangle {
+            id: pickerPanel
+            objectName: "listingPickerPanel"
+            anchors {
+                top: searchBar.bottom
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                bottom: pagerBar.top; bottomMargin: Style.gap
+            }
+            color: Style.paper
+            border.width: 2
+            border.color: Style.ink
+            radius: 6
+
+            Flickable {
+                id: pickerFlick
+                objectName: "listingPickerFlickable"
+                anchors.fill: parent
+                anchors.margins: Style.gap
+                contentWidth: width
+                contentHeight: pickerColumn.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: pickerColumn
+                    width: pickerFlick.width
+                    spacing: Style.gap
+
+                    Repeater {
+                        model: screen.listingGroups
+                        delegate: Column {
+                            width: pickerColumn.width
+                            spacing: 4
+                            visible: modelData.entries.length > 0
+
+                            SectionHeading {
+                                width: parent.width
+                                text: modelData.heading
+                            }
+
+                            Repeater {
+                                model: modelData.entries
+                                delegate: Rectangle {
+                                    objectName: "listingPickerEntry"
+                                    width: pickerColumn.width
+                                    height: Style.rowHeight
+                                    color: entryArea.pressed ? Style.pressed : Style.paper
+
+                                    Text {
+                                        anchors {
+                                            left: parent.left; leftMargin: Style.gap
+                                            right: parent.right; rightMargin: Style.gap
+                                            verticalCenter: parent.verticalCenter
+                                        }
+                                        elide: Text.ElideRight
+                                        text: modelData.label
+                                        font.pointSize: Style.bodySize
+                                        color: Style.ink
+                                    }
+
+                                    MouseArea {
+                                        id: entryArea
+                                        anchors.fill: parent
+                                        onClicked: screen.chooseListing(modelData.id, modelData.label)
+                                    }
+
+                                    Rectangle {
+                                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                        height: Style.hairline
+                                        color: Style.rule
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ---- search input ------------------------------------------------------

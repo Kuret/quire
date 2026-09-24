@@ -668,6 +668,10 @@ Rectangle {
             root.fillSeries(msg)
             return
 
+        case Msg.Listings:
+            seriesGridScreen.applyListings(msg && msg.listings ? msg.listings : [])
+            return
+
         case Msg.SearchAllResults:
             root.fillSearchAll(msg)
             return
@@ -1329,7 +1333,15 @@ Rectangle {
             "pageSize": seriesGridScreen.pageSize
         }
         if (seriesGridScreen.query.length > 0) {
+            // A non-empty query is a text search and ignores the listing
+            // entirely — the backend's own rule (MessageSearch's doc
+            // comment), kept true here too rather than only on that side.
             req.query = seriesGridScreen.query
+            root.send(Msg.Search, req)
+        } else if (seriesGridScreen.currentListingId !== "latest") {
+            // Empty query, a listing other than the default: page it exactly
+            // like Browse, through Msg.Search's own listing field.
+            req.listing = seriesGridScreen.currentListingId
             root.send(Msg.Search, req)
         } else {
             root.send(Msg.Browse, req)
@@ -1415,6 +1427,13 @@ Rectangle {
         seriesGridScreen.busy = true
         seriesGridScreen.pendingPage = 1
         root.requestSeriesPage(1)
+        // What this source can be browsed by, besides its own latest updates
+        // — the picker's menu. Asked for every time the grid opens rather
+        // than cached here: the backend already caches it per source for 24
+        // hours (service/listings.go), so this is at most a return from
+        // memory, never a second real fetch for a source browsed twice in a
+        // session.
+        root.send(Msg.ListListings, {"sourceId": sourceId})
     }
 
     // openSeries opens one (source, series) pair. `matches` is the combined

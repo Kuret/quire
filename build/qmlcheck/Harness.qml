@@ -1011,6 +1011,75 @@ Window {
         win.want("without putting the keyboard away", seriesGrid.searching, true)
         seriesGrid.dismissInput()
 
+        // ---- the browse listing picker -------------------------------------
+        //
+        // "Browse: <label>" once a Msg.Listings answer named the current
+        // listing, plain "Browse" before that or when it will not fit;
+        // tapping it opens a full-width, grouped picker; choosing an entry
+        // browses it and closes the panel.
+        seriesGrid.reset()
+        var browseLabel = win.findChild(seriesGrid, "browseButtonLabel")
+        win.want("before any Listings answer, the button just says Browse",
+                 browseLabel.text, "Browse")
+        win.want("and the default listing is latest", seriesGrid.currentListingId, "latest")
+
+        seriesGrid.applyListings([
+            {"id": "latest", "label": "Latest updates", "group": "sort"},
+            {"id": "popular", "label": "Popular", "group": "sort"},
+            {"id": "completed", "label": "Completed", "group": "status"},
+            {"id": "genre:action", "label": "Action", "group": "genre"},
+            {"id": "genre:romance", "label": "Romance", "group": "genre"}
+        ])
+        win.want("the backend's own label fills in for the listing showing now",
+                 seriesGrid.currentListingLabel, "Latest updates")
+        // "Browse: Latest updates" measures wider than this button — the
+        // "just 'Browse' if too long" half of the rule, exercised for real
+        // rather than assumed: the shorter "Browse: Completed" below is what
+        // proves the full wording *can* show when it fits.
+        win.want("too long to fit, so the button falls back to plain Browse",
+                 browseLabel.text, "Browse")
+
+        var picker = win.findChild(seriesGrid, "listingPicker")
+        win.want("the picker starts closed", picker.visible, false)
+        win.findChild(seriesGrid, "browseButtonArea").clicked(null)
+        win.want("tapping the button opens it", seriesGrid.pickerOpen, true)
+        win.want("and the panel is on screen", picker.visible, true)
+
+        var entries = win.findChildren(seriesGrid, "listingPickerEntry", [])
+        win.want("one row per listing: two sort, one status, two genres",
+                 entries.length, 5)
+
+        // Choosing "Completed" (status group) browses it and closes the
+        // picker — through the same browseRequested signal Clear and the old
+        // "Latest" tap already used.
+        var browseSignalCount = 0
+        var onChosenBrowse = function () { browseSignalCount++ }
+        seriesGrid.browseRequested.connect(onChosenBrowse)
+        seriesGrid.chooseListing("completed", "Completed")
+        win.want("choosing an entry closes the picker", seriesGrid.pickerOpen, false)
+        win.want("and switches the current listing", seriesGrid.currentListingId, "completed")
+        win.want("with the label it was given", seriesGrid.currentListingLabel, "Completed")
+        win.want("clears any query underneath it", seriesGrid.query, "")
+        win.want("and asks Main.qml to browse it", browseSignalCount, 1)
+        win.want("the button now says so", browseLabel.text, "Browse: Completed")
+        seriesGrid.browseRequested.disconnect(onChosenBrowse)
+
+        // Tapping the scrim outside the panel dismisses it without choosing.
+        seriesGrid.pickerOpen = true
+        win.findChild(seriesGrid, "listingPickerScrim").clicked(null)
+        win.want("tapping outside the panel closes it without a choice",
+                 seriesGrid.pickerOpen, false)
+        win.want("and the listing is unchanged", seriesGrid.currentListingId, "completed")
+
+        // reset() (a real change of source) always goes back to latest, with
+        // no listing menu held over from the source just left.
+        seriesGrid.reset()
+        win.want("reset() returns to the default listing",
+                 seriesGrid.currentListingId, "latest")
+        win.want("with nothing left to show for it yet",
+                 seriesGrid.currentListingLabel, "")
+        win.want("and no stale menu", seriesGrid.listings.length, 0)
+
         // The address field, the same way round.
         var addrField = win.findChild(addSource, "urlField")
         addrField.forceActiveFocus()
