@@ -106,7 +106,17 @@ const (
 	// dropped either.
 	MessageSearchAllResults MessageType = 27
 
-	// MessageSearch is UI→BE, JSON {sourceId, query}.
+	// MessageSearch is UI→BE, JSON {sourceId, query, page, pageSize,
+	// listing}. `listing` is a theme.Listing ID — "" and "latest" both mean
+	// today's Browse — and is only consulted when `query` is empty: a
+	// non-empty query is a text search and ignores it, exactly as before this
+	// field existed. An empty query naming any other listing runs
+	// theme.Lister.List instead of the default Search, paged exactly like
+	// Browse (see backend/service/paging.go's pagerKey, which now carries the
+	// listing too, so switching listings never serves the other one's cached
+	// page). A source whose theme is not a theme.Lister, or a listing ID it
+	// did not name in MessageListings, is `search_failed` — never a silent
+	// fall back to another listing (theme/listing.go's own rule, kept here).
 	MessageSearch MessageType = 20
 	// MessageSearchResults is BE→UI, JSON array.
 	MessageSearchResults MessageType = 21
@@ -644,6 +654,31 @@ const (
 	// MessageDownloadProgress's running commentary, for the moments a book
 	// session cannot yet answer with a page.
 	MessageBookStatus MessageType = 102
+
+	// Browse listings (PLAN §7.5's default Browse, generalised): a source may
+	// offer more ways to browse than its one latest-updates page —
+	// popular, newly added, top rated, completed, and genres — through
+	// theme.Lister.
+	//
+	// MessageListListings is UI→BE, JSON {sourceId}: what can this source be
+	// browsed by? MessageListings is BE→UI, JSON {sourceId, listings:
+	// [{id, label, group}]}. It always starts with {"latest", "Latest
+	// updates", "sort"}, even for a source whose theme is not a
+	// theme.Lister — then that is the only entry, because the default Browse
+	// (an empty-query Search) always exists. group is "sort", "status" or
+	// "genre" (theme.ListingGroupSort and friends); entries are ordered sort,
+	// then status, then genre, and the genres keep the order the theme gave
+	// them. Well-known listings get theme.ListingLabel's one wording
+	// regardless of what the theme sent, so no source can call its popular
+	// page "Hot" (PLAN §2).
+	//
+	// Answers are cached per source for 24 hours (in memory); a Listings()
+	// call that fails degrades to the sort/status entries already known (the
+	// last successful answer, or latest-only with nothing cached yet) plus a
+	// log line — never an error banner, because a browse screen that stopped
+	// working over one flaky fetch is worse than one offering fewer ways in.
+	MessageListListings MessageType = 103
+	MessageListings     MessageType = 104
 )
 
 // messageNames covers every type Quire defines, system types included. It is
@@ -733,6 +768,8 @@ var messageNames = map[MessageType]string{
 	MessageBookRelaid:            "BookRelaid",
 	MessageCloseBook:             "CloseBook",
 	MessageBookStatus:            "BookStatus",
+	MessageListListings:          "ListListings",
+	MessageListings:              "Listings",
 }
 
 // Name returns the PLAN §7.1 name of a message type, or "Unknown(<n>)".

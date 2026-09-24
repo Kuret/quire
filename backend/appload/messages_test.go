@@ -94,6 +94,8 @@ func TestMessageTypeValues(t *testing.T) {
 		"BookRelaid":            100,
 		"CloseBook":             101,
 		"BookStatus":            102,
+		"ListListings":          103,
+		"Listings":              104,
 	}
 	if len(messageNames) != len(want) {
 		t.Fatalf("messageNames has %d entries, want %d", len(messageNames), len(want))

@@ -192,3 +192,12 @@ var SetReaderSettings = 99
 var BookRelaid = 100
 var CloseBook = 101
 var BookStatus = 102
+
+// Browse listings: what a source can be browsed by besides its own latest
+// updates (popular, newly added, top rated, completed, genres) — see
+// backend/appload/messages.go's doc comment. ListListings asks; Listings
+// answers {sourceId, listings: [{id, label, group}]}, always starting with
+// {"latest", "Latest updates", "sort"} even for a source with nothing else to
+// offer. Search's own payload gains a `listing` field alongside it.
+var ListListings = 103
+var Listings = 104
