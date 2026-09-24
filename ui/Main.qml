@@ -507,6 +507,14 @@ Rectangle {
                 // over latestUuid (ui/DownloadedList.qml's readable/chose).
                 "savedCount": r.savedCount ? r.savedCount : 0,
                 "latestSavedChapterId": r.latestSavedChapterId ? r.latestSavedChapterId : "",
+                // What tapping this row should open (PLAN §12.9), flattened
+                // off the backend's "continue" object — a ListModel role has
+                // to exist from the first append, and a nested object is not
+                // this file's convention elsewhere in this model. "" means
+                // nothing to continue, and the row falls back to Browse.
+                "continueKind": r.continue && r.continue.kind ? r.continue.kind : "",
+                "continueChapterId": r.continue && r.continue.chapterId ? r.continue.chapterId : "",
+                "continueDocumentUuid": r.continue && r.continue.documentUuid ? r.continue.documentUuid : "",
                 // The menu's Watch / Stop watching line, from the store. A
                 // row here is a (source, series) pair, so it answers for
                 // itself rather than for the source being browsed.
@@ -1917,10 +1925,12 @@ Rectangle {
             // else (PLAN §6 M6).
             onReadRequested: root.openInReader(documentUuid)
             // "Read latest" on a row whose newest thing is a chapter saved
-            // in Quire (DownloadedList.qml's readable/chose prefer this).
-            // Back from the reader returns here rather than to a series
-            // screen this route never opened.
-            onReadSavedRequested: root.openSaved(sourceId, seriesId, chapterId, "downloaded")
+            // in Quire (DownloadedList.qml's readable/chose prefer this), and
+            // continuing to read on a tap (PLAN §12.9). Back from the reader
+            // returns to whichever of the two Downloaded screens the row was
+            // on, rather than to a series screen this route never opened.
+            onReadSavedRequested: root.openSaved(sourceId, seriesId, chapterId,
+                downloadedListScreen.inPrivateMode ? "downloadedPrivate" : "downloaded")
 
             // Watching a series from the screen that lists what is already on
             // the tablet. A row here is a (source, series) pair, so it names

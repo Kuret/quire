@@ -217,6 +217,34 @@ Item {
                && String(row.latestSavedChapterId).length > 0
     }
 
+    // continueKindOf reads the backend's continue target (PLAN §12.9) off a
+    // row: "saved", "library", or "" when there is nothing to read yet. An
+    // absent role reads as "" rather than undefined, the same rule every
+    // other optional role on this screen follows.
+    function continueKindOf(row) {
+        return row.continueKind === undefined || row.continueKind === null
+               ? "" : String(row.continueKind)
+    }
+
+    // tapRow is what a tap on a row or a tile does now: continue reading,
+    // rather than opening the series' own results list first (which fetches
+    // from the web and is slow). A row with nothing to continue falls back
+    // to exactly what a tap always did — opening the series — which is also
+    // what the menu's Browse now does on purpose.
+    function tapRow(row) {
+        switch (screen.continueKindOf(row)) {
+        case "saved":
+            screen.readSavedRequested(row.sourceId, row.seriesId,
+                row.continueChapterId ? String(row.continueChapterId) : "")
+            return
+        case "library":
+            screen.readRequested(row.continueDocumentUuid ? String(row.continueDocumentUuid) : "")
+            return
+        default:
+            screen.openRequested(row.sourceId, row.sourceName, row.seriesId, row.title)
+        }
+    }
+
     function itemsFor(row) {
         var items = []
 
@@ -244,7 +272,12 @@ Item {
             return items
         }
 
-        items.push({"action": "open", "label": "Open", "enabled": true})
+        // "Browse" — opening the series' own results list, exactly what a
+        // tap on this row used to do before it started continuing reading
+        // instead (tapRow above). Kept on the menu, relabelled, rather than
+        // duplicated: it is still the only way to reach a series' full
+        // chapter list from here.
+        items.push({"action": "open", "label": "Browse", "enabled": true})
         // **Absent, not greyed out, when there is nothing to open.** An item
         // that cannot ever be used on this row is not an item.
         if (screen.readable(row))
@@ -375,7 +408,7 @@ Item {
                 // screen's rows, not something a grid of pictures should know.
                 if (!row.openable)
                     return
-                screen.openRequested(row.sourceId, row.sourceName, row.seriesId, row.title)
+                screen.tapRow(row)
             }
             onHeld: {
                 var at = tiles.mapToItem(screen, x, y)
@@ -494,10 +527,13 @@ Item {
                     }
                 }
 
-                // The row body still opens the series — asked for explicitly,
-                // "clicking on the rest of the row still should link to that
-                // manga to delete individual chapters" — so the tap target
-                // stops where the delete button starts rather than covering it.
+                // The row body continues reading (tapRow, PLAN §12.9) rather
+                // than opening the series first — which used to fetch from
+                // the web and be slow — falling back to the series' own
+                // results list only when there is nothing to continue yet.
+                // Browsing the series deliberately is still one long press
+                // away (the menu's Browse). The tap target stops where the
+                // delete button starts rather than covering it.
                 HoldArea {
                     id: rowArea
                     objectName: "downloadedRowArea"
@@ -511,8 +547,7 @@ Item {
                     // openMenu, where the grid declines the same rows, so that
                     // the two layouts offer the same nothing.
                     enabled: model.openable
-                    onTapped: screen.openRequested(model.sourceId, model.sourceName,
-                                                   model.seriesId, model.title)
+                    onTapped: screen.tapRow(model)
                     onHeld: {
                         var at = rowArea.mapToItem(screen, rowArea.pressX, rowArea.pressY)
                         screen.openMenu(index, at.x, at.y)

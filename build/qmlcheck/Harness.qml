@@ -2842,7 +2842,12 @@ Window {
                     // be asserted against a model shape the app never produces.
                     "kind": Kinds.of(r),
                     "badge": Kinds.mark(r),
-                    "watched": r.watched ? true : false})
+                    "watched": r.watched ? true : false,
+                    // PLAN §12.9's continue target, flattened the way
+                    // Main.qml's fillDownloaded flattens it.
+                    "continueKind": r.continueKind ? r.continueKind : "",
+                    "continueChapterId": r.continueChapterId ? r.continueChapterId : "",
+                    "continueDocumentUuid": r.continueDocumentUuid ? r.continueDocumentUuid : ""})
             }
             win.findChild(downloadedList, "downloadedRows").forceLayout()
             win.findChild(downloadedList, "coverTiles").forceLayout()
@@ -4799,7 +4804,7 @@ Window {
         win.want("not even one that is already watched",
                  bookMenu.indexOf("Stop watching"), -1)
         win.want("while still offering everything that means something",
-                 bookMenu.join(","), "Open,Delete everything from this series")
+                 bookMenu.join(","), "Browse,Delete everything from this series")
         win.want("and not one line of it counts chapters",
                  bookMenu.join(" | ").toLowerCase().indexOf("chapter"), -1)
         win.findChild(downloadedList, "contextMenuScrim").clicked(null)
@@ -4846,7 +4851,7 @@ Window {
         win.want("**an unwatched book is offered no Watch either**",
                  freshBookMenu.indexOf("Watch"), -1)
         win.want("and the rest of its menu is unchanged",
-                 freshBookMenu.join(","), "Open,Delete everything from this series")
+                 freshBookMenu.join(","), "Browse,Delete everything from this series")
         win.findChild(downloadedList, "contextMenuScrim").clicked(null)
 
         downloadedList.view = dlViewBefore
@@ -5037,7 +5042,7 @@ Window {
                  win.menuActions(downloadedList).join(","), "open,read,watch,delete")
         win.want("in the screen's own words",
                  win.menuLabels(downloadedList).join(","),
-                 "Open,Read latest,Watch,Delete everything from this series")
+                 "Browse,Read latest,Watch,Delete everything from this series")
 
         // **Absent, not greyed out.** A row with nothing openable must not
         // offer to open it.
@@ -5212,6 +5217,74 @@ Window {
                  win.downloadedSavedReads, 1)
         win.want("naming it", win.downloadedSavedReadChapter, "c12")
         win.want("not the library document this time either", win.downloadedReads, 0)
+
+        // ---- continue reading on a tap (PLAN §12.9) ------------------------
+        //
+        // A tap used to open the series' own results list, which fetches
+        // from the web first and is slow. It continues reading instead now,
+        // following the backend's "continue" target; the menu's Browse (the
+        // old "Open", relabelled above) is what still opens the series.
+        downloadedRows([
+            {"sourceId": "src-e", "sourceName": "Example Reader",
+             "seriesId": "/manga/continue-saved/", "title": "Continue Saved",
+             "detail": "1 chapter saved in Quire", "openable": true, "note": "",
+             "continueKind": "saved", "continueChapterId": "c7"},
+            {"sourceId": "src-f", "sourceName": "Example Reader",
+             "seriesId": "/manga/continue-library/", "title": "Continue Library",
+             "detail": "1 download", "openable": true, "note": "",
+             "continueKind": "library", "continueDocumentUuid": "doc-continue"},
+            {"sourceId": "src-g", "sourceName": "Example Reader",
+             "seriesId": "/manga/continue-none/", "title": "Continue None",
+             "detail": "1 download", "openable": true, "note": ""}])
+        downloadedList.view = "list"
+        var continueRowAreas = win.findChildren(downloadedList, "downloadedRowArea", [])
+
+        win.downloadedSavedReads = 0
+        win.downloadedReads = 0
+        win.downloadedOpens = 0
+        continueRowAreas[0].clicked(null)
+        win.want("a saved continue target sends OpenSaved", win.downloadedSavedReads, 1)
+        win.want("naming the chapter to continue at", win.downloadedSavedReadChapter, "c7")
+        win.want("and opens no series", win.downloadedOpens, 0)
+
+        win.downloadedReads = 0
+        win.downloadedOpens = 0
+        continueRowAreas[1].clicked(null)
+        win.want("a library continue target hands off to the reader", win.downloadedReads, 1)
+        win.want("naming the document", win.downloadedReadUuid, "doc-continue")
+        win.want("and opens no series", win.downloadedOpens, 0)
+
+        win.downloadedReads = 0
+        win.downloadedSavedReads = 0
+        win.downloadedOpens = 0
+        continueRowAreas[2].clicked(null)
+        win.want("a row with nothing to continue falls back to Browse",
+                 win.downloadedOpens, 1)
+        win.want("naming its own series", win.downloadedOpenedSeries, "/manga/continue-none/")
+        win.want("and asks for no read", win.downloadedReads + win.downloadedSavedReads, 0)
+
+        // The tile grid follows exactly the same rule.
+        downloadedList.view = "grid"
+        win.findChild(dlTiles, "coverTiles").forceLayout()
+        var continueTiles = win.findChildren(dlTiles, "coverTileArea", [])
+        win.downloadedSavedReads = 0
+        win.downloadedOpens = 0
+        continueTiles[0].clicked(null)
+        win.want("a saved continue target sends OpenSaved from a tile too",
+                 win.downloadedSavedReads, 1)
+        win.want("opening no series", win.downloadedOpens, 0)
+
+        // The menu's Browse still opens the series, even on a row that
+        // continues reading on a tap.
+        win.holdOn(continueRowAreas[0])
+        win.want("Browse is still on the menu",
+                 win.menuLabels(downloadedList).join(","),
+                 "Browse,Watch,Delete everything from this series")
+        win.downloadedOpens = 0
+        win.tapMenu(downloadedList, "open")
+        win.want("and it opens the series, not the continue target",
+                 win.downloadedOpens, 1)
+        win.want("naming that series", win.downloadedOpenedSeries, "/manga/continue-saved/")
 
         // ---- Watching ------------------------------------------------------
 
