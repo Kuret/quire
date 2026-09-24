@@ -3557,3 +3557,97 @@ not serve one, so a badge that an ordinary tap used to clear can survive it;
 Browse still clears it. Whether continuing to read should *also* count as
 having seen the series is a product decision for the main thread, not
 settled here.
+
+### 12.10 Browse listings — Popular, Newly added, Top rated, Completed, genres — 2026-09-24
+
+**Why.** Browse has only ever been one listing: `Search` with an empty query,
+whatever a site's own default page happens to be (§7.5's stage 5 already
+leans on this). Several site families sort that same catalogue several other
+ways — most read, most recently added, highest rated, finished-only — and
+list it by genre besides. None of that was reachable; the empty-query page
+was the only one.
+
+**`theme.Lister` (`backend/theme/listing.go`), a side interface.** A theme
+that has more than its default Browse implements it: `Listings(ctx, s)`
+names the ways this source can be browsed (well-known IDs
+`ListingLatest`/`Popular`/`New`/`Rating`/`Completed`, or a `GenreListing` per
+genre); `List(ctx, s, listingID, page)` answers one. It is a side interface
+for the same reason `FirstPageProber` is (§7.2): most sources have nothing to
+add, and a theme with nothing to add is not making a false claim by omission
+— the screen still offers the one listing it always had. `ListingLatest` need
+not be named; the caller offers it first regardless, and `List(ListingLatest)`
+must equal today's `Search("")` — every implementation gets this for free by
+delegating rather than duplicating the default page's own logic. **A theme
+lists only what its site actually serves** (§2): answering "Top rated" with
+the latest-updates page would be the screen asserting something untrue, and
+an ID `Listings` did not name is always an error from `List`, never a silent
+fall back to another listing.
+
+**The wire contract — two new message types (103/104), one field added.**
+`MessageListListings` (UI→BE, `{sourceId}`) asks; `MessageListings` (BE→UI,
+`{sourceId, listings: [{id, label, group}]}`) answers, always starting with
+`{"latest", "Latest updates", "sort"}` — even for a source whose theme is not
+a `theme.Lister`, in which case that is the only entry — then whatever the
+theme named, ordered sort/status/genre, genres kept in the theme's own order
+(not resorted: §2, it is the site's list, not ours to reorder). Well-known
+listings get `theme.ListingLabel`'s one wording regardless of what the theme
+sent, so no source can call its popular page "Hot" and another "Trending".
+Cached per source for 24 hours, in memory — a menu of sort orders and genres
+changes about as often as a theme does. A `Listings()` call that fails
+degrades to whatever is already known (the last successful answer, or
+latest-only with nothing cached yet) plus a log line, **never an error
+banner**: a browse screen that stopped offering "Top rated" because one fetch
+of its own picker's menu failed is a worse answer than one that just does not
+offer it this time.
+
+`MessageSearch` gains `listing` (a `theme.Listing` ID). `""` and `"latest"`
+both mean today's Browse; an empty query naming any other listing runs
+`theme.Lister.List` instead of `Search`, paged exactly like Browse — the
+single-source pager (`backend/service/paging.go`) now keys its cache on
+`(source, query, listing)`, not just `(source, query)`, precisely so
+switching from "Popular" to "Top rated" never serves "Popular"'s cached page
+back under the new listing's name. **A non-empty query ignores `listing`
+entirely** — it is a text search, exactly as before this field existed — and
+a source whose theme is not a `theme.Lister`, or a listing ID it never named,
+answers `search_failed` rather than silently falling back to its default.
+
+**UI (`ui/SeriesGrid.qml`).** The "Latest" button becomes "Browse: `<label>`"
+once `MessageListings` has named the listing showing now — plain "Browse"
+before that answer lands, or whenever the full wording measures wider than
+the button (real font metrics, not a guessed character count). Tapping it
+opens a full-width panel grouped under "Sort", "Status" and "Genres"
+headings, built from the `MessageListings` array; it scrolls in a
+`Flickable` rather than paging — the one other exception to §12.1's "no
+scrolling" alongside the "Aa" reader-settings panel (§12.8 round 3), because
+a menu of short lines that a source's genre list can run to dozens of is not
+the paginated *results* §12.1 is about, and capping it at a screenful would
+just hide genres near the end of the site's own list. Choosing an entry
+browses its first page and closes the panel; paging keeps whichever listing
+is showing; typing a query searches as always, ignoring it; **clearing the
+query returns to the chosen listing** rather than leaving the search's rows
+on screen. A source's grid opening asks for its `MessageListings` every
+time — the backend's 24-hour cache means this is at most a return from
+memory, never a second real fetch for a source browsed twice in a session.
+Default listing per visit: latest, exactly as Browse always was.
+
+**generic (`backend/theme/generic`): browse listings as optional config,
+same closed-vocabulary pattern.** `listingPopular`/`listingNew`/
+`listingRating`/`listingCompleted` are URL templates (`{page}`), parsed with
+the very same `searchItem`/`searchLink`/`searchTitle`/`searchCover`
+selectors `Search` already uses — a listing is still just a page of series
+stubs, so there is no second parsing vocabulary to learn. Genres are
+`genreListPath` (the site's own genre index, fetched once and cached by the
+caller), `genreLinkSelector` (each genre's anchor: its text is the label, the
+last path segment of its href is the site's own slug) and `genrePath`
+(`{genre}`, `{page}`). Only listings a source actually configured are
+offered; an unconfigured or unrecognised one is always an error from `List`,
+matching every other theme. A genre page that fails to fetch does not fail
+the whole `Listings()` call — the sort and status listings above it are
+still true, so it is skipped rather than degrading a working browse screen
+over one bad page nobody had asked for yet.
+
+**Theme agents implement `theme.Lister` per theme, verified live**, in
+`backend/theme/<theme>/` — see `docs/THEME-NOTES.md`'s "Adding `theme.Lister`
+to a theme" for what to check before claiming a listing, and each theme's own
+package comment for which listings its site offers and which it lacks (and
+why).

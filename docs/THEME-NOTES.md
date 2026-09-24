@@ -1896,10 +1896,63 @@ same reason an unknown override is):
 `searchPath`, `searchItem`, `searchLink`, `searchTitle`, `searchCover`,
 `seriesPath`, `seriesTitle`, `seriesCover`, `seriesDescription`,
 `seriesGenres`, `seriesStatus`, `chapterItem`, `chapterLink`, `chapterTitle`,
-`chapterDate`, `pageImage`.
+`chapterDate`, `pageImage`, `listingPopular`, `listingNew`, `listingRating`,
+`listingCompleted`, `genreListPath`, `genreLinkSelector`, `genrePath`.
 
 `searchPath` and `seriesPath` are URL templates rather than selectors:
 `{query}` (URL-escaped), `{page}`, `{id}`.
+
+**Browse listings (`theme.Lister`), as optional config.** `listingPopular`,
+`listingNew`, `listingRating` and `listingCompleted` are URL templates —
+`{page}` only — parsed with the same `searchItem`/`searchLink`/
+`searchTitle`/`searchCover` selectors `Search` already uses: a listing is
+still just a page of series stubs, so there is no second parser to write.
+Genres need three keys together: `genreListPath` (the site's genre index,
+fetched once — the caller caches it), `genreLinkSelector` (each genre's
+anchor; its text is the label shown, the last path segment of its href is
+the slug used as the genre's own ID) and `genrePath` (`{genre}`, `{page}`).
+Only the listings a source actually configured are offered — this is a
+closed vocabulary, not something every generic source gets by default — and
+an unconfigured or unrecognised listing ID is always an error from `List`,
+never a silent fall back to the default listing. A `genreListPath` that
+fails to fetch does not fail `Listings()` as a whole: the sort and status
+listings configured alongside it are still true, so the genre section is
+just missing that once rather than the whole picker degrading.
+
+A worked, synthetic example (PLAN §1.3: no real source addresses in this
+repository — the actual live investigation that shaped this shape, against a
+real UIkit-based manga directory site, is recorded in the change that added
+this feature rather than here):
+
+```json
+"selectors": {
+  "browsePath": "/latest/page/{page}",
+  "searchItem": ".item",
+  "searchLink": ".text h3.title a",
+  "searchTitle": ".text h3.title a",
+  "searchCover": ".wrap_img img",
+
+  "listingNew": "/new-manga/page/{page}",
+
+  "genreListPath": "/genres",
+  "genreLinkSelector": "ul.sub-menu.genres a",
+  "genrePath": "/genre/{genre}/page/{page}"
+}
+```
+
+Note what is *not* configured: this particular site's filter form offers no
+rating or popularity order at all (its "Order by" only had Latest update, New
+manga, A-Z and Number of chapters), so `listingPopular` and `listingRating`
+stay unset rather than being pointed at the nearest approximation — an
+approximation is exactly the false claim §2 and this package's own doc
+comment warn against. Its "Completed" checkbox filter also turned out not to
+be reachable from a plain URL a fetch can replay (its results did not change
+across several parameter shapes tried against the live site, which reads as
+client-side or session-based filtering rather than a request the server
+actually honours) — so `listingCompleted` is left unset for the same reason:
+offering it without confidence it truly filters would show "Completed" and
+answer with an ordinary mixed listing, which is the one thing a themed
+source's `Lister` must never do.
 
 **`overrides` keys**
 
@@ -2053,6 +2106,80 @@ genuinely ambiguous, require corroboration.
 
 ---
 
+## Adding `theme.Lister` to a theme
+
+`theme.Lister` (`backend/theme/listing.go`) is a side interface, like
+`FirstPageProber` and `FileTheme`: implement it only for a site that genuinely
+offers more ways to browse than its one default page. A theme that has
+nothing to add stays exactly as it is — the browse screen still offers that
+one listing, and *not* implementing `Lister` is not a false claim, whereas
+implementing it and answering a listing with the wrong page would be.
+
+**Before writing anything, find the site's own ways of browsing it — not by
+guessing at plausible endpoints.** Load the site by hand (or with `curl`) and
+look for what its own navigation offers: a sort dropdown or query parameter on
+its directory/listing page (recently updated, newly added, highest rated,
+most read), a "Completed" filter, and a genre index page. Record the
+**published, working URL shape** for each — not an assumption from another
+theme in the same family, since two sites built from the same software still
+diverge (see madara's own notes on this above). If a site's directory has an
+"order by" control, read every option it actually lists: several real sites
+have no rating or popularity order at all, and it is better to omit
+`ListingRating`/`ListingPopular` than to point them at the nearest thing and
+have the screen claim an ordering the site never promised.
+
+**Verify each listing answers what it claims, live, the same way §7.5 stage 5
+verifies a search.** A checkbox- or form-driven filter (as opposed to a plain
+path or query string) is the one to be suspicious of: some are rendered
+entirely client-side, or only take effect through an AJAX request the theme
+cannot easily replay, in which case a GET to the "same" URL with the filter's
+query parameter added answers with the *unfiltered* list — a false `ok` in
+miniature (§7.5's own words for the same mistake at a different layer). If a
+plain request does not visibly change the result set compared to the
+unfiltered listing, that listing is not supported — implement `Listings()`
+without it and say so in the package comment, the same way an unreachable
+rating order is handled.
+
+**`Listings()`:**
+- Return only the well-known `theme.Listing`s (`ListingPopular`/`New`/
+  `Rating`/`Completed`) this site's own navigation actually offers — omit
+  `ListingLatest`, which the caller adds unconditionally and which
+  `List(ListingLatest)` must equal `Search("")` for regardless.
+- Genres: fetch the site's own genre index (the caller caches the answer for
+  24 hours; see PLAN §12.10 and `backend/service/listings.go`), build one
+  `theme.GenreListing(id, label)` per genre using the site's own slug as `id`
+  and its own name as `label`, and cap the count at something sane — the
+  site's full list is fine for everything measured so far.
+- A part of this call that fails (typically the genre page) should not sink
+  the rest of it if the rest is still true: prefer returning the sort/status
+  listings you *could* get plus a nil error over failing the whole call, the
+  way `generic.Theme.Listings` does — the caller's own degrade path
+  (service/listings.go) exists for the case a *whole* `Listings()` call
+  fails, not as a substitute for a theme keeping known-good listings when one
+  part of the fetch does not need the others.
+
+**`List(ctx, s, listingID, page)`:**
+- `ListingLatest` (and `""`, which the caller never sends but costs nothing to
+  handle) delegates to `Search(ctx, s, "", page)` — literally the same call,
+  not a second implementation of the default page that could drift from it.
+- Every other ID this theme actually named in `Listings()` fetches its own
+  page/template and parses it with the theme's existing series-stub parser —
+  a listing is still just a page of series stubs.
+- An ID this theme did not name in `Listings()` is always an error. Never
+  fall back to the default listing, another listing, or an empty page —
+  §7.5's rule about a false `ok` applies here just as much as at probe time.
+
+**Testing.** Fixture-based, exactly like every other theme method: one
+fixture per listing (or the same fixture reused across routes, when the
+parse is identical and only the URL differs), a test that
+`List(ListingLatest, ...)` matches `Search("", ...)`, and a test that an
+unrecognised listing ID errors. Document, in the package comment, which
+listings the site offers and which it lacks — with the reason (no rating
+order, genre page behind a challenge, filter is client-side only) — the same
+way each theme's own section below already documents what it found.
+
+---
+
 ## Writing the next theme — the short version
 
 1. New package under `backend/theme/`. Implement `theme.Theme` (eight methods
@@ -2096,3 +2223,8 @@ genuinely ambiguous, require corroboration.
 11. If it is a JSON API rather than a markup family, say so at the top of its
    section the way `mangadex` does, and gate the fingerprint on something that
    cannot be worn by accident. A JSON envelope is not a fingerprint.
+12. If the site can be browsed more ways than its default listing — popular,
+   newly added, top rated, completed, genres — implement `theme.Lister`. See
+   "Adding `theme.Lister` to a theme" above for what to verify before
+   claiming one, and document per theme which listings the site offers and
+   which it lacks, and why.
