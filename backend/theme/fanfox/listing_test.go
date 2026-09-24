@@ -35,6 +35,17 @@ func TestListingsNamesTheSortStatusAndGenreEntries(t *testing.T) {
 	}
 }
 
+// TestDefaultListingIsPopular pins this file's own doc comment:
+// KeyBrowseOrder's own default is "popular", so Search("") — absent a source
+// override — is the same request as ListingPopular, not ListingLatest's
+// "most recently updated" meaning.
+func TestDefaultListingIsPopular(t *testing.T) {
+	th := fanfox.NewWithClock(nil, clock)
+	if got := th.DefaultListing(); got != theme.ListingPopular {
+		t.Fatalf("DefaultListing() = %q, want %q", got, theme.ListingPopular)
+	}
+}
+
 func TestListingLatestDelegatesToEmptyQuerySearch(t *testing.T) {
 	f := themetest.New(t, map[string]themetest.Route{
 		"GET /directory/": {File: "directory.html"},

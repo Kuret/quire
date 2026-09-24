@@ -52,6 +52,17 @@ const (
 	sortRating  listSort = "rating"
 )
 
+var _ theme.DefaultLister = (*Theme)(nil)
+
+// DefaultListing implements theme.DefaultLister: KeyBrowseOrder's own default
+// is "popular", so Search("") — absent a source override — is the same
+// directory-in-popularity-order request as ListingPopular, not
+// ListingLatest's "most recently updated" meaning. (If a source has
+// overridden KeyBrowseOrder to "latest", Search("") genuinely is latest
+// order; theme.DefaultLister has no source-specific hook for that, so this
+// names the theme's own shipped default.)
+func (t *Theme) DefaultListing() string { return theme.ListingPopular }
+
 // Listings implements theme.Lister.
 //
 // The genre list lives on the directory page itself — there is no separate
