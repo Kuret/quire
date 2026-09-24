@@ -1044,6 +1044,15 @@ Window {
         win.findChild(seriesGrid, "browseButtonArea").clicked(null)
         win.want("tapping the button opens it", seriesGrid.pickerOpen, true)
         win.want("and the panel is on screen", picker.visible, true)
+        // Visible is not drawn: an anchor Qt refused once left this panel with
+        // no geometry, so Browse "opened" and showed nothing on the device.
+        var pickerPanel = win.findChild(seriesGrid, "listingPickerPanel")
+        var searchBarItem = win.findChild(seriesGrid, "searchBar")
+        win.want("the open panel has real height", pickerPanel.height > 100, true)
+        win.want("the open panel has real width", pickerPanel.width > 100, true)
+        if (searchBarItem)
+            win.want("and sits below the search bar",
+                     pickerPanel.y >= searchBarItem.y + searchBarItem.height, true)
 
         var entries = win.findChildren(seriesGrid, "listingPickerEntry", [])
         win.want("one row per listing: two sort, one status, two genres",

@@ -330,6 +330,7 @@ Item {
 
     Item {
         id: searchBar
+        objectName: "searchBar"
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: Style.rowHeight
 
@@ -614,11 +615,17 @@ Item {
         Rectangle {
             id: pickerPanel
             objectName: "listingPickerPanel"
+            // Anchored to its own parent, offset by where the search bar and
+            // pager sit: those two are listingPicker's siblings, not this
+            // panel's, and Qt refuses an anchor to an item that is neither
+            // parent nor sibling — the panel then had no geometry at all and
+            // Browse opened nothing on the device. listingPicker fills the
+            // screen, so the bars' own y is valid in its coordinates.
             anchors {
-                top: searchBar.bottom
+                top: parent.top; topMargin: searchBar.y + searchBar.height
                 left: parent.left; leftMargin: Style.margin
                 right: parent.right; rightMargin: Style.margin
-                bottom: pagerBar.top; bottomMargin: Style.gap
+                bottom: parent.bottom; bottomMargin: parent.height - pagerBar.y + Style.gap
             }
             color: Style.paper
             border.width: 2
