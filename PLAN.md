@@ -3666,3 +3666,79 @@ next higher one, or the last chapter, with the row marked until the page
 changes — and **Go to page**, plus **First page** and **Last page**. The
 volume view offers the page options only, because a volume row names only its
 first chapter.
+
+### 12.12 Offline-first series detail — 2026-09-25
+
+**Requested: opening a series always loads its chapter list from the
+internet. Without a connection it should still show — instantly — the
+chapters already on the tablet.** Before this, `runSeriesDetail` made the
+user wait on `th.Series`/`th.Chapters` every single time, and answered with
+`MessageError` when the site did not answer at all — even for a series
+whose chapters are already sitting on disk.
+
+**The cache.** `backend/seriescache` is a small on-disk store, modelled on
+`backend/shelf` and `backend/library`: one small atomic JSON file per
+(source, series) rather than one big file rewritten whole, because a
+series' chapter list can run to hundreds of entries and a series is opened
+one at a time. After every successful live fetch the series' `theme.Series`
+and its `[]theme.Chapter` are written, alongside `FetchedAt` (when the fetch
+happened) and `OpenedAt` (when the entry last answered a request, cache hit
+or fresh fetch alike — what eviction orders on).
+
+Bounded at 300 entries, evicted least-recently-opened first — except a
+series with saved chapters, a library record or a watch, which is never
+evicted just to make room for casual browsing (`Service.seriesCacheProtect`,
+passed to the cache as a `seriescache.Protect` callback). Tying eviction to
+those three is the same reasoning §12.2's watch-drop and §12.6/§12.7's
+saved-chapter deletes already use: an orphan that nothing can act on is
+worse than one that costs a little disk. Private sources are cached too —
+a chapter list reveals nothing a saved chapter does not — but the cache is
+deleted along with the series' or source's saved chapters (series delete,
+source removal), so nothing outlives what it would otherwise answer for
+offline.
+
+**The flow**, in `runSeriesDetail` (all three steps gated on `SeriesCache`
+being non-nil — nil disables the whole of this, the same convention every
+other optional store in `service.Options` follows):
+
+1. A cached entry answers immediately: `MessageSeriesDetailResult` with
+   `cached: true`, `fetchedAt` (RFC3339) and a backend-composed `note` —
+   "Showing the chapter list from 3 days ago while Quire checks for new
+   chapters." (`humanAge` renders "a moment ago", "2 hours ago", "3 days
+   ago" — PLAN §2 keeps this a sentence, not a timestamp QML would have to
+   format).
+2. Nothing cached, but the tablet has saved chapters or library records:
+   `synthesizeSeriesDetail` builds a `theme.Series`/`[]theme.Chapter` from
+   them — title from the records, chapters from the saved ones' own stored
+   titles and numbers, library-only chapters filled in with a plain
+   "Chapter <id>" fallback and number -1 (unknown) — and answers the same
+   way, `cached: true`, noting "Showing only the chapters on this
+   reMarkable while Quire checks the site."
+3. Either way, the live fetch then runs exactly as it always did. On
+   success: the cache is updated and a fresh reply is sent, `cached: false`,
+   no note — indistinguishable from today's single reply for a series with
+   nothing cached yet. On failure, **if something was already sent above**:
+   no error banner. The same reply is resent with only its `note` changed —
+   "Couldn't reach MangaDex, so this is the chapter list from 3 days ago"
+   (or the saved-chapters-only wording) — because something true is already
+   on screen and a network hiccup is not a reason to take it away. On
+   failure with nothing sent (no cache, nothing on the tablet): today's
+   plain `MessageError`, unchanged. The empty-chapter-list re-probe
+   (§6 M7) still only fires after a *successful* fetch that came back
+   empty; a network failure returns before reaching it, so a dropped
+   connection can never be mistaken for a source that started returning
+   nothing.
+
+**The UI.** `MessageSeriesDetailResult` can now legitimately arrive twice
+for one series. `ChapterList.qml`'s rows are rebuilt from whichever reply
+just arrived, but `rebuildChapterRows` (`ui/Main.qml`) carries each row's
+`downloadState`/`downloadMessage` forward by chapter id first — those are
+local, in-flight bookkeeping the backend's reply knows nothing about, and
+resetting them to blank on the second reply is how a download in progress
+would appear to restart. The current page is untouched by any of this;
+`Paging`'s own `totalPages` clamp is what keeps it sane, and nothing here
+ever sets `page` directly. A reply naming a different source or series than
+the one on screen is ignored, as it always effectively was. `note` is shown
+verbatim as a muted, elided line above the chapter rows
+(`ChapterList.qml`'s `noteBand`) and collapses to nothing — costing no
+space — when there is none.
