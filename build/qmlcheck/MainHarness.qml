@@ -1197,6 +1197,47 @@ Window {
                  chapterList.seriesTitle, "The Lantern Keeper")
         win.want("which is what the chrome draws", win.app.screenTitle(),
                  "The Lantern Keeper")
+        // ---- PLAN §12.12: a second SeriesDetailResult for the same series ----
+        //
+        // The offline-first flow can send this twice — a cached or
+        // synthesised reply immediately, then a fresh one once the live
+        // fetch lands. Neither the page nor an in-flight row's own progress
+        // may be disturbed by the second one.
+
+        // A page turned away from 1, and a download in progress on c1 — both
+        // must survive the second reply below untouched.
+        chapterList.page = 2
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "downloading", "message": "Page 3 of 20."})
+        win.want("the row is downloading before the second reply",
+                 chapterList.model.get(0).downloadState, "downloading")
+
+        win.deliver(Msg.SeriesDetailResult, {
+            "series": {"title": "The Lantern Keeper", "description": "A long description."},
+            "chapters": [
+                {"id": "c1", "title": "Chapter 1", "number": 1,
+                 "published": "2026-01-01", "scanlator": "Group"},
+                {"id": "c2", "title": "Chapter 2", "number": 2,
+                 "published": "2026-01-02", "scanlator": "Group",
+                 "documentUuid": "doc-1"}],
+            "volumes": [
+                {"id": "c1", "title": "Volume 1", "detail": "7 chapters",
+                 "chapterCount": 7}]})
+        win.want("**the page is not reset by a second reply**", chapterList.page, 2)
+        win.want("**and the in-flight row keeps its own progress**",
+                 chapterList.model.get(0).downloadState, "downloading")
+        win.want("with the sentence it already had",
+                 chapterList.model.get(0).downloadMessage, "Page 3 of 20.")
+        win.want("while an untouched row still reflects the reply",
+                 chapterList.model.get(1).documentUuid, "doc-1")
+
+        // Reset for what follows below, which assumes page 1 and no
+        // in-flight state of its own.
+        chapterList.page = 1
+        win.deliver(Msg.DownloadProgress, {
+            "volumeId": "c1", "phase": "cancelled", "message": "Stopped."})
+        win.want("cleared back to nothing before the rest of the checks",
+                 chapterList.model.get(0).downloadState, "cancelled")
 
         // ---- the screen title, and the bar under it --------------------------
         //

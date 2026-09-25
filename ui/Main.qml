@@ -1091,73 +1091,122 @@ Rectangle {
             root.send(Msg.RequestCover, msg)
     }
 
+    // fillChapters answers MessageSeriesDetailResult. PLAN §12.12 means this
+    // can now legitimately arrive twice for one series — an immediate cached
+    // or synthesised reply, then a fresh one once the live fetch lands (or a
+    // note-only update if it failed) — so rebuildChapterRows carries forward
+    // each row's in-flight download state by chapter id rather than always
+    // starting it blank. On the very first reply for a series the models are
+    // already empty (openSeries clears them before asking), so this is no
+    // different from a plain rebuild in that case.
     function fillChapters(msg) {
         chapterListScreen.busy = false
-        chaptersModel.clear()
-        var list = msg && msg.chapters ? msg.chapters : []
-        for (var i = 0; i < list.length; ++i) {
-            chaptersModel.append({
-                "chapterId": list[i].id,
-                "title": list[i].title,
-                "number": list[i].number,
-                "published": list[i].published ? list[i].published : "",
-                "scanlator": list[i].scanlator ? list[i].scanlator : "",
-                "downloadState": list[i].documentUuid ? "done" : "",
-                "downloadMessage": "",
-                "documentUuid": list[i].documentUuid ? list[i].documentUuid : "",
-                // Saved in Quire (independent of documentUuid — a chapter can
-                // be both saved and in the library).
-                "saved": list[i].saved ? true : false
-            })
-        }
-        volumesModel.clear()
-        var vols = msg && msg.volumes ? msg.volumes : []
-        for (var v = 0; v < vols.length; ++v) {
-            volumesModel.append({
-                // chapterId, not volumeId: a download request names the chapter
-                // the user tapped and the backend works out the volume around
-                // it. The row carries the first chapter of its volume.
-                "chapterId": vols[v].id,
-                "title": vols[v].title,
-                // The source's own bare label ("2"), for the short "Vol 2"
-                // form the delete confirm strip's button names — never a
-                // sentence (PLAN §2), just what backend/service/download.go
-                // already calls this same volume in a filename.
-                "label": vols[v].label ? vols[v].label : "",
-                "detail": vols[v].detail ? vols[v].detail : "",
-                "chapterCount": vols[v].chapterCount,
-                "downloadState": vols[v].documentUuid ? "done" : "",
-                "downloadMessage": "",
-                "documentUuid": vols[v].documentUuid ? vols[v].documentUuid : "",
-                // True only when every chapter of the volume is saved.
-                "saved": vols[v].saved ? true : false,
-                // The volume's own chapters, in order, and how many of them
-                // are saved right now — what decides whether Delete shows at
-                // all, and what MessageDeleteSaved's chapterIds names to
-                // delete the whole volume from Quire in one round trip.
-                //
-                // Stored JSON-encoded rather than as a plain array: a
-                // ListModel role holding a JS array silently becomes a
-                // nested QQmlListModel instead, which is not an array and
-                // breaks the moment something calls .join or .length on it.
-                // Encoding it keeps the round trip exact.
-                "chapterIdsJson": JSON.stringify(vols[v].chapterIds ? vols[v].chapterIds : []),
-                "savedCount": vols[v].savedCount ? vols[v].savedCount : 0
-            })
-        }
+        if (!msg)
+            return
+        // A reply for a series no longer on screen (the user has since left,
+        // or switched source) is ignored, the same as it always effectively
+        // was. Only checked when the field actually names something: naming
+        // nothing is what every reply this screen ever filled chapters from
+        // did before sourceId/series.id existed on the wire at all.
+        var seriesId = msg.series ? msg.series.id : ""
+        if (msg.sourceId && msg.sourceId !== root.currentSourceId)
+            return
+        if (seriesId && seriesId !== root.currentSeriesId)
+            return
 
-        chapterListScreen.seriesTitle = msg && msg.series ? msg.series.title : ""
-        chapterListScreen.synopsis = msg && msg.series && msg.series.description
+        root.rebuildChapterRows(chaptersModel, msg.chapters ? msg.chapters : [], false)
+        root.rebuildChapterRows(volumesModel, msg.volumes ? msg.volumes : [], true)
+
+        chapterListScreen.seriesTitle = msg.series ? msg.series.title : ""
+        chapterListScreen.synopsis = msg.series && msg.series.description
             ? msg.series.description : ""
         // Whether this series' source is private — never offered "Send to
         // library" from the reader, and the flag is only ever this
         // trustworthy right after a fresh detail reply.
-        chapterListScreen.isPrivate = msg && msg.private ? true : false
+        chapterListScreen.isPrivate = msg.private ? true : false
 
         // The rows are new objects even when they describe the same chapters,
         // so anything picked before this refill has to be checked against what
         // is actually on screen now.
         chapterListScreen.pruneSelection()
+    }
+
+    // rebuildChapterRows replaces model's rows with list (chapters or
+    // volumes), carrying forward each existing row's downloadState and
+    // downloadMessage by chapter id first — those are local, in-flight
+    // bookkeeping the backend's reply says nothing about, and resetting them
+    // to blank is how a download in progress would appear to reset the
+    // moment a second SeriesDetailResult landed (PLAN §12.12). The current
+    // page survives this too, without anything here doing it on purpose:
+    // ChapterList.qml clamps screen.page to screen.totalPages whenever the
+    // row count changes, and never touches it merely because the model was
+    // rebuilt.
+    function rebuildChapterRows(model, list, isVolume) {
+        var carried = {}
+        for (var r = 0; r < model.count; ++r) {
+            var row = model.get(r)
+            carried[row.chapterId] = {
+                "downloadState": row.downloadState,
+                "downloadMessage": row.downloadMessage
+            }
+        }
+        model.clear()
+        for (var i = 0; i < list.length; ++i) {
+            var item = list[i]
+            var prior = carried[item.id]
+            var downloadState = prior ? prior.downloadState : (item.documentUuid ? "done" : "")
+            var downloadMessage = prior ? prior.downloadMessage : ""
+            if (isVolume) {
+                model.append({
+                    // chapterId, not volumeId: a download request names the
+                    // chapter the user tapped and the backend works out the
+                    // volume around it. The row carries the first chapter of
+                    // its volume.
+                    "chapterId": item.id,
+                    "title": item.title,
+                    // The source's own bare label ("2"), for the short
+                    // "Vol 2" form the delete confirm strip's button names —
+                    // never a sentence (PLAN §2), just what
+                    // backend/service/download.go already calls this same
+                    // volume in a filename.
+                    "label": item.label ? item.label : "",
+                    "detail": item.detail ? item.detail : "",
+                    "chapterCount": item.chapterCount,
+                    "downloadState": downloadState,
+                    "downloadMessage": downloadMessage,
+                    "documentUuid": item.documentUuid ? item.documentUuid : "",
+                    // True only when every chapter of the volume is saved.
+                    "saved": item.saved ? true : false,
+                    // The volume's own chapters, in order, and how many of
+                    // them are saved right now — what decides whether Delete
+                    // shows at all, and what MessageDeleteSaved's chapterIds
+                    // names to delete the whole volume from Quire in one
+                    // round trip.
+                    //
+                    // Stored JSON-encoded rather than as a plain array: a
+                    // ListModel role holding a JS array silently becomes a
+                    // nested QQmlListModel instead, which is not an array and
+                    // breaks the moment something calls .join or .length on
+                    // it. Encoding it keeps the round trip exact.
+                    "chapterIdsJson": JSON.stringify(item.chapterIds ? item.chapterIds : []),
+                    "savedCount": item.savedCount ? item.savedCount : 0
+                })
+            } else {
+                model.append({
+                    "chapterId": item.id,
+                    "title": item.title,
+                    "number": item.number,
+                    "published": item.published ? item.published : "",
+                    "scanlator": item.scanlator ? item.scanlator : "",
+                    "downloadState": downloadState,
+                    "downloadMessage": downloadMessage,
+                    "documentUuid": item.documentUuid ? item.documentUuid : "",
+                    // Saved in Quire (independent of documentUuid — a
+                    // chapter can be both saved and in the library).
+                    "saved": item.saved ? true : false
+                })
+            }
+        }
     }
 
     // ---- watched series (PLAN §12.2) ---------------------------------------
