@@ -51,6 +51,11 @@ Item {
     property string synopsis: ""
     property bool busy: false
 
+    // PLAN §12.12's offline-first note: composed in the backend, shown
+    // verbatim as a muted line above the chapter list, and empty when there
+    // is nothing to say (a fresh, uncached reply).
+    property string note: ""
+
     // What this series is: "manga" — every source that existed before books —
     // or "book". It is set from the row that opened the screen, because that is
     // where the backend says it (ui/Kinds.js); the detail reply carries no kind
@@ -978,12 +983,58 @@ Item {
         }
     }
 
+    // ---- the offline-first note (PLAN §12.12) -------------------------------
+    //
+    // Composed entirely in the backend (PLAN §2) — "Showing the chapter list
+    // from 3 days ago while Quire checks for new chapters," or similar — and
+    // shown verbatim. Collapses to zero height when there is none, so an
+    // ordinary, uncached reply gets exactly the screen it had before this
+    // existed and the same number of rows to a page.
+    Item {
+        id: noteBand
+        objectName: "noteBand"
+        anchors { top: viewSwitch.bottom; left: parent.left; right: parent.right }
+        visible: screen.note.length > 0
+        height: visible ? Style.gap * 2 + noteProbe.height * 2 : 0
+
+        // One line, measured rather than guessed, so two lines is exactly two
+        // lines whatever the platform's font metrics say — the same trick
+        // synopsisBand uses above.
+        Text {
+            id: noteProbe
+            visible: false
+            text: "Ag"
+            font.pointSize: Style.smallSize
+        }
+
+        Text {
+            objectName: "noteText"
+            anchors {
+                left: parent.left; leftMargin: Style.margin
+                right: parent.right; rightMargin: Style.margin
+                top: parent.top; topMargin: Style.gap
+            }
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            text: screen.note
+            font.pointSize: Style.smallSize
+            color: Style.muted
+        }
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: Style.hairline
+            color: Style.rule
+        }
+    }
+
     // ---- the chapters ------------------------------------------------------
 
     Item {
         id: viewport
         anchors {
-            top: viewSwitch.bottom
+            top: noteBand.bottom
             left: parent.left; right: parent.right
             bottom: pagerBar.top
         }

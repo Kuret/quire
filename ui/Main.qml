@@ -1124,6 +1124,9 @@ Rectangle {
         // library" from the reader, and the flag is only ever this
         // trustworthy right after a fresh detail reply.
         chapterListScreen.isPrivate = msg.private ? true : false
+        // PLAN §12.12's offline-first explanation, shown verbatim above the
+        // chapter list; "" means an ordinary, uncached reply and hides it.
+        chapterListScreen.note = msg.note ? msg.note : ""
 
         // The rows are new objects even when they describe the same chapters,
         // so anything picked before this refill has to be checked against what
@@ -1525,6 +1528,11 @@ Rectangle {
         chapterListScreen.seriesTitle = title
         chapterListScreen.synopsis = ""
         chapterListScreen.page = 1
+        // Cleared before the first SeriesDetailResult for this series can
+        // possibly land, so there is nothing to carry an in-flight download
+        // state forward from (PLAN §12.12) — rebuildChapterRows sees empty
+        // models and behaves as a plain fill.
+        chapterListScreen.note = ""
         chapterListScreen.closeConfirm()
         chapterListScreen.leaveSelection()
         chapterListScreen.busy = true

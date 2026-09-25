@@ -1197,12 +1197,17 @@ Window {
                  chapterList.seriesTitle, "The Lantern Keeper")
         win.want("which is what the chrome draws", win.app.screenTitle(),
                  "The Lantern Keeper")
+        win.want("an ordinary reply carries no note", chapterList.note, "")
+        win.want("so the note band is not drawn",
+                 win.findChild(chapterList, "noteBand").visible, false)
+
         // ---- PLAN §12.12: a second SeriesDetailResult for the same series ----
         //
         // The offline-first flow can send this twice — a cached or
         // synthesised reply immediately, then a fresh one once the live
         // fetch lands. Neither the page nor an in-flight row's own progress
-        // may be disturbed by the second one.
+        // may be disturbed by the second one, and the note is shown or hidden
+        // exactly as the reply says.
 
         // A page turned away from 1, and a download in progress on c1 — both
         // must survive the second reply below untouched.
@@ -1214,6 +1219,8 @@ Window {
 
         win.deliver(Msg.SeriesDetailResult, {
             "series": {"title": "The Lantern Keeper", "description": "A long description."},
+            "cached": true, "fetchedAt": "2026-03-01T00:00:00Z",
+            "note": "Showing the chapter list from 3 days ago while Quire checks for new chapters.",
             "chapters": [
                 {"id": "c1", "title": "Chapter 1", "number": 1,
                  "published": "2026-01-01", "scanlator": "Group"},
@@ -1223,6 +1230,10 @@ Window {
             "volumes": [
                 {"id": "c1", "title": "Volume 1", "detail": "7 chapters",
                  "chapterCount": 7}]})
+        win.want("the second reply's note is shown verbatim", chapterList.note,
+                 "Showing the chapter list from 3 days ago while Quire checks for new chapters.")
+        win.want("and the band is drawn",
+                 win.findChild(chapterList, "noteBand").visible, true)
         win.want("**the page is not reset by a second reply**", chapterList.page, 2)
         win.want("**and the in-flight row keeps its own progress**",
                  chapterList.model.get(0).downloadState, "downloading")
@@ -1230,6 +1241,26 @@ Window {
                  chapterList.model.get(0).downloadMessage, "Page 3 of 20.")
         win.want("while an untouched row still reflects the reply",
                  chapterList.model.get(1).documentUuid, "doc-1")
+
+        // A third reply with no note at all — the live fetch landed — hides
+        // the band again, and leaves the still-downloading row exactly as it
+        // was.
+        win.deliver(Msg.SeriesDetailResult, {
+            "series": {"title": "The Lantern Keeper", "description": "A long description."},
+            "chapters": [
+                {"id": "c1", "title": "Chapter 1", "number": 1,
+                 "published": "2026-01-01", "scanlator": "Group"},
+                {"id": "c2", "title": "Chapter 2", "number": 2,
+                 "published": "2026-01-02", "scanlator": "Group",
+                 "documentUuid": "doc-1"}],
+            "volumes": [
+                {"id": "c1", "title": "Volume 1", "detail": "7 chapters",
+                 "chapterCount": 7}]})
+        win.want("a fresh reply with no note clears it", chapterList.note, "")
+        win.want("hiding the band", win.findChild(chapterList, "noteBand").visible, false)
+        win.want("the page still holds", chapterList.page, 2)
+        win.want("and the row is still downloading",
+                 chapterList.model.get(0).downloadState, "downloading")
 
         // Reset for what follows below, which assumes page 1 and no
         // in-flight state of its own.

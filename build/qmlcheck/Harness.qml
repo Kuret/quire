@@ -862,6 +862,18 @@ Window {
         cp.previousRequested()
         win.want("previous turns back", chapterList.page, chapterList.totalPages - 1)
 
+        // PLAN §12.12's offline-first note: a muted line above the chapter
+        // list, shown verbatim and hidden entirely when there is none.
+        var noteBand = win.findChild(chapterList, "noteBand")
+        var noteText = win.findChild(chapterList, "noteText")
+        win.want("no note is drawn by default", noteBand.visible, false)
+        chapterList.note = "Showing the chapter list from 3 days ago while Quire checks for new chapters."
+        win.want("setting a note shows the band", noteBand.visible, true)
+        win.want("with the backend's own words", noteText.text,
+                 "Showing the chapter list from 3 days ago while Quire checks for new chapters.")
+        chapterList.note = ""
+        win.want("clearing the note hides the band again", noteBand.visible, false)
+
         // One page of sources means no pager at all.
         win.want("a single page shows no pager", win.findChild(sourceList, "sourcePager").visible, false)
 
